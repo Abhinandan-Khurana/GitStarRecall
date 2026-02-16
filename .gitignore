@@ -118,7 +118,6 @@ browser-db/
 *.bin
 
 # Embedding cache artifacts
-embeddings/
 cache/
 
 # =========================
