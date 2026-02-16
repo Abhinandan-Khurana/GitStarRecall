@@ -211,4 +211,5 @@ We prioritize:
 
 This project has been iterated with help from multiple LLM collaborators (GPT, Claude, Gemini, DeepSeek, and others) for design exploration, threat modeling, implementation planning, debugging, and review.
 
-no AI agents were harmed during the process lol
+> [!NOTE]
+> No AI agents were harmed in the process, lol.
