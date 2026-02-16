@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="gitstarrecall-logo.png">
+  <img src="./gitstarrecall-logo.png">
 </p>
 
 
