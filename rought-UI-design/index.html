@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GitStarRecall UI - HTML + CSS</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="container nav-inner">
+        <div class="brand">
+          <span class="icon icon-primary" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.86L12 17.77 5.82 21l1.18-6.86-5-4.87 6.91-1.01L12 2z" />
+            </svg>
+          </span>
+          <span class="brand-name">GitStarRecall</span>
+        </div>
+        <div class="nav-actions">
+          <button class="btn btn-secondary">
+            <span class="icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 19c-4.5 1.5-4.5-2.5-6-3m12 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 18 3.77 5.07 5.07 0 0 0 17.91 1S16.73.65 14 2.48a13.38 13.38 0 0 0-7 0C4.27.65 3.09 1 3.09 1A5.07 5.07 0 0 0 3 3.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 7 18.13V22" />
+              </svg>
+            </span>
+            <span class="hide-sm">Connect GitHub</span>
+          </button>
+          <button class="icon-button" aria-label="Settings">
+            <span class="icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.34.45.52 1 .52 1.57 0 .57-.18 1.12-.52 1.57Z" />
+              </svg>
+            </span>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <main>
+      <section class="hero">
+        <div class="container hero-inner">
+          <div class="pill">
+            <span class="icon icon-primary" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3l2 4 4 2-4 2-2 4-2-4-4-2 4-2 2-4z" />
+                <path d="M5 12l1.5 3 3 1.5-3 1.5L5 21l-1.5-3L0.5 16.5 3.5 15 5 12z" />
+              </svg>
+            </span>
+            Powered by local RAG
+          </div>
+          <h1>
+            Find any starred repo by
+            <span class="text-gradient-primary"> describing it</span>
+          </h1>
+          <p>
+            Search your GitHub stars using natural language. No more scrolling through hundreds of repos — just describe what you remember.
+          </p>
+          <button class="btn btn-primary">Connect GitHub to get started</button>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <div class="card sync-card">
+            <div class="sync-header">
+              <div class="sync-title">
+                <span class="icon icon-primary spin" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-9-9" />
+                    <path d="M3 12a9 9 0 0 1 9-9 9 9 0 0 1 9 9" />
+                    <path d="M3 4v5h5" />
+                    <path d="M21 20v-5h-5" />
+                  </svg>
+                </span>
+                <span>Syncing starred repos…</span>
+              </div>
+              <span class="muted">142 / 387</span>
+            </div>
+            <div class="progress">
+              <span class="progress-bar" style="width: 37%"></span>
+            </div>
+            <div class="sync-foot">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 22s8-4 8-10V6l-8-4-8 4v6c0 6 8 10 8 10z" />
+                </svg>
+              </span>
+              All processing happens locally — your data never leaves your machine.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <div class="search-box">
+            <span class="icon search-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <path d="M21 21l-4.35-4.35" />
+              </svg>
+            </span>
+            <input type="text" placeholder="Describe the tool you remember…" />
+            <button class="btn btn-primary btn-search">Search</button>
+          </div>
+
+          <div class="filters">
+            <span class="filters-label">Filters:</span>
+            <button class="chip">Python</button>
+            <button class="chip">TypeScript</button>
+            <button class="chip">Rust</button>
+            <button class="chip">Go</button>
+            <span class="divider"></span>
+            <button class="chip">CLI</button>
+            <button class="chip">AI/ML</button>
+            <button class="chip">DevOps</button>
+            <button class="chip">Web</button>
+            <button class="chip ghost">
+              More
+              <span class="icon tiny" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <div class="results-head">
+            <h2>Results</h2>
+            <span class="muted">4 repos found</span>
+          </div>
+
+          <div class="results-grid">
+            <article class="repo-card">
+              <div class="repo-head">
+                <h3><span class="muted">BurntSushi/</span>ripgrep</h3>
+                <span class="repo-stars">
+                  <span class="icon tiny warning" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.86L12 17.77 5.82 21l1.18-6.86-5-4.87 6.91-1.01L12 2z" />
+                    </svg>
+                  </span>
+                  48.2k
+                </span>
+              </div>
+              <p>ripgrep recursively searches directories for a regex pattern while respecting your gitignore rules.</p>
+              <div class="repo-meta">
+                <span class="lang"><span class="dot rust"></span>Rust</span>
+                <span class="tag">CLI</span>
+                <span class="tag">search</span>
+                <span class="tag">regex</span>
+                <span class="match">96% match</span>
+              </div>
+            </article>
+
+            <article class="repo-card">
+              <div class="repo-head">
+                <h3><span class="muted">sharkdp/</span>fd</h3>
+                <span class="repo-stars">
+                  <span class="icon tiny warning" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.86L12 17.77 5.82 21l1.18-6.86-5-4.87 6.91-1.01L12 2z" />
+                    </svg>
+                  </span>
+                  34.1k
+                </span>
+              </div>
+              <p>A simple, fast and user-friendly alternative to 'find'. Colorized output, smart case, regex support.</p>
+              <div class="repo-meta">
+                <span class="lang"><span class="dot rust"></span>Rust</span>
+                <span class="tag">CLI</span>
+                <span class="tag">filesystem</span>
+                <span class="match">89% match</span>
+              </div>
+            </article>
+
+            <article class="repo-card">
+              <div class="repo-head">
+                <h3><span class="muted">junegunn/</span>fzf</h3>
+                <span class="repo-stars">
+                  <span class="icon tiny warning" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.86L12 17.77 5.82 21l1.18-6.86-5-4.87 6.91-1.01L12 2z" />
+                    </svg>
+                  </span>
+                  65.8k
+                </span>
+              </div>
+              <p>A general-purpose command-line fuzzy finder with an interactive interface and support for previews.</p>
+              <div class="repo-meta">
+                <span class="lang"><span class="dot go"></span>Go</span>
+                <span class="tag">CLI</span>
+                <span class="tag">fuzzy-search</span>
+                <span class="match">84% match</span>
+              </div>
+            </article>
+
+            <article class="repo-card">
+              <div class="repo-head">
+                <h3><span class="muted">astral-sh/</span>ruff</h3>
+                <span class="repo-stars">
+                  <span class="icon tiny warning" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.86L12 17.77 5.82 21l1.18-6.86-5-4.87 6.91-1.01L12 2z" />
+                    </svg>
+                  </span>
+                  33.5k
+                </span>
+              </div>
+              <p>An extremely fast Python linter and code formatter, written in Rust. Drop-in replacement for Flake8 and Black.</p>
+              <div class="repo-meta">
+                <span class="lang"><span class="dot rust"></span>Rust</span>
+                <span class="tag">Python</span>
+                <span class="tag">linter</span>
+                <span class="tag">DevOps</span>
+                <span class="match">72% match</span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-bottom">
+        <div class="container">
+          <div class="card">
+            <div class="panel-head">
+              <span class="icon warning" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 18h6" />
+                  <path d="M10 22h4" />
+                  <path d="M12 2a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2z" />
+                </svg>
+              </span>
+              <h2>You might also like</h2>
+            </div>
+
+            <div class="suggestions">
+              <div class="suggestion">
+                <div class="suggestion-head">
+                  <span class="truncate">bubbletea</span>
+                  <span class="repo-stars">
+                    <span class="icon tiny warning" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.86L12 17.77 5.82 21l1.18-6.86-5-4.87 6.91-1.01L12 2z" />
+                      </svg>
+                    </span>
+                    28.4k
+                  </span>
+                </div>
+                <p class="small">A powerful TUI framework for Go</p>
+                <p class="tiny">charmbracelet</p>
+              </div>
+
+              <div class="suggestion">
+                <div class="suggestion-head">
+                  <span class="truncate">bun</span>
+                  <span class="repo-stars">
+                    <span class="icon tiny warning" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.86L12 17.77 5.82 21l1.18-6.86-5-4.87 6.91-1.01L12 2z" />
+                      </svg>
+                    </span>
+                    74.9k
+                  </span>
+                </div>
+                <p class="small">Incredibly fast JavaScript runtime, bundler, and package manager</p>
+                <p class="tiny">oven-sh</p>
+              </div>
+
+              <div class="suggestion">
+                <div class="suggestion-head">
+                  <span class="truncate">deno</span>
+                  <span class="repo-stars">
+                    <span class="icon tiny warning" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.86L12 17.77 5.82 21l1.18-6.86-5-4.87 6.91-1.01L12 2z" />
+                      </svg>
+                    </span>
+                    96.3k
+                  </span>
+                </div>
+                <p class="small">A modern runtime for JavaScript and TypeScript</p>
+                <p class="tiny">denoland</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
