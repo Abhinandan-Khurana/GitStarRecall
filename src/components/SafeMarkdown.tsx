@@ -7,9 +7,9 @@ type SafeMarkdownProps = {
   className?: string;
 };
 
-export default function SafeMarkdown({ content, className }: SafeMarkdownProps) {
+export default function SafeMarkdown({ content, className }: Readonly<SafeMarkdownProps>) {
   return (
-    <div className={className}>
+    <div className={className ?? "text-foreground [&_*]:text-inherit"}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
         {content}
       </ReactMarkdown>

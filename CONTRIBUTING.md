@@ -139,35 +139,6 @@ Likely docs to touch:
 
 ---
 
-## SPDX Header Guidance
-
-For new source files, add a short SPDX license identifier header where appropriate.
-
-Examples:
-
-```ts
-// SPDX-License-Identifier: Apache-2.0
-```
-
-```js
-// SPDX-License-Identifier: Apache-2.0
-```
-
-```css
-/* SPDX-License-Identifier: Apache-2.0 */
-```
-
-```md
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-```
-
-Notes:
-- Keep the header at the top of the file.
-- Do not retroactively reformat third-party vendored code.
-- If a file has a different upstream license, preserve the upstream notice and do not overwrite it.
-
----
-
 ## PR Template (Recommended)
 
 Copy this into your PR description:

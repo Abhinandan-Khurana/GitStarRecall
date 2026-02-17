@@ -1,6 +1,12 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Content-Security-Policy: see docs/threat-modeling-stride.md and docs/security-review-stride.md.
+// Production uses script-src 'unsafe-eval' for runtime needs (e.g. embedding worker); avoid adding inline scripts.
 const BASE_CSP_DIRECTIVES = [
   "default-src 'self'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
@@ -30,6 +36,9 @@ export default defineConfig(({ command }) => {
 
   return {
     plugins: [react()],
+    resolve: {
+      alias: { "@": path.resolve(__dirname, "./src") },
+    },
     server: {
       port: 5173,
       headers: {
