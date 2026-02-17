@@ -1,25 +1,43 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import { createGitHubApiClient } from "../github/client";
 import type { GitHubStarredRepo, RepoReadmeRecord } from "../github/types";
 import { getLocalDatabase } from "../db/client";
-import type { ChatMessageRecord, RepoRecord } from "../db/types";
+import type { ChatMessageRecord, RepoRecord, EmbeddingRecord, SearchResult } from "../db/types";
 import { chunkRepos } from "../chunking/chunker";
 import { Embedder, type EmbeddingBackendPreference } from "../embeddings/Embedder";
 import { EmbeddingWorkerPool } from "../embeddings/WorkerPool";
 import { float32ToBlob } from "../embeddings/vector";
-import type { EmbeddingRecord, SearchResult } from "../db/types";
 import { buildSyncPlan } from "../sync/plan";
 import { sortChatMessages } from "../chat/order";
 import { captureLocalError, captureLocalWarn } from "../observability/localLog";
 import SafeMarkdown from "../components/SafeMarkdown";
+import { SessionChat } from "../components/SessionChat";
 import {
   formatProviderError,
   getProviderById,
   getProviderDefinitions,
 } from "../llm/providers";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 type SearchSession = {
   id: string;
@@ -42,6 +60,8 @@ type IndexingStatus = {
   embeddingsCreated: number;
   embeddingTarget: number;
   duplicateEmbeddingHits: number;
+  /** Set when phase is "Sync complete" or "Indexing complete" */
+  elapsedSeconds?: number;
 };
 
 type ContextAvailabilityDebug = {
@@ -253,6 +273,8 @@ export default function UsagePage() {
   const [embeddingRunMetrics, setEmbeddingRunMetrics] = useState<EmbeddingRunMetrics | null>(null);
   const [starsSummary, setStarsSummary] = useState<string | null>(null);
   const [dbStorageMode, setDbStorageMode] = useState<string | null>(null);
+  const [indexDetailsExpanded, setIndexDetailsExpanded] = useState(true);
+  const [sessionsExpanded, setSessionsExpanded] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
@@ -267,11 +289,11 @@ export default function UsagePage() {
   const [providerId, setProviderId] = useState<LLMProviderId>("openai-compatible");
   const [providerBaseUrl, setProviderBaseUrl] = useState(
     providerDefinitions.find((provider) => provider.id === "openai-compatible")?.defaultBaseUrl ??
-      "https://api.openai.com",
+    "https://api.openai.com",
   );
   const [providerModel, setProviderModel] = useState(
     providerDefinitions.find((provider) => provider.id === "openai-compatible")?.defaultModel ??
-      "gpt-4o-mini",
+    "gpt-4o-mini",
   );
   const [providerApiKey, setProviderApiKey] = useState("");
   const [allowRemoteProvider, setAllowRemoteProvider] = useState(false);
@@ -281,6 +303,7 @@ export default function UsagePage() {
   const [llmError, setLlmError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const generationControllerRef = useRef<AbortController | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
@@ -405,6 +428,10 @@ export default function UsagePage() {
     };
   }, []);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activeSessionMessages.length, isGenerating, llmAnswer]);
+
   const handleProviderChange = (nextProviderId: LLMProviderId) => {
     const nextProvider =
       providerDefinitions.find((provider) => provider.id === nextProviderId) ?? providerDefinitions[0];
@@ -414,7 +441,7 @@ export default function UsagePage() {
     setLlmError(null);
   };
 
-  const handlePatLogin = (event: FormEvent<HTMLFormElement>) => {
+  const handlePatLogin = (event: { preventDefault(): void }) => {
     event.preventDefault();
 
     try {
@@ -474,10 +501,10 @@ export default function UsagePage() {
         setIndexingStatus((previous) =>
           previous
             ? {
-                ...previous,
-                phase: `Fetching starred repos (page ${progress.fetchedPages})`,
-                repoTotal: progress.totalReposSoFar,
-              }
+              ...previous,
+              phase: `Fetching starred repos (page ${progress.fetchedPages})`,
+              repoTotal: progress.totalReposSoFar,
+            }
             : previous,
         );
       },
@@ -488,10 +515,10 @@ export default function UsagePage() {
     setIndexingStatus((previous) =>
       previous
         ? {
-            ...previous,
-            phase: "Diffing repos with checksum state",
-            repoTotal: starResult.repos.length,
-          }
+          ...previous,
+          phase: "Diffing repos with checksum state",
+          repoTotal: starResult.repos.length,
+        }
         : previous,
     );
 
@@ -505,13 +532,13 @@ export default function UsagePage() {
     setIndexingStatus((previous) =>
       previous
         ? {
-            ...previous,
-            phase: `Fetching READMEs for changed/new repos (${candidates.length})`,
-            readmesTarget: candidates.length,
-            readmesCompleted: 0,
-            readmesMissing: 0,
-            readmesFailed: 0,
-          }
+          ...previous,
+          phase: `Fetching READMEs for changed/new repos (${candidates.length})`,
+          readmesTarget: candidates.length,
+          readmesCompleted: 0,
+          readmesMissing: 0,
+          readmesFailed: 0,
+        }
         : previous,
     );
 
@@ -520,11 +547,11 @@ export default function UsagePage() {
         setIndexingStatus((previous) =>
           previous
             ? {
-                ...previous,
-                readmesCompleted: progress.completed,
-                readmesMissing: progress.missingCount,
-                readmesFailed: progress.failedCount,
-              }
+              ...previous,
+              readmesCompleted: progress.completed,
+              readmesMissing: progress.missingCount,
+              readmesFailed: progress.failedCount,
+            }
             : previous,
         );
         setFetchPhase(`Fetching changed READMEs… ${progress.completed}/${progress.total}`);
@@ -539,12 +566,12 @@ export default function UsagePage() {
     setIndexingStatus((previous) =>
       previous
         ? {
-            ...previous,
-            readmesTarget: candidates.length,
-            readmesCompleted: candidates.length,
-            readmesMissing: readmeResult.missingCount,
-            readmesFailed: readmeResult.failedCount,
-          }
+          ...previous,
+          readmesTarget: candidates.length,
+          readmesCompleted: candidates.length,
+          readmesMissing: readmeResult.missingCount,
+          readmesFailed: readmeResult.failedCount,
+        }
         : previous,
     );
 
@@ -574,9 +601,9 @@ export default function UsagePage() {
       setIndexingStatus((previous) =>
         previous
           ? {
-              ...previous,
-              phase: "Chunking changed repositories",
-            }
+            ...previous,
+            phase: "Chunking changed repositories",
+          }
           : previous,
       );
 
@@ -585,9 +612,9 @@ export default function UsagePage() {
       setIndexingStatus((previous) =>
         previous
           ? {
-              ...previous,
-              chunkTotal: chunks.length,
-            }
+            ...previous,
+            chunkTotal: chunks.length,
+          }
           : previous,
       );
     }
@@ -619,25 +646,28 @@ export default function UsagePage() {
     setIndexingStatus((previous) =>
       previous
         ? {
-            ...previous,
-            phase: hasPendingEmbeddingChunks ? "Preparing embeddings for unindexed chunks" : "Sync complete",
-            repoTotal: starResult.repos.length,
-            readmesTarget: candidates.length,
-            readmesCompleted: candidates.length,
-            readmesMissing: readmeResult.missingCount,
-            readmesFailed: readmeResult.failedCount,
-            chunkTotal: localChunkCount,
-            embeddingsCreated: localEmbeddingCount,
-            embeddingTarget: hasPendingEmbeddingChunks ? previous.embeddingTarget : 0,
-          }
+          ...previous,
+          phase: hasPendingEmbeddingChunks ? "Preparing embeddings for unindexed chunks" : "Sync complete",
+          repoTotal: starResult.repos.length,
+          readmesTarget: candidates.length,
+          readmesCompleted: candidates.length,
+          readmesMissing: readmeResult.missingCount,
+          readmesFailed: readmeResult.failedCount,
+          chunkTotal: localChunkCount,
+          embeddingsCreated: localEmbeddingCount,
+          embeddingTarget: hasPendingEmbeddingChunks ? previous.embeddingTarget : 0,
+          elapsedSeconds: hasPendingEmbeddingChunks
+            ? undefined
+            : Math.max(1, Math.round((Date.now() - previous.startedAt) / 1000)),
+        }
         : previous,
     );
 
     setStarsSummary(
       `Sync complete: ${starResult.repos.length} stars scanned (${starResult.fetchedPages} pages), ` +
-        `${changedRecords.length} changed/new, ${syncPlan.removedRepoIds.length} removed. ` +
-        `READMEs fetched: ${readmeCount}, missing: ${readmeResult.missingCount}, failed: ${readmeResult.failedCount}. ` +
-        `Local DB: ${localRepoCount} repos, ${localChunkCount} chunks, ${localEmbeddingCount} embeddings.`,
+      `${changedRecords.length} changed/new, ${syncPlan.removedRepoIds.length} removed. ` +
+      `READMEs fetched: ${readmeCount}, missing: ${readmeResult.missingCount}, failed: ${readmeResult.failedCount}. ` +
+      `Local DB: ${localRepoCount} repos, ${localChunkCount} chunks, ${localEmbeddingCount} embeddings.`,
     );
 
     if (hasPendingEmbeddingChunks) {
@@ -661,9 +691,9 @@ export default function UsagePage() {
       setIndexingStatus((previous) =>
         previous
           ? {
-              ...previous,
-              phase: `Failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-            }
+            ...previous,
+            phase: `Failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+          }
           : previous,
       );
       setError(err instanceof Error ? err.message : "Failed to fetch starred repos");
@@ -681,9 +711,9 @@ export default function UsagePage() {
       setIndexingStatus((previous) =>
         previous
           ? {
-              ...previous,
-              phase: "Initializing embedding model",
-            }
+            ...previous,
+            phase: "Initializing embedding model",
+          }
           : previous,
       );
 
@@ -718,11 +748,11 @@ export default function UsagePage() {
       setIndexingStatus((previous) =>
         previous
           ? {
-              ...previous,
-              phase: "Generating embeddings",
-              embeddingTarget,
-            }
-            : previous,
+            ...previous,
+            phase: "Generating embeddings",
+            embeddingTarget,
+          }
+          : previous,
       );
       setEmbeddingRunMetrics({
         backendIdentity: initialBackendIdentity,
@@ -806,7 +836,7 @@ export default function UsagePage() {
               } catch (singleErr) {
                 throw new Error(
                   `embedding batch item failed for chunk ${item.chunkId}: ${batchItem.error ?? "unknown"}; ` +
-                    `single_retry=${singleErr instanceof Error ? singleErr.message : String(singleErr)}`,
+                  `single_retry=${singleErr instanceof Error ? singleErr.message : String(singleErr)}`,
                 );
               }
             }
@@ -852,17 +882,17 @@ export default function UsagePage() {
         setIndexingStatus((previous) =>
           previous
             ? {
-                ...previous,
-                phase: "Generating embeddings",
-                embeddingsCreated: processedCount,
-                embeddingTarget,
-                duplicateEmbeddingHits: duplicateHits,
-              }
+              ...previous,
+              phase: "Generating embeddings",
+              embeddingsCreated: processedCount,
+              embeddingTarget,
+              duplicateEmbeddingHits: duplicateHits,
+            }
             : previous,
         );
         setStarsSummary(
           `Indexing in progress: ${processedCount}/${embeddingTarget} embeddings ` +
-            `(cache hits: ${duplicateHits}, ~${Math.max(0, etaSeconds)}s remaining).`,
+          `(cache hits: ${duplicateHits}, ~${Math.max(0, etaSeconds)}s remaining).`,
         );
         setEmbeddingRunMetrics({
           backendIdentity,
@@ -898,19 +928,24 @@ export default function UsagePage() {
       setIndexingStatus((previous) =>
         previous
           ? {
-              ...previous,
-              phase: "Indexing complete",
-              embeddingsCreated: processedCount,
-              embeddingTarget,
-              duplicateEmbeddingHits: duplicateHits,
-            }
+            ...previous,
+            phase: "Indexing complete",
+            repoTotal: finalRepoCount,
+            readmesCompleted: previous.readmesCompleted,
+            readmesTarget: previous.readmesTarget,
+            chunkTotal: finalChunkCount,
+            embeddingsCreated: finalEmbeddingCount,
+            embeddingTarget,
+            duplicateEmbeddingHits: duplicateHits,
+            elapsedSeconds: totalDurationSec,
+          }
           : previous,
       );
 
       setStarsSummary(
         `Sync complete in ${totalDurationSec}s. ` +
-          `Repos: ${finalRepoCount}, Chunks: ${finalChunkCount}, Embeddings: ${finalEmbeddingCount} ` +
-          `(new: ${processedCount}, cache hits: ${duplicateHits}).`,
+        `Repos: ${finalRepoCount}, Chunks: ${finalChunkCount}, Embeddings: ${finalEmbeddingCount} ` +
+        `(new: ${processedCount}, cache hits: ${duplicateHits}).`,
       );
       const finalElapsedSeconds = Math.max((Date.now() - startMs) / 1000, 1);
       const finalQueueDepth = database.getPendingEmbeddingChunkCount();
@@ -1044,17 +1079,6 @@ export default function UsagePage() {
         updatedAt: now,
       });
 
-      const sequence = database.getNextChatMessageSequence(targetSessionId);
-      const userMessage: ChatMessageRecord = {
-        id: crypto.randomUUID(),
-        sessionId: targetSessionId,
-        role: "user",
-        content: trimmedQuery,
-        sequence,
-        createdAt: now,
-      };
-      await database.addChatMessage(userMessage);
-
       setSessions((previous) => {
         const existingIndex = previous.findIndex((session) => session.id === targetSessionId);
         const nextSession: SearchSession = {
@@ -1076,14 +1100,6 @@ export default function UsagePage() {
         return updated;
       });
 
-      setSessionMessagesById((previous) => {
-        const current = previous[targetSessionId] ?? [];
-        return {
-          ...previous,
-          [targetSessionId]: sortChatMessages([...current, userMessage]),
-        };
-      });
-
       setActiveSessionId(targetSessionId);
       setSessionMode("continue");
       setLanguageFilter("all");
@@ -1095,9 +1111,9 @@ export default function UsagePage() {
       setIndexingStatus((previous) =>
         previous
           ? {
-              ...previous,
-              phase: `Failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-            }
+            ...previous,
+            phase: `Failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+          }
           : previous,
       );
       setError(err instanceof Error ? "Search failed: " + err.message : "Search failed");
@@ -1147,25 +1163,46 @@ export default function UsagePage() {
       const debugMessage =
         debug.totalResults === 0
           ? `No context available. Active session has 0 retrieved results. session_id=${activeSession.id}. ` +
-            "Run Search first to populate context."
+          "Run Search first to populate context."
           : "No context available after filtering. " +
-            `session_id=${activeSession.id}; total_results=${debug.totalResults}; ` +
-            `filtered_results=${debug.filteredResults}; ` +
-            `filters={language:${languageFilter},topic:${topicFilter},updatedWithinDays:${updatedWithinDaysFilter}}; ` +
-            `pass_counts={language:${debug.languagePassCount},topic:${debug.topicPassCount},recency:${debug.recencyPassCount},invalidUpdatedAt:${debug.invalidUpdatedAtCount}}. ` +
-            "Set filters to all or run a new search.";
+          `session_id=${activeSession.id}; total_results=${debug.totalResults}; ` +
+          `filtered_results=${debug.filteredResults}; ` +
+          `filters={language:${languageFilter},topic:${topicFilter},updatedWithinDays:${updatedWithinDaysFilter}}; ` +
+          `pass_counts={language:${debug.languagePassCount},topic:${debug.topicPassCount},recency:${debug.recencyPassCount},invalidUpdatedAt:${debug.invalidUpdatedAtCount}}. ` +
+          "Set filters to all or run a new search.";
       captureLocalError("llm_no_context_available", new Error(debugMessage));
       setLlmError(debugMessage);
       return;
     }
 
+    const promptText = llmPrompt.trim();
     try {
       setLlmError(null);
       setLlmAnswer("");
       setIsGenerating(true);
+      setLlmPrompt("");
       let streamedAnswer = "";
       const controller = new AbortController();
       generationControllerRef.current = controller;
+
+      const database = await getLocalDatabase();
+      const userSequence = database.getNextChatMessageSequence(activeSessionId!);
+      const userMessage: ChatMessageRecord = {
+        id: crypto.randomUUID(),
+        sessionId: activeSessionId!,
+        role: "user",
+        content: promptText,
+        sequence: userSequence,
+        createdAt: Date.now(),
+      };
+      await database.addChatMessage(userMessage);
+      setSessionMessagesById((previous) => {
+        const current = previous[activeSessionId!] ?? [];
+        return {
+          ...previous,
+          [activeSessionId!]: sortChatMessages([...current, userMessage]),
+        };
+      });
 
       const provider = getProviderById(providerId);
       await provider.stream(
@@ -1175,7 +1212,7 @@ export default function UsagePage() {
           apiKey: providerApiKey.trim(),
         },
         {
-          prompt: llmPrompt.trim(),
+          prompt: promptText,
           contextSnippets: snippets,
           signal: controller.signal,
           onToken: (token) => {
@@ -1186,14 +1223,13 @@ export default function UsagePage() {
       );
 
       if (activeSessionId && streamedAnswer.trim()) {
-        const database = await getLocalDatabase();
-        const sequence = database.getNextChatMessageSequence(activeSessionId);
+        const assistantSequence = database.getNextChatMessageSequence(activeSessionId);
         const assistantMessage: ChatMessageRecord = {
           id: crypto.randomUUID(),
           sessionId: activeSessionId,
           role: "assistant",
           content: streamedAnswer,
-          sequence,
+          sequence: assistantSequence,
           createdAt: Date.now(),
         };
         await database.addChatMessage(assistantMessage);
@@ -1219,353 +1255,234 @@ export default function UsagePage() {
   };
 
   return (
-    <section className="space-y-6">
-      <h2 className="font-display text-3xl text-white">Usage Console</h2>
-      {isAuthenticated ? (
-        <div className="space-y-4">
-          {error ? (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
-              {error}
-            </div>
-          ) : null}
-          <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-            <p className="text-sm text-mist/70">Search your stars</p>
-            <div className="mt-3 flex items-center gap-3">
-              <input
-                className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-2 text-sm text-white focus:border-mint focus:outline-none"
-                placeholder="e.g. vector database in browser"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleSearch();
-                }}
-              />
-              <button
-                className="rounded-lg bg-mint px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50"
-                onClick={() => void handleSearch()}
-                disabled={isSearching}
-              >
-                {isSearching ? "..." : "Search"}
-              </button>
-              <button
-                className="rounded-lg border border-cyan/60 px-4 py-2 text-sm font-semibold text-cyan disabled:opacity-50"
-                onClick={() => {
-                  void handleFetchStars();
-                }}
-                disabled={fetchingStars}
-              >
-                {fetchingStars ? (fetchPhase ?? "Fetching…") : "Fetch Stars"}
-              </button>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-mist/80">
-              <span className="text-mist/60">Session mode:</span>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="session-mode"
-                  checked={sessionMode === "new"}
-                  onChange={() => setSessionMode("new")}
-                />
-                New session
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="session-mode"
-                  checked={sessionMode === "continue"}
-                  onChange={() => setSessionMode("continue")}
-                  disabled={!activeSessionId}
-                />
-                Continue active session
-              </label>
-            </div>
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
-              <select
-                value={languageFilter}
-                onChange={(event) => {
-                  setLanguageFilter(event.target.value);
-                }}
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-mist"
-              >
-                <option value="all">All languages</option>
-                {availableLanguages.map((language) => (
-                  <option key={language} value={language}>
-                    {language}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={topicFilter}
-                onChange={(event) => {
-                  setTopicFilter(event.target.value);
-                }}
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-mist"
-              >
-                <option value="all">All topics</option>
-                {availableTopics.map((topic) => (
-                  <option key={topic} value={topic}>
-                    {topic}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={updatedWithinDaysFilter}
-                onChange={(event) => {
-                  setUpdatedWithinDaysFilter(event.target.value);
-                }}
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-mist"
-              >
-                <option value="all">Any updated date</option>
-                <option value="30">Updated in last 30 days</option>
-                <option value="90">Updated in last 90 days</option>
-                <option value="365">Updated in last year</option>
-              </select>
-            </div>
-            {searchProgress ? <p className="mt-2 text-xs text-mist/60">{searchProgress}</p> : null}
-            {indexingStatus ? (
-              <div className="mt-3 rounded-lg border border-cyan/30 bg-cyan/10 p-3 text-[11px] text-cyan-50">
-                <p className="font-semibold text-cyan">Index status: {indexingStatus.phase}</p>
-                <p className="mt-1">
-                  Repos: {indexingStatus.repoTotal} | READMEs: {indexingStatus.readmesCompleted}
-                  {" / "}
-                  {indexingStatus.readmesTarget} (missing {indexingStatus.readmesMissing}, failed{" "}
-                  {indexingStatus.readmesFailed})
-                </p>
-                <p>
-                  Chunks: {indexingStatus.chunkTotal} | Embeddings: {indexingStatus.embeddingsCreated}
-                  {indexingStatus.embeddingTarget > 0
-                    ? ` / ${indexingStatus.embeddingTarget}`
-                    : ""}
-                </p>
-                <p>
-                  Duplicate embedding cache hits: {indexingStatus.duplicateEmbeddingHits} | Elapsed:{" "}
-                  {Math.max(Math.floor((Date.now() - indexingStatus.startedAt) / 1000), 0)}s
-                </p>
-                {embeddingRunMetrics ? (
-                  <p className="mt-1">
-                    Embedding telemetry: backend {embeddingRunMetrics.backendIdentity} | batches{" "}
-                    {embeddingRunMetrics.batchCount} | pool {embeddingRunMetrics.activePoolSize}/
-                    {embeddingRunMetrics.configuredPoolSize}
-                    {embeddingRunMetrics.poolDownshifted
-                      ? ` (downshifted: ${embeddingRunMetrics.poolDownshiftReason ?? "error threshold"})`
-                      : ""}{" "}
-                    | speed{" "}
-                    {embeddingRunMetrics.embeddingsPerSecond.toFixed(2)}/s | batch latency avg{" "}
-                    {embeddingRunMetrics.avgBatchEmbedLatencyMs.toFixed(1)}ms (last{" "}
-                    {embeddingRunMetrics.lastBatchEmbedLatencyMs.toFixed(1)}ms) | checkpoint avg{" "}
-                    {embeddingRunMetrics.avgDbCheckpointMs.toFixed(1)}ms (last{" "}
-                    {embeddingRunMetrics.lastDbCheckpointMs.toFixed(1)}ms) | checkpoint policy{" "}
-                    {embeddingRunMetrics.checkpointEveryEmbeddings} embeddings or{" "}
-                    {embeddingRunMetrics.checkpointEveryMs}ms | pending since checkpoint{" "}
-                    {embeddingRunMetrics.pendingEmbeddingsSinceCheckpoint} | last checkpoint{" "}
-                    {embeddingRunMetrics.lastCheckpointAt
-                      ? new Date(embeddingRunMetrics.lastCheckpointAt).toLocaleTimeString()
-                      : "not yet"}{" "}
-                    | queue depth{" "}
-                    {embeddingRunMetrics.queueDepth} (peak {embeddingRunMetrics.peakQueueDepth})
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-            {starsSummary ? <p className="mt-3 text-xs text-cyan">{starsSummary}</p> : null}
-            {dbStorageMode ? (
-              <p className="mt-1 text-xs text-mist/60">Storage mode: {dbStorageMode}</p>
-            ) : null}
-          </div>
+    <article className="space-y-6">
+      {error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
 
-          {/* Search Results */}
-          {activeSession ? (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium text-white">
-                Search Results
-                <span className="ml-2 text-xs text-mist/60">
-                  Session: {activeSession.title}
-                </span>
-              </h3>
-              <p className="text-xs text-mist/60">
-                Showing {filteredResults.length} / {activeSession.results.length} results
-              </p>
-              <div className="space-y-3">
-                {filteredResults.map((result) => (
-                  <div
-                    key={result.chunkId}
-                    className="rounded-xl border border-white/10 bg-black/20 p-4 transition hover:bg-black/30"
-                  >
-                    <div className="mb-2 flex items-baseline justify-between">
-                      <a
-                        href={result.repoUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-mono text-sm font-bold text-mint hover:underline"
-                      >
-                        {result.repoFullName}
-                      </a>
-                      <span className="text-xs text-mist/50">
-                        Score: {result.score.toFixed(4)}
-                      </span>
+      {isAuthenticated ? (
+        <>
+          {/* Primary: Search */}
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <Label htmlFor="search-stars" className="sr-only">
+                  Search your stars
+                </Label>
+                <Input
+                  id="search-stars"
+                  className="min-w-0 flex-1"
+                  placeholder="e.g. vector database in browser"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && void handleSearch()}
+                />
+                <Button
+                  onClick={() => void handleSearch()}
+                  disabled={isSearching}
+                  className="sm:shrink-0"
+                >
+                  {isSearching ? "Searching…" : "Search"}
+                </Button>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleFetchStars()}
+                  disabled={fetchingStars}
+                  className="text-accent border-accent/50 hover:bg-accent/10"
+                >
+                  {fetchingStars ? (fetchPhase ?? "Syncing…") : "Fetch Stars"}
+                </Button>
+              </div>
+              {/* Index status block */}
+              {indexingStatus ? (
+                <div className="mt-3 rounded-lg border border-accent/20 bg-accent/5 p-3 text-[11px] text-foreground space-y-1.5">
+                  <p className="font-medium">
+                    Index status: <span className="text-accent">{indexingStatus.phase}</span>
+                  </p>
+                  <p>
+                    Repos: {indexingStatus.repoTotal} | READMEs: {indexingStatus.readmesCompleted} / {indexingStatus.readmesTarget} (missing {indexingStatus.readmesMissing}, failed {indexingStatus.readmesFailed})
+                  </p>
+                  <p>
+                    Chunks: {indexingStatus.chunkTotal} | Embeddings: {indexingStatus.embeddingsCreated}
+                    {indexingStatus.embeddingTarget > 0 ? ` / ${indexingStatus.embeddingTarget}` : ""}
+                  </p>
+                  <p>
+                    Duplicate embedding cache hits: {indexingStatus.duplicateEmbeddingHits}
+                    {indexingStatus.elapsedSeconds != null ? ` | Elapsed: ${indexingStatus.elapsedSeconds}s` : ""}
+                  </p>
+                  {starsSummary ? (
+                    <p className="text-accent">{starsSummary}</p>
+                  ) : null}
+                  {dbStorageMode ? (
+                    <p className="pt-0.5">Storage mode: {dbStorageMode}</p>
+                  ) : null}
+                </div>
+              ) : starsSummary || dbStorageMode ? (
+                <div className="mt-3 rounded-lg border border-accent/20 bg-accent/5 p-3 text-[11px] text-foreground space-y-1.5">
+                  {starsSummary ? <p className="text-accent">{starsSummary}</p> : null}
+                  {dbStorageMode ? <p>Storage mode: {dbStorageMode}</p> : null}
+                </div>
+              ) : null}
+              {/* Optional embedding run details */}
+              {(indexingStatus || embeddingRunMetrics) && embeddingRunMetrics ? (
+                <>
+                  <div className="mt-2 flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto p-0 text-xs text-muted-foreground underline"
+                      onClick={() => setIndexDetailsExpanded((e) => !e)}
+                    >
+                      {indexDetailsExpanded ? "Hide" : "Show"} embedding run details
+                    </Button>
+                  </div>
+                  {indexDetailsExpanded ? (
+                    <div className="mt-2 rounded border border-border bg-muted/30 p-2 text-[11px] text-muted-foreground space-y-1">
+                      <p>Backend: {embeddingRunMetrics.backendIdentity} · pool {embeddingRunMetrics.activePoolSize}/{embeddingRunMetrics.configuredPoolSize}{embeddingRunMetrics.poolDownshifted ? ` (downshifted: ${embeddingRunMetrics.poolDownshiftReason ?? "yes"})` : ""}</p>
+                      <p>Batches: {embeddingRunMetrics.batchCount} · speed {embeddingRunMetrics.embeddingsPerSecond.toFixed(2)}/s · queue {embeddingRunMetrics.queueDepth} (peak {embeddingRunMetrics.peakQueueDepth})</p>
+                      <p>Latency: avg batch {embeddingRunMetrics.avgBatchEmbedLatencyMs.toFixed(0)}ms · DB checkpoint avg {embeddingRunMetrics.avgDbCheckpointMs.toFixed(0)}ms</p>
                     </div>
-                    {result.repoDescription ? (
-                      <p className="mb-2 text-xs text-mist/70">{result.repoDescription}</p>
-                    ) : null}
-                    <p className="mb-2 text-[11px] text-mist/50">
-                      {result.language ?? "Unknown language"} | Updated {new Date(result.updatedAt).toLocaleDateString()}
-                      {result.topics.length > 0 ? ` | Topics: ${result.topics.join(", ")}` : ""}
-                    </p>
-                    <div className="rounded bg-black/40 p-3 text-sm text-mist">
-                      <SafeMarkdown
-                        className="line-clamp-3 whitespace-pre-wrap font-mono text-xs"
-                        content={result.text}
-                      />
+                  ) : null}
+                </>
+              ) : null}
+              {searchProgress ? <p className="mt-2 text-xs text-muted-foreground">{searchProgress}</p> : null}
+              <p className="mt-2 text-xs text-muted-foreground">
+                Search your stars to create a session; then filter and chat below.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Session results + filters (only when there is an active session) */}
+          {activeSession ? (
+            <Card>
+              <CardHeader className="pb-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-sm font-medium">Session: {activeSession.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {filteredResults.length} of {activeSession.results.length} results
+                  </p>
+                </div>
+                {activeSession.results.length === 0 ? (
+                  <div className="mt-3 rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+                    <p>This session has no results in memory. Run the same search again to repopulate, or start a new search.</p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="mt-2"
+                      onClick={() => {
+                        setSearchQuery(activeSession.query);
+                        void handleSearch();
+                      }}
+                    >
+                      Re-run search
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    <p className="text-[11px] text-muted-foreground">Filter repos in this session</p>
+                    <RadioGroup
+                      value={sessionMode}
+                      onValueChange={(v) => setSessionMode(v as "new" | "continue")}
+                      className="flex flex-wrap items-center gap-3 text-xs"
+                    >
+                      <Label className="w-full shrink-0 text-muted-foreground sm:w-auto">Session:</Label>
+                      <div className="flex items-center gap-2">
+                        <RadioGroupItem value="new" id="session-new" />
+                        <Label htmlFor="session-new" className="cursor-pointer font-normal">New</Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <RadioGroupItem value="continue" id="session-continue" disabled={!activeSessionId} />
+                        <Label htmlFor="session-continue" className="cursor-pointer font-normal">Continue</Label>
+                      </div>
+                    </RadioGroup>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <Select value={languageFilter} onValueChange={setLanguageFilter}>
+                        <SelectTrigger aria-label="Filter by language">
+                          <SelectValue placeholder="All languages" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All languages</SelectItem>
+                          {availableLanguages.map((lang) => <SelectItem key={lang} value={lang}>{lang}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Select value={topicFilter} onValueChange={setTopicFilter}>
+                        <SelectTrigger aria-label="Filter by topic">
+                          <SelectValue placeholder="All topics" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All topics</SelectItem>
+                          {availableTopics.map((topic) => <SelectItem key={topic} value={topic}>{topic}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Select value={updatedWithinDaysFilter} onValueChange={setUpdatedWithinDaysFilter}>
+                        <SelectTrigger aria-label="Filter by last updated">
+                          <SelectValue placeholder="Any date" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Any date</SelectItem>
+                          <SelectItem value="30">Last 30 days</SelectItem>
+                          <SelectItem value="90">Last 90 days</SelectItem>
+                          <SelectItem value="365">Last year</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {activeSession ? (
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-              <p className="text-sm font-medium text-white">Session messages</p>
-              <div className="mt-3 space-y-2">
-                {activeSessionMessages.length === 0 ? (
-                  <p className="text-xs text-mist/60">No messages yet.</p>
-                ) : (
-                  activeSessionMessages.map((message) => (
-                    <div
-                      key={message.id}
-                      className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-mist"
-                    >
-                      <p className="mb-1 font-mono uppercase tracking-[0.1em] text-mist/60">
-                        {message.role} • seq {message.sequence}
-                      </p>
-                      <p className="whitespace-pre-wrap">{message.content}</p>
-                    </div>
-                  ))
                 )}
-              </div>
-            </div>
+              </CardHeader>
+              {activeSession.results.length > 0 ? (
+                <CardContent className="pt-0">
+                  <div className="max-h-[min(60vh,28rem)] overflow-auto rounded-md border border-border">
+                    <div className="space-y-2 p-2">
+                      {filteredResults.map((result) => (
+                        <Card key={result.chunkId} className="transition-colors hover:bg-card/80">
+                          <CardContent className="p-3">
+                            <div className="flex flex-wrap items-baseline justify-between gap-1">
+                              <a
+                                href={result.repoUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="font-mono text-sm font-bold text-primary hover:underline"
+                              >
+                                {result.repoFullName}
+                              </a>
+                              <span className="text-[11px] text-muted-foreground">{result.score.toFixed(3)}</span>
+                            </div>
+                            {result.repoDescription ? (
+                              <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{result.repoDescription}</p>
+                            ) : null}
+                            <div className="mt-1 rounded bg-muted/50 p-2 text-xs">
+                              <SafeMarkdown className="line-clamp-2 whitespace-pre-wrap font-mono text-[11px]" content={result.text} />
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              ) : null}
+            </Card>
           ) : null}
 
-          <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-mist/70">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="font-medium text-white">LLM Answer Mode</p>
-              <p className="text-[11px] text-mist/50">Top 8 filtered snippets are sent as context</p>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-3">
-              <select
-                value={providerId}
-                onChange={(event) => {
-                  handleProviderChange(event.target.value as LLMProviderId);
-                }}
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-mist"
-              >
-                {providerDefinitions.map((provider) => (
-                  <option key={provider.id} value={provider.id}>
-                    {provider.label}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={providerBaseUrl}
-                onChange={(event) => {
-                  setProviderBaseUrl(event.target.value);
-                }}
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-mist"
-                placeholder="Base URL"
-              />
-              <input
-                value={providerModel}
-                onChange={(event) => {
-                  setProviderModel(event.target.value);
-                }}
-                className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-mist"
-                placeholder="Model"
-              />
-            </div>
-
-            {selectedProvider.requiresApiKey ? (
-              <input
-                type="password"
-                value={providerApiKey}
-                onChange={(event) => {
-                  setProviderApiKey(event.target.value);
-                }}
-                className="mt-3 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-mist"
-                placeholder="Provider API key"
-              />
-            ) : null}
-
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <label className="flex items-center gap-2 text-xs text-mist/80">
-                <input
-                  type="checkbox"
-                  checked={allowRemoteProvider}
-                  onChange={(event) => {
-                    setAllowRemoteProvider(event.target.checked);
-                  }}
-                />
-                Enable remote provider usage (sends context out of browser)
-              </label>
-              <label className="flex items-center gap-2 text-xs text-mist/80">
-                <input
-                  type="checkbox"
-                  checked={allowLocalProvider}
-                  onChange={(event) => {
-                    setAllowLocalProvider(event.target.checked);
-                  }}
-                />
-                Enable local endpoint usage (localhost/Ollama/LM Studio)
-              </label>
-            </div>
-
-            <textarea
-              value={llmPrompt}
-              onChange={(event) => {
-                setLlmPrompt(event.target.value);
-              }}
-              className="mt-3 h-24 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-mist"
-              placeholder="Ask a recommendation question based on current filtered results..."
-            />
-
-            <div className="mt-3 flex items-center gap-3">
-              <button
-                className="rounded-lg bg-cyan px-4 py-2 text-xs font-semibold text-ink disabled:opacity-50"
-                disabled={isGenerating}
-                onClick={() => {
-                  void handleGenerateAnswer();
-                }}
-              >
-                {isGenerating ? "Generating..." : "Generate Answer"}
-              </button>
-              <button
-                className="rounded-lg border border-white/20 px-4 py-2 text-xs font-semibold text-mist disabled:opacity-50"
-                disabled={!isGenerating}
-                onClick={handleCancelGeneration}
-              >
-                Cancel
-              </button>
-            </div>
-
-            {llmError ? (
-              <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-100">
-                {llmError}
-              </p>
-            ) : null}
-
-            <div className="mt-3 rounded-lg border border-white/10 bg-black/40 p-3">
-              <p className="mb-2 text-[11px] uppercase tracking-[0.12em] text-mist/50">Streamed answer</p>
-              <div className="min-h-16 whitespace-pre-wrap text-xs text-mist">
-                {llmAnswer || "No answer yet."}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-mist/70">
-            <div className="flex items-center justify-between">
-              <p>Sessions (logged in via {authMethod})</p>
-              <button
-                className="rounded-lg border border-white/20 px-3 py-1 text-[11px] uppercase tracking-[0.12em] text-mist/80"
+          {/* Chat section: sidebar (chats) + main chat */}
+          <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
+            {/* Chats sidebar */}
+            <aside
+              className="w-full shrink-0 rounded-lg border border-border bg-card p-3 md:w-60"
+              aria-label="Chat sessions"
+            >
+              <p className="mb-2 text-sm font-medium">Chats</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mb-3 h-7 w-full text-xs"
                 onClick={() => {
                   setActiveSessionId(null);
                   setSessionMode("new");
@@ -1575,107 +1492,158 @@ export default function UsagePage() {
                 }}
               >
                 Clear active
-              </button>
-            </div>
-            <div className="mt-3 space-y-2">
-              {sessions.length === 0 ? (
-                <p className="text-xs text-mist/50">No search sessions yet.</p>
+              </Button>
+              <ul className="space-y-1">
+                {sessions.length === 0 ? (
+                  <li>
+                    <p className="text-xs text-muted-foreground">No chats yet. Run a search to start one.</p>
+                  </li>
+                ) : (
+                  sessions.map((session) => (
+                    <li key={session.id}>
+                      <Button
+                        variant={activeSessionId === session.id ? "secondary" : "ghost"}
+                        size="sm"
+                        className="h-auto w-full justify-start py-1.5 text-left text-xs font-normal"
+                        onClick={() => {
+                          void getLocalDatabase().then((db) => {
+                            setSessionMessagesById((prev) => ({
+                              ...prev,
+                              [session.id]: sortChatMessages(db.listChatMessages(session.id)),
+                            }));
+                          });
+                          setActiveSessionId(session.id);
+                          setSessionMode("continue");
+                        }}
+                        aria-current={activeSessionId === session.id ? "true" : undefined}
+                      >
+                        <span className="truncate font-medium">{session.title}</span>
+                        <span className="ml-1 shrink-0 text-muted-foreground">· {session.results.length}</span>
+                      </Button>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </aside>
+
+            {/* Main chat area */}
+            <div className="min-w-0 flex-1">
+              {activeSession ? (
+                <Card className="flex h-full flex-col">
+                  <CardHeader className="py-3">
+                    <p className="text-sm font-medium">Chat</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Top 8 filtered snippets are sent as context.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="flex min-h-0 flex-1 flex-col pt-0">
+                    <SessionChat
+                      messages={activeSessionMessages}
+                      isGenerating={isGenerating}
+                      streamingContent={llmAnswer}
+                      prompt={llmPrompt}
+                      onPromptChange={setLlmPrompt}
+                      onSend={() => void handleGenerateAnswer()}
+                      onCancel={handleCancelGeneration}
+                      error={llmError}
+                      canSend={filteredResults.length > 0}
+                      noResultsHint={filteredResults.length === 0}
+                      messagesEndRef={messagesEndRef}
+                      providerId={providerId}
+                      providerBaseUrl={providerBaseUrl}
+                      providerModel={providerModel}
+                      providerApiKey={providerApiKey}
+                      onProviderIdChange={(id) => handleProviderChange(id)}
+                      onProviderBaseUrlChange={setProviderBaseUrl}
+                      onProviderModelChange={setProviderModel}
+                      onProviderApiKeyChange={setProviderApiKey}
+                      selectedProvider={selectedProvider}
+                      providerDefinitions={providerDefinitions}
+                      allowRemoteProvider={allowRemoteProvider}
+                      allowLocalProvider={allowLocalProvider}
+                      onAllowRemoteChange={setAllowRemoteProvider}
+                      onAllowLocalChange={setAllowLocalProvider}
+                    />
+                  </CardContent>
+                </Card>
               ) : (
-                sessions.map((session) => (
-                  <button
-                    key={session.id}
-                    onClick={() => {
-                      void (async () => {
-                        const database = await getLocalDatabase();
-                        const persistedMessages = database.listChatMessages(session.id);
-                        setSessionMessagesById((previous) => ({
-                          ...previous,
-                          [session.id]: sortChatMessages(persistedMessages),
-                        }));
-                      })();
-                      setActiveSessionId(session.id);
-                      setSessionMode("continue");
-                    }}
-                    className={`block w-full rounded-lg border px-3 py-2 text-left text-xs ${
-                      activeSessionId === session.id
-                        ? "border-mint/60 bg-mint/10 text-mint"
-                        : "border-white/10 bg-black/30 text-mist/70"
-                    }`}
-                  >
-                    <div className="font-medium">{session.title}</div>
-                    <div className="text-[11px] opacity-80">
-                      {session.results.length} results |{" "}
-                      {new Date(session.updatedAt).toLocaleString()}
-                    </div>
-                  </button>
-                ))
+                <Card>
+                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                    Run a search above to start a session, then chat here.
+                  </CardContent>
+                </Card>
               )}
             </div>
-            <div className="mt-3">
-              <button
-                className="mr-3 rounded-lg border border-white/25 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white"
-                onClick={logout}
-              >
-                Clear token
-              </button>
-              <button
-                className="rounded-lg border border-red-400/50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-red-200"
-                onClick={() => {
-                  void handleClearLocalData();
-                }}
-              >
-                Delete all local data
-              </button>
-            </div>
           </div>
-        </div>
+
+          {/* Account: collapsible (no session list) */}
+          <Collapsible open={sessionsExpanded} onOpenChange={setSessionsExpanded}>
+            <Card>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" className="w-full justify-between px-4 py-2.5 font-normal">
+                  <span>Account</span>
+                  <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
+                    <span className="hidden sm:inline">{authMethod}</span>
+                    <span>{sessionsExpanded ? "−" : "+"}</span>
+                  </span>
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent className="border-t border-border pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={logout}>
+                      Clear token
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => void handleClearLocalData()}
+                    >
+                      Delete local data
+                    </Button>
+                  </div>
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+        </>
       ) : (
-        <div className="space-y-4 rounded-xl border border-white/10 bg-black/20 p-6 text-mist/70">
-          <p className="text-lg text-white">Login required</p>
-          <p className="mt-2 text-sm">
-            Connect GitHub with OAuth or provide a PAT. Token stays in memory by default.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <button
-              className="rounded-lg bg-mint px-4 py-2 text-sm font-semibold text-ink"
-              onClick={() => {
-                void handleOAuth();
-              }}
-            >
-              Login with GitHub OAuth
-            </button>
-          </div>
-          <p className="text-xs text-mist/60">
-            OAuth redirect URI expected by app: <code>{oauthConfig.redirectUri}</code>
-          </p>
-          <form onSubmit={handlePatLogin} className="space-y-3 rounded-lg border border-white/10 p-4">
-            <label className="block text-sm text-mist/80" htmlFor="patToken">
-              Personal Access Token (fallback)
-            </label>
-            <input
-              id="patToken"
-              type="password"
-              value={patToken}
-              onChange={(event) => {
-                setPatToken(event.target.value);
-              }}
-              className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-2 text-sm text-white focus:border-mint focus:outline-none"
-              placeholder="ghp_..."
-            />
-            <button
-              type="submit"
-              className="rounded-lg border border-cyan/60 px-4 py-2 text-sm font-semibold text-cyan"
-            >
-              Use PAT
-            </button>
-          </form>
-          {error ? (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
-              {error}
+        <Card>
+          <CardContent className="p-6">
+            <p className="text-lg font-medium">Login required</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Connect GitHub with OAuth or provide a PAT. Token stays in memory by default.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Button onClick={() => void handleOAuth()}>
+                Login with GitHub OAuth
+              </Button>
             </div>
-          ) : null}
-        </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              OAuth redirect URI expected by app: <code className="rounded bg-muted px-1">{oauthConfig.redirectUri}</code>
+            </p>
+            <form onSubmit={handlePatLogin} className="mt-4 space-y-3 rounded-lg border border-border p-4">
+              <Label htmlFor="patToken">Personal Access Token (fallback)</Label>
+              <Input
+                id="patToken"
+                type="password"
+                value={patToken}
+                onChange={(e) => setPatToken(e.target.value)}
+                placeholder="ghp_..."
+              />
+              <Button type="submit" variant="secondary" className="text-accent-foreground bg-accent hover:bg-accent/90">
+                Use PAT
+              </Button>
+            </form>
+            {error ? (
+              <Alert variant="destructive" className="mt-4">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null}
+          </CardContent>
+        </Card>
       )}
-    </section>
+    </article>
   );
 }

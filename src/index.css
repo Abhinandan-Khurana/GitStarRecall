@@ -1,12 +1,48 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Syne:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  color: #e5e7eb;
-  background: #0b0f14;
+  --color-ink: #0b0f14;
+  --color-mist: #e5e7eb;
+  --color-mint: #34d399;
+  --color-cyan: #22d3ee;
+  --color-surface: #111827;
+  --color-surface-elevated: #1f2937;
+  --font-display: "Syne", ui-sans-serif, system-ui;
+  --font-body: "DM Sans", ui-sans-serif, system-ui;
+
+  /* shadcn/theme (HSL values without hsl() for Tailwind) */
+  --background: 210 25% 6%;
+  --foreground: 220 14% 91%;
+  --card: 222 47% 11%;
+  --card-foreground: 220 14% 91%;
+  --popover: 222 47% 11%;
+  --popover-foreground: 220 14% 91%;
+  --primary: 160 64% 51%;
+  --primary-foreground: 210 25% 6%;
+  --secondary: 215 28% 17%;
+  --secondary-foreground: 220 14% 91%;
+  --muted: 215 28% 17%;
+  --muted-foreground: 220 14% 63%;
+  --accent: 187 85% 53%;
+  --accent-foreground: 210 25% 6%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 220 14% 20%;
+  --input: 220 14% 20%;
+  --ring: 160 64% 51%;
+  --radius: 0.625rem;
+  --chart-1: 160 64% 51%;
+  --chart-2: 187 85% 53%;
+  --chart-3: 220 70% 50%;
+  --chart-4: 30 80% 55%;
+  --chart-5: 340 75% 55%;
+
+  color: var(--color-mist);
+  background: var(--color-ink);
 }
 
 * {
@@ -16,11 +52,123 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "IBM Plex Sans", ui-sans-serif, system-ui;
-  background: radial-gradient(circle at top, #0f172a, #0b0f14 55%);
+  font-family: var(--font-body);
+  background: radial-gradient(circle at top, #0f172a, var(--color-ink) 55%);
 }
 
 a {
   color: inherit;
   text-decoration: none;
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.5s ease-out forwards;
+}
+
+/* Focus rings disabled per preference */
+*:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Session chat – force theme variables for message bubbles and input */
+.session-chat-root {
+  color: hsl(var(--foreground));
+}
+.session-chat-messages {
+  border-color: hsl(var(--border));
+  background: hsl(var(--muted) / 0.15);
+}
+.session-chat-bubble-user {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+.session-chat-bubble-assistant {
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--border));
+}
+.session-chat-bubble-assistant a {
+  color: hsl(var(--accent));
+}
+.session-chat-bubble-assistant a:hover {
+  opacity: 0.9;
+}
+.session-chat-prompt-wrap {
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--border));
+}
+.session-chat-prompt-wrap .session-chat-prompt-input,
+.session-chat-prompt-wrap textarea {
+  color: hsl(var(--foreground)) !important;
+  background: transparent !important;
+}
+.session-chat-prompt-wrap textarea::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+.session-chat-addon-row {
+  border-color: hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+.session-chat-addon-trigger {
+  color: hsl(var(--foreground));
+}
+.session-chat-addon-icon {
+  color: hsl(var(--muted-foreground));
+}
+/* Model settings popover: single background, no focus ring */
+.session-chat-settings-popover {
+  background: hsl(var(--card)) !important;
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+}
+.session-chat-settings-popover input:focus-visible,
+.session-chat-settings-popover button:focus-visible,
+.session-chat-settings-popover [data-state]:focus-visible,
+.session-chat-settings-popover [role="checkbox"]:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+.session-chat-settings-input {
+  background: transparent;
+  border-color: hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+.session-chat-settings-input::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+.session-chat-hint {
+  color: hsl(var(--muted-foreground));
+}
+
+@layer base {
+  .dark {
+    --background: 210 25% 6%;
+    --foreground: 220 14% 91%;
+    --card: 222 47% 11%;
+    --card-foreground: 220 14% 91%;
+    --primary: 160 64% 51%;
+    --primary-foreground: 210 25% 6%;
+    --secondary: 215 28% 17%;
+    --muted: 215 28% 17%;
+    --muted-foreground: 220 14% 63%;
+    --accent: 187 85% 53%;
+    --accent-foreground: 210 25% 6%;
+    --destructive: 0 62.8% 50%;
+    --border: 220 14% 20%;
+    --input: 220 14% 20%;
+    --ring: 160 64% 51%;
+  }
 }

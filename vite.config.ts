@@ -1,5 +1,9 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const BASE_CSP_DIRECTIVES = [
   "default-src 'self'",
@@ -30,6 +34,9 @@ export default defineConfig(({ command }) => {
 
   return {
     plugins: [react()],
+    resolve: {
+      alias: { "@": path.resolve(__dirname, "./src") },
+    },
     server: {
       port: 5173,
       headers: {
