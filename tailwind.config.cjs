@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
 /** @type {import('tailwindcss').Config} */
 /* Theme values match :root in src/index.css for single source of truth */
 module.exports = {

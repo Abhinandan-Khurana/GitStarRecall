@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
 import { useState } from "react";
 import { useAuth } from "../auth/useAuth";
 import { Button } from "@/components/ui/button";

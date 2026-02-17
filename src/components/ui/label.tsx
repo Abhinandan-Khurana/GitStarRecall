@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
 import * as React from "react"
 import * as LabelPrimitive from "@radix-ui/react-label"
 import { cva, type VariantProps } from "class-variance-authority"

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
