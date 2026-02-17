@@ -391,6 +391,12 @@ export function SessionChat({
         </p>
       ) : null}
 
+      {allowRemoteProvider ? (
+        <p className="session-chat-hint rounded-md border border-border/80 bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground">
+          Data is sent to the remote provider when you send a message.
+        </p>
+      ) : null}
+
       <ChatComposer
         prompt={prompt}
         onPromptChange={onPromptChange}

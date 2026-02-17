@@ -1000,7 +1000,9 @@ export default function UsagePage() {
         }),
       );
     } catch (err) {
-      console.error("Embedding generation failed", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (import.meta.env.DEV) console.error("Embedding generation failed", err);
+      else console.error("Embedding generation failed:", msg);
       captureLocalError("embedding_generation_failed", err);
       setError(formatEmbeddingError(err));
     } finally {
@@ -1106,7 +1108,9 @@ export default function UsagePage() {
       setTopicFilter("all");
       setUpdatedWithinDaysFilter("all");
     } catch (err) {
-      console.error("Search failed", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (import.meta.env.DEV) console.error("Search failed", err);
+      else console.error("Search failed:", msg);
       captureLocalError("search_failed", err);
       setIndexingStatus((previous) =>
         previous
@@ -1590,6 +1594,14 @@ export default function UsagePage() {
               </CollapsibleTrigger>
               <CollapsibleContent>
                 <CardContent className="border-t border-border pt-4">
+                  {authMethod === "pat" ? (
+                    <p className="mb-3 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                      You are using a Personal Access Token. For better security, prefer{" "}
+                      <Button variant="link" className="h-auto p-0 text-xs font-medium" onClick={() => void handleOAuth()}>
+                        Login with GitHub OAuth
+                      </Button>.
+                    </p>
+                  ) : null}
                   <div className="flex flex-wrap items-center gap-2">
                     <Button variant="outline" size="sm" className="h-7 text-xs" onClick={logout}>
                       Clear token
