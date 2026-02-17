@@ -18,10 +18,10 @@ export default function AppLayout({ children }: PropsWithChildren) {
           </Link>
           <nav className="flex min-w-0 shrink flex-wrap items-center justify-end gap-2 text-sm sm:gap-4">
             <Link to="/" className={isLanding ? "text-mint" : "text-mist/80 hover:text-mist"}>
-              Landing
+              Home
             </Link>
             <Link to="/app" className={!isLanding ? "text-mint" : "text-mist/80 hover:text-mist"}>
-              Usage
+              App
             </Link>
             {isAuthenticated ? (
               <Button variant="outline" size="sm" onClick={logout} className="rounded-full uppercase tracking-widest">
