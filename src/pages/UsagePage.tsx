@@ -428,9 +428,7 @@ export default function UsagePage() {
     };
   }, []);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeSessionMessages.length, isGenerating, llmAnswer]);
+  /* Chat scroll is handled inside SessionChat (only the message list scrolls, not the page) */
 
   const handleProviderChange = (nextProviderId: LLMProviderId) => {
     const nextProvider =

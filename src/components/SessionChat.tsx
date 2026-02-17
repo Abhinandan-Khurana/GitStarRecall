@@ -51,6 +51,16 @@ export interface SessionChatProps {
   onAllowLocalChange: (value: boolean) => void;
 }
 
+function TypingDots() {
+  return (
+    <span className="inline-flex gap-0.5" aria-hidden>
+      <span className="session-chat-typing-dot size-1.5 rounded-full bg-current opacity-60" style={{ animationDelay: "0ms" }} />
+      <span className="session-chat-typing-dot size-1.5 rounded-full bg-current opacity-60" style={{ animationDelay: "200ms" }} />
+      <span className="session-chat-typing-dot size-1.5 rounded-full bg-current opacity-60" style={{ animationDelay: "400ms" }} />
+    </span>
+  );
+}
+
 type MessageListProps = {
   messages: ChatMessageRecord[];
   isGenerating: boolean;
@@ -64,10 +74,21 @@ function MessageList({
   streamingContent,
   messagesEndRef,
 }: Readonly<MessageListProps>) {
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
   const showEmptyState = messages.length === 0 && !isGenerating;
 
+  // Scroll only the chat container to bottom when content changes (not the whole page)
+  React.useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages.length, isGenerating, streamingContent]);
+
   return (
-    <div className="session-chat-messages flex min-h-[200px] max-h-[min(50vh,28rem)] flex-col gap-3 overflow-y-auto overflow-x-hidden rounded-xl border p-3">
+    <div
+      ref={scrollContainerRef}
+      className="session-chat-messages flex min-h-[200px] max-h-[min(50vh,28rem)] flex-col gap-3 overflow-y-auto overflow-x-hidden rounded-xl border p-3"
+    >
       {showEmptyState ? (
         <p className="py-4 text-center text-sm text-muted-foreground">
           Ask something about the results above.
@@ -92,10 +113,14 @@ function MessageList({
       ))}
       {isGenerating ? (
         <div className="session-chat-bubble-assistant mr-auto max-w-[85%] rounded-2xl border px-4 py-2.5 text-sm shadow-sm [&_*]:text-inherit">
-          <SafeMarkdown
-            className="whitespace-pre-wrap text-xs [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:text-inherit [&_code]:text-inherit"
-            content={streamingContent || "…"}
-          />
+          {streamingContent ? (
+            <SafeMarkdown
+              className="whitespace-pre-wrap text-xs [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:text-inherit [&_code]:text-inherit"
+              content={streamingContent}
+            />
+          ) : (
+            <TypingDots />
+          )}
         </div>
       ) : null}
       <div ref={messagesEndRef} />
