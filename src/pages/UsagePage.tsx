@@ -20,6 +20,7 @@ import {
   getProviderDefinitions,
 } from "../llm/providers";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
+import { loadSettings, saveSettings } from "../lib/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -427,6 +428,35 @@ export default function UsagePage() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
+
+  // Load saved provider settings when user logs in
+  useEffect(() => {
+    if (accessToken) {
+      const savedSettings = loadSettings(accessToken);
+      if (savedSettings) {
+        setProviderId(savedSettings.providerId);
+        setProviderBaseUrl(savedSettings.baseUrl);
+        setProviderModel(savedSettings.model);
+        setProviderApiKey(savedSettings.apiKey);
+        setAllowRemoteProvider(savedSettings.allowRemoteProvider);
+        setAllowLocalProvider(savedSettings.allowLocalProvider);
+      }
+    }
+  }, [accessToken]);
+
+  // Save provider settings when they change
+  useEffect(() => {
+    if (accessToken) {
+      saveSettings(accessToken, {
+        providerId,
+        baseUrl: providerBaseUrl,
+        model: providerModel,
+        apiKey: providerApiKey,
+        allowRemoteProvider,
+        allowLocalProvider,
+      });
+    }
+  }, [accessToken, providerId, providerBaseUrl, providerModel, providerApiKey, allowRemoteProvider, allowLocalProvider]);
 
   /* Chat scroll is handled inside SessionChat (only the message list scrolls, not the page) */
 
