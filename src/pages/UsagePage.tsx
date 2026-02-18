@@ -20,7 +20,7 @@ import {
   getProviderDefinitions,
 } from "../llm/providers";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
-import { loadSettings, saveSettings } from "../lib/settings";
+import { loadSettings, loadSettingsAsync, saveSettings } from "../lib/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -429,19 +429,32 @@ export default function UsagePage() {
     };
   }, []);
 
-  // Load saved provider settings when user logs in
+  // Load saved provider settings when user logs in (sync for plaintext, async for encrypted)
   useEffect(() => {
-    if (accessToken) {
-      const savedSettings = loadSettings(accessToken);
-      if (savedSettings) {
-        setProviderId(savedSettings.providerId);
-        setProviderBaseUrl(savedSettings.baseUrl);
-        setProviderModel(savedSettings.model);
-        setProviderApiKey(savedSettings.apiKey);
-        setAllowRemoteProvider(savedSettings.allowRemoteProvider);
-        setAllowLocalProvider(savedSettings.allowLocalProvider);
-      }
+    if (!accessToken) return;
+    const sync = loadSettings(accessToken);
+    if (sync) {
+      setProviderId(sync.providerId);
+      setProviderBaseUrl(sync.baseUrl);
+      setProviderModel(sync.model);
+      setProviderApiKey(sync.apiKey);
+      setAllowRemoteProvider(sync.allowRemoteProvider);
+      setAllowLocalProvider(sync.allowLocalProvider);
+      return;
     }
+    let cancelled = false;
+    loadSettingsAsync(accessToken).then((saved) => {
+      if (cancelled || !saved) return;
+      setProviderId(saved.providerId);
+      setProviderBaseUrl(saved.baseUrl);
+      setProviderModel(saved.model);
+      setProviderApiKey(saved.apiKey);
+      setAllowRemoteProvider(saved.allowRemoteProvider);
+      setAllowLocalProvider(saved.allowLocalProvider);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [accessToken]);
 
   // Save provider settings when they change

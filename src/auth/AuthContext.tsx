@@ -11,6 +11,7 @@ import {
 } from "./githubOAuth";
 import { AuthContext } from "./auth-context";
 import type { AuthContextValue, AuthMethod, OAuthCallbackInput } from "./auth-types";
+import { clearSettings } from "@/lib/settings";
 
 function normalizeTokenInput(raw: string): string {
   let token = raw.trim();
@@ -61,9 +62,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const logout = useCallback(() => {
+    clearSettings(accessToken);
     setAccessToken(null);
     setAuthMethod(null);
-  }, []);
+  }, [accessToken]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

@@ -21,13 +21,13 @@ const BASE_CSP_DIRECTIVES = [
 
 const DEV_CSP = [
   "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
-  "connect-src 'self' ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:* https://api.github.com https://api.openai.com https://huggingface.co https://*.huggingface.co https://hf.co https://*.hf.co https://xethub.hf.co https://*.xethub.hf.co https://cdn-lfs.huggingface.co https://cdn.jsdelivr.net",
+  "connect-src 'self' ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:* https://api.github.com https://api.openai.com https://api.anthropic.com https://api.deepseek.com https://api.moonshot.cn https://api.moonshot.ai https://api.z.ai https://open.bigmodel.cn https://bigmodel.cn https://huggingface.co https://*.huggingface.co https://hf.co https://*.hf.co https://xethub.hf.co https://*.xethub.hf.co https://cdn-lfs.huggingface.co https://cdn.jsdelivr.net",
   ...BASE_CSP_DIRECTIVES,
 ].join("; ");
 
 const PROD_CSP = [
   "script-src 'self' 'unsafe-eval'",
-  "connect-src 'self' https://api.github.com https://api.openai.com https://huggingface.co https://*.huggingface.co https://hf.co https://*.hf.co https://xethub.hf.co https://*.xethub.hf.co https://cdn-lfs.huggingface.co https://cdn.jsdelivr.net http://localhost:11434 http://localhost:1234 http://localhost:3001",
+  "connect-src 'self' https://api.github.com https://api.openai.com https://api.anthropic.com https://api.deepseek.com https://api.moonshot.cn https://api.moonshot.ai https://api.z.ai https://open.bigmodel.cn https://bigmodel.cn https://huggingface.co https://*.huggingface.co https://hf.co https://*.hf.co https://xethub.hf.co https://*.xethub.hf.co https://cdn-lfs.huggingface.co https://cdn.jsdelivr.net http://localhost:11434 http://localhost:1234 http://localhost:3001",
   ...BASE_CSP_DIRECTIVES,
 ].join("; ");
 
