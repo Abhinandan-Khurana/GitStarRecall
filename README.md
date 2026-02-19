@@ -11,7 +11,7 @@ You can ask things like:
 - "Show me TypeScript auth projects with clean architecture vibes."
 - "Recommend the best-fit repos from my stars for my use case."
 
-This project exists because starred repos are great until your brain says, "I know what it does, but not what it is called."
+**This project exists because starred repos are great until your brain says, "I know what it does, but not what it is called."**
 
 ---
 
@@ -129,6 +129,7 @@ Important variables:
 - `VITE_EMBEDDING_BACKEND_PREFERRED` (`webgpu` or `wasm`)
 - `VITE_EMBEDDING_POOL_SIZE` (1..2)
 - `VITE_EMBEDDING_WORKER_BATCH_SIZE` (1..32)
+- `VITE_LLM_SETTINGS_ENCRYPTION_KEY=` (openssl rand -hex 32)
 
 If using Vercel OAuth exchange, see:
 - `docs/deployment-vercel.md`
@@ -199,7 +200,7 @@ We prioritize:
 
 ## License
 
-[Apache-2.0](./LICENSE)
+[MIT](./LICENSE)
 
 ---
 
