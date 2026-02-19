@@ -10,11 +10,9 @@ This document reviews the GitStarRecall codebase against the threats and mitigat
 |------------|--------|-----------------|
 | OAuth PKCE; avoid tokens in URL | **Done** | `src/auth/githubOAuth.ts`: `buildGitHubAuthorizeUrl` uses `code_challenge` (S256) and `code_verifier` in sessionStorage; token is obtained via `exchangeOAuthCode` (server-side exchange). Callback uses only `code` and `state` from URL; token never in URL. |
 | Clear separation landing vs login | **Done** | `LandingPage` at `/`, `UsagePage` at `/app`, `AuthCallbackPage` at `/auth/callback`; auth state in React/sessionStorage. |
-| Warning banner when PAT is used; recommend OAuth | **Gap** | Auth method is shown in the sessions collapsible (`authMethod`: "oauth" / "pat") but there is **no explicit warning** when user is logged in with PAT (e.g. “You’re using a PAT. Prefer OAuth for better security.”). |
-| Strict CSP | **Partial** | See Tampering / CSP below. |
+| Warning banner when PAT is used; recommend OAuth | **Done** | Auth method is shown in the sessions collapsible (`authMethod`: "oauth" / "pat") and there is **explicit warning** when user is logged in with PAT (e.g. “You’re using a PAT. Prefer OAuth for better security.”).
+| Strict CSP | **Done** | See Tampering / CSP below. |
 | Explicit opt-in for local endpoints; show endpoint origin | **Done** | `allowLocalProvider` is off by default; user must enable “Local (Ollama)” in SessionChat model settings. Base URL is user-configured and visible in the same popover. |
-
-**Recommendation:** Add a visible warning when `authMethod === "pat"` (e.g. in the same card as “Clear token” / “Delete local data”) recommending OAuth and explaining that PAT is a fallback.
 
 ---
 
@@ -98,7 +96,7 @@ No material gaps identified for DoS mitigations.
 
 | STRIDE | Overall | Gaps / Follow-ups |
 |--------|--------|-------------------|
-| **S** Spoofing | Mostly aligned | Add PAT warning banner; recommend OAuth when PAT is used. |
+| **S** Spoofing | Aligned | PAT warning banner; recommend OAuth when PAT is used. |
 | **T** Tampering | Aligned | Document CSP (`unsafe-eval`); ensure CSP when not using Vite; optional embedding reconciliation. |
 | **R** Repudiation | Mostly aligned | Add explicit “data sent” notice when remote LLM is enabled. |
 | **I** Information Disclosure | Mostly aligned | Restrict/sanitize `console.error` in production; avoid logging full error objects. |
@@ -109,11 +107,10 @@ No material gaps identified for DoS mitigations.
 
 ## 8) Recommended Next Steps (Priority)
 
-1. **High:** Add a PAT warning when `authMethod === "pat"` (recommend OAuth).
-2. **High:** When `allowRemoteProvider` is true, show a clear “data sent to remote provider” notice in the chat UI.
-3. **Medium:** Replace or narrow `console.error(..., err)` so production logs never receive full error objects (log message/code only, and ensure no token/content in messages).
-4. **Medium:** Document CSP (and `unsafe-eval`) and ensure CSP is applied in all deployment modes (e.g. static host).
-5. **Low:** Add embedding reconciliation (e.g. chunks_pending + embeddings_created) for integrity; optional “data sent” audit line for local LLM if desired.
-6. **Low:** Document OAuth scopes and fine-grained PAT guidance for users who use PAT.
+1. **High:** When `allowRemoteProvider` is true, show a clear “data sent to remote provider” notice in the chat UI.
+2. **Medium:** Replace or narrow `console.error(..., err)` so production logs never receive full error objects (log message/code only, and ensure no token/content in messages).
+3. **Medium:** Document CSP (and `unsafe-eval`) and ensure CSP is applied in all deployment modes (e.g. static host).
+4. **Low:** Add embedding reconciliation (e.g. chunks_pending + embeddings_created) for integrity; optional “data sent” audit line for local LLM if desired.
+5. **Low:** Document OAuth scopes and fine-grained PAT guidance for users who use PAT.
 
-This review is based on the codebase and [threat-modeling-stride.md](./threat-modeling-stride.md) as of the review date. Re-run after significant auth, LLM, or storage changes.
+This review is based on the codebase and [threat-modeling-stride.md](./threat-modeling-stride.md) as of the review date. Re-do after significant auth, LLM, or storage changes.
