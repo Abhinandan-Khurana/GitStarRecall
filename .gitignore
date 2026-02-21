@@ -175,3 +175,5 @@ temp/
 # =========================
 docs/.cache/
 docs/dist/
+
+.codex
