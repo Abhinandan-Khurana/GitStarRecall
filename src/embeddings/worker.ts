@@ -82,6 +82,76 @@ class EmbeddingPipeline {
   }
 }
 
+type BatchTensorLike = {
+  data?: Float32Array | number[];
+  dims?: number[];
+};
+
+function toFloat32Array(value: Float32Array | number[] | undefined): Float32Array | null {
+  if (!value) {
+    return null;
+  }
+  if (value instanceof Float32Array) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return Float32Array.from(value);
+  }
+  return null;
+}
+
+function splitBatchedTensor(output: BatchTensorLike, expectedItems: number): Array<Float32Array | null> | null {
+  const data = toFloat32Array(output.data);
+  const dims = output.dims;
+  if (!data || !dims || dims.length < 2) {
+    return null;
+  }
+  const batch = Number(dims[0]);
+  if (!Number.isFinite(batch) || batch < 1 || batch !== expectedItems) {
+    return null;
+  }
+  const dimension = Math.trunc(data.length / batch);
+  if (!Number.isFinite(dimension) || dimension < 1 || dimension * batch !== data.length) {
+    return null;
+  }
+
+  const vectors: Array<Float32Array | null> = [];
+  for (let i = 0; i < batch; i += 1) {
+    const start = i * dimension;
+    const end = start + dimension;
+    vectors.push(data.slice(start, end));
+  }
+  return vectors;
+}
+
+function normalizeBatchOutput(output: unknown, expectedItems: number): Array<Float32Array | null> | null {
+  if (Array.isArray(output)) {
+    if (output.length !== expectedItems) {
+      return null;
+    }
+    return output.map((item) => {
+      if (item && typeof item === "object") {
+        const tensor = item as BatchTensorLike;
+        return toFloat32Array(tensor.data);
+      }
+      return null;
+    });
+  }
+
+  if (output && typeof output === "object") {
+    const tensor = output as BatchTensorLike;
+    const split = splitBatchedTensor(tensor, expectedItems);
+    if (split) {
+      return split;
+    }
+    if (expectedItems === 1) {
+      return [toFloat32Array(tensor.data)];
+    }
+  }
+
+  return null;
+}
+
 self.addEventListener("message", async (event) => {
   const { id, texts, text, preferredBackend } = event.data as {
     id: string;
@@ -95,20 +165,33 @@ self.addEventListener("message", async (event) => {
   try {
     const pipe = await EmbeddingPipeline.getInstance(preferred);
 
-    const embeddings: Array<Float32Array | null> = [];
-    const errors: Array<string | null> = [];
+    const embeddings: Array<Float32Array | null> = Array.from({ length: batchTexts.length }, () => null);
+    const errors: Array<string | null> = Array.from({ length: batchTexts.length }, () => null);
 
-    // Generate embeddings for a batch in request order.
-    // Per-item errors are captured and returned without dropping the whole batch.
-    for (const itemText of batchTexts) {
-      try {
-        const output = await pipe(itemText, { pooling: "mean", normalize: true });
-        const embedding = (output as { data: Float32Array }).data;
-        embeddings.push(embedding);
-        errors.push(null);
-      } catch (itemError) {
-        embeddings.push(null);
-        errors.push(itemError instanceof Error ? itemError.message : String(itemError));
+    try {
+      const batchOutput = await pipe(batchTexts, { pooling: "mean", normalize: true });
+      const normalized = normalizeBatchOutput(batchOutput, batchTexts.length);
+      if (!normalized) {
+        throw new Error("invalid batched embedding output shape");
+      }
+      for (let i = 0; i < normalized.length; i += 1) {
+        embeddings[i] = normalized[i];
+      }
+    } catch (batchError) {
+      for (let i = 0; i < batchTexts.length; i += 1) {
+        const itemText = batchTexts[i];
+        try {
+          const output = await pipe(itemText, { pooling: "mean", normalize: true });
+          const normalized = normalizeBatchOutput(output, 1);
+          embeddings[i] = normalized?.[0] ?? null;
+        } catch (itemError) {
+          errors[i] =
+            itemError instanceof Error
+              ? itemError.message
+              : batchError instanceof Error
+                ? batchError.message
+                : String(batchError);
+        }
       }
     }
 

@@ -597,7 +597,7 @@ export class LocalDatabase {
     const result = this.db.exec(`
       SELECT e.chunk_id, e.vector_blob
       FROM embeddings e
-      INNER JOIN chunks c ON CAST(c.id AS TEXT) = CAST(e.chunk_id AS TEXT);
+      INNER JOIN chunks c ON c.id = e.chunk_id;
     `);
     if (result.length === 0) {
       this.vectorIndexCache = [];
@@ -902,7 +902,7 @@ export class LocalDatabase {
       SELECT c.id, c.repo_id, c.chunk_id, c.text, c.source, c.created_at
       FROM chunks c
       LEFT JOIN embeddings e
-        ON CAST(e.chunk_id AS TEXT) = CAST(c.id AS TEXT)
+        ON e.chunk_id = c.id
       WHERE e.chunk_id IS NULL
       ORDER BY c.created_at ASC
       LIMIT ${safeLimit};
@@ -943,7 +943,7 @@ export class LocalDatabase {
       SELECT COUNT(*)
       FROM chunks c
       LEFT JOIN embeddings e
-        ON CAST(e.chunk_id AS TEXT) = CAST(c.id AS TEXT)
+        ON e.chunk_id = c.id
       WHERE e.chunk_id IS NULL;
     `);
 
@@ -964,6 +964,16 @@ export class LocalDatabase {
     return Number(result[0].values[0][0]);
   }
 
+  async clearEmbeddings(): Promise<void> {
+    this.db.run("DELETE FROM embeddings;");
+    this.vectorIndexCache = null;
+    this.vectorIndexCacheCount = -1;
+    this.pendingEmbeddingsSinceCheckpoint = 0;
+    this.pendingEmbeddingsStartedAt = 0;
+    this.lastEmbeddingCheckpointAt = null;
+    await this.persist();
+  }
+
   private recreateEmbeddingsTable(): void {
     this.db.run("DROP TABLE IF EXISTS embeddings;");
     this.db.run(`
@@ -977,6 +987,76 @@ export class LocalDatabase {
         FOREIGN KEY (chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
       );
     `);
+    this.db.run("CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id);");
+  }
+
+  listPendingChunksForEmbedding(args?: { limit?: number; repoIds?: number[] }): ChunkRecord[] {
+    const limit = Number.isFinite(args?.limit) ? Math.max(1, Math.trunc(Number(args?.limit))) : null;
+    const repoIds = (args?.repoIds ?? []).filter((id) => Number.isFinite(id));
+    const whereRepo =
+      repoIds.length > 0
+        ? ` AND c.repo_id IN (${repoIds.map((id) => Math.trunc(id)).join(",")})`
+        : "";
+    const limitClause = limit == null ? "" : ` LIMIT ${limit}`;
+    const query = `
+      SELECT c.id, c.repo_id, c.chunk_id, c.text, c.source, c.created_at
+      FROM chunks c
+      LEFT JOIN embeddings e
+        ON e.chunk_id = c.id
+      WHERE e.chunk_id IS NULL${whereRepo}
+      ORDER BY c.created_at ASC${limitClause};
+    `;
+    const result = this.db.exec(query);
+    if (result.length === 0) {
+      return [];
+    }
+
+    const [table] = result;
+    return table.values.map((row) => ({
+      id: String(row[0]),
+      repoId: Number(row[1]),
+      chunkId: String(row[2]),
+      text: String(row[3]),
+      source: String(row[4]),
+      createdAt: Number(row[5]),
+    }));
+  }
+
+  getIndexMetaValue(key: string): string | null {
+    const normalizedKey = String(key ?? "").trim();
+    if (!normalizedKey) {
+      return null;
+    }
+
+    const result = this.db.exec(
+      `
+      SELECT value
+      FROM index_meta
+      WHERE key = ?
+      LIMIT 1;
+      `,
+      [normalizedKey],
+    );
+    if (result.length === 0 || result[0].values.length === 0) {
+      return null;
+    }
+    const value = result[0].values[0]?.[0];
+    return value == null ? null : String(value);
+  }
+
+  getPendingChunksQueryPlan(): string {
+    const result = this.db.exec(`
+      EXPLAIN QUERY PLAN
+      SELECT c.id
+      FROM chunks c
+      LEFT JOIN embeddings e ON e.chunk_id = c.id
+      WHERE e.chunk_id IS NULL
+      ORDER BY c.created_at ASC;
+    `);
+    if (result.length === 0) {
+      return "";
+    }
+    return result[0].values.map((row) => row.map((col) => String(col)).join("|")).join(" || ");
   }
 
   private rebuildChatTablesPreservingData(): void {

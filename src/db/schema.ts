@@ -62,4 +62,6 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_repo_id ON chunks(repo_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_created_at ON chunks(created_at);
+CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id);
 `;
