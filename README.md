@@ -72,6 +72,7 @@ Read more:
 - Star sync with pagination handling (manual via `Fetch Stars`).
 - Checksum-based diff sync for changed/new/removed stars.
 - README fetch pipeline with missing/failure tracking.
+- Adaptive batched README ingestion pipeline (feature-flagged rollout).
 - Local chunking + embedding generation.
 - Persistent chat sessions with ordered messages.
 - Session-aware search and follow-up flow on existing local embeddings.
@@ -133,6 +134,10 @@ Important variables:
 - `VITE_EMBEDDING_UI_UPDATE_MS` (100..2000)
 - `VITE_EMBEDDING_LARGE_LIBRARY_MODE` (`1` or `0`)
 - `VITE_EMBEDDING_LARGE_LIBRARY_THRESHOLD` (default `500`)
+- `VITE_README_BATCH_PIPELINE_V2` (`1` enables staged README->chunk->embed pipeline)
+- `VITE_README_BATCH_SIZE` (default `40`)
+- `VITE_EMBED_TRIGGER_THRESHOLD` (pending chunk threshold for rolling embed windows)
+- `VITE_EMBED_WINDOW_SIZE` (per rolling embed window)
 - `VITE_OLLAMA_BASE_URL` (optional default, must be localhost/127.0.0.1/[::1])
 - `VITE_OLLAMA_MODEL` (optional default, e.g. `nomic-embed-text`)
 - `VITE_OLLAMA_TIMEOUT_MS`
@@ -180,6 +185,11 @@ The app exposes indexing telemetry in UI so you can see:
 - checkpoint behavior,
 - queue depth,
 - worker pool downshift events.
+
+README batching pipeline controls:
+- `VITE_README_BATCH_PIPELINE_V2=1` enables batched README ingestion with adaptive concurrency and incremental chunk writes.
+- `VITE_README_BATCH_SIZE` tunes mini-batch write size (higher improves throughput, lower reduces memory spikes).
+- `VITE_EMBED_TRIGGER_THRESHOLD` and `VITE_EMBED_WINDOW_SIZE` control rolling embedding windows during README ingestion.
 
 ### Ollama Embedding Mode (Opt-in)
 

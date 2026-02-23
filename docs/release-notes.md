@@ -1,5 +1,20 @@
 # Release Notes
 
+## 2026-02-23 (README Batch Pipeline v2 + Incremental Sync)
+
+- Added feature-flagged staged sync pipeline (`VITE_README_BATCH_PIPELINE_V2`) for large star libraries.
+- README ingestion now supports adaptive concurrency with retry/rate-limit telemetry and cooldown downshift.
+- Added conditional README revalidation support and persisted validators:
+  - new repo fields: `readme_etag`, `readme_last_modified`
+  - request headers: `If-None-Match`, `If-Modified-Since`
+  - `304 Not Modified` path reuses previously indexed README checksum/content metadata.
+- Added mini-batch README processing callbacks to overlap README fetch with chunk upserts.
+- Added rolling embedding windows during sync (`VITE_EMBED_TRIGGER_THRESHOLD`, `VITE_EMBED_WINDOW_SIZE`) so first embeddings can appear before full README completion.
+- Persisted pipeline metrics in `index_meta` under `last_star_sync_pipeline_metrics` (star fetch time, README stage time, p95 README latency, first embedding timing).
+- Added/updated tests for new README client behavior:
+  - conditional revalidation
+  - batch callback execution
+
 ## 2026-02-23 (Search Uses Existing Local Index Only)
 
 - Removed automatic star refresh from search execution flow.

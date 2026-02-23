@@ -108,5 +108,77 @@ describe("github client integration", () => {
     expect(result.failedCount).toBe(1);
     expect(result.records.some((record) => (record.readmeText ?? "").includes("hello"))).toBe(true);
     expect(result.records.filter((record) => record.missingReadme)).toHaveLength(2);
+    expect(result.records.every((record) => record.notModified === false)).toBe(true);
+    expect(result.records.every((record) => "readmeEtag" in record)).toBe(true);
+  });
+
+  test("fetchReadmes supports conditional revalidation and batch callbacks", async () => {
+    const repos = [makeRepo(10), makeRepo(11)];
+    const readmeBase64 = btoa("fresh readme");
+    const capturedHeaders: string[] = [];
+    let batchCalls = 0;
+
+    const fetchImpl: typeof fetch = vi.fn(async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const headers = new Headers(init?.headers);
+      const ifNoneMatch = headers.get("if-none-match");
+      if (ifNoneMatch) {
+        capturedHeaders.push(ifNoneMatch);
+      }
+
+      if (url.endsWith("/repos/owner/repo-10/readme")) {
+        return new Response(null, {
+          status: 304,
+          headers: { etag: '"etag-10"', "last-modified": "Mon, 23 Feb 2026 00:00:00 GMT" },
+        });
+      }
+
+      return jsonResponse(
+        {
+          content: readmeBase64,
+          encoding: "base64",
+          html_url: "https://github.com/owner/repo-11/blob/main/README.md",
+        },
+        {
+          headers: { etag: '"etag-11"', "last-modified": "Mon, 23 Feb 2026 00:00:00 GMT" },
+        },
+      );
+    }) as typeof fetch;
+
+    const client = createGitHubApiClient({
+      accessToken: "token",
+      fetchImpl,
+      logger: {
+        debug: () => undefined,
+        warn: () => undefined,
+      },
+    });
+
+    const result = await client.fetchReadmes(repos, {
+      batchSize: 1,
+      previousSyncStateByRepoId: new Map([
+        [
+          10,
+          {
+            checksum: "previous-checksum",
+            readmeEtag: '"etag-10"',
+            readmeLastModified: "Mon, 22 Feb 2026 00:00:00 GMT",
+          },
+        ],
+      ]),
+      onBatch: async () => {
+        batchCalls += 1;
+      },
+    });
+
+    expect(batchCalls).toBeGreaterThanOrEqual(2);
+    expect(capturedHeaders).toContain('"etag-10"');
+    const notModified = result.records.find((record) => record.repoId === 10);
+    expect(notModified?.notModified).toBe(true);
+    expect(notModified?.checksum).toBe("previous-checksum");
+    expect(notModified?.readmeEtag).toBe('"etag-10"');
+    const modified = result.records.find((record) => record.repoId === 11);
+    expect(modified?.notModified).toBe(false);
+    expect(modified?.readmeText).toContain("fresh readme");
   });
 });
