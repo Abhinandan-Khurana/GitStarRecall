@@ -12,6 +12,7 @@ In scope:
 - Embeddings and vector index
 - Embedding model artifacts downloaded at runtime (browser cache)
 - Embedding runtime selection state (`webgpu` / `wasm`) and performance diagnostics
+- Optional local Ollama embedding endpoint configuration (`localhost` only)
 - Chat sessions and messages
 - User queries
 
@@ -35,6 +36,7 @@ Mitigations:
 - Add warning banner when PAT is used; recommend OAuth.
 - Use strict Content Security Policy (CSP).
 - Require explicit opt-in for local endpoints and show endpoint origin clearly.
+- Enforce localhost-only allowlist for Ollama embedding service base URL.
 
 ### T - Tampering
 Threats:
@@ -76,6 +78,7 @@ Mitigations:
 - Token stored in memory or encrypted storage.
 - Add “Clear all data” and “Clear token” actions.
 - Restrict debug logs to IDs/counts/timings; never log README plaintext by default.
+- Ollama embedding request payload must not include GitHub tokens or PAT values.
 
 ### D - Denial of Service
 Threats:
@@ -93,17 +96,19 @@ Mitigations:
 - Cap worker pool size and queue depth.
 - Adaptive micro-batch downshift on failures.
 - Deterministic fallback from `webgpu` to `wasm`.
+- Preload pending chunk queue once per run to avoid repeated hot-loop DB scans.
+- Buffer embedding writes to reduce checkpoint overhead and main-thread contention.
 
 ### E - Elevation of Privilege
 Threats:
 - Over-scoped GitHub token allows repo access beyond need.
 - Local LLM endpoints expose sensitive data to other local services.
-- Browser origin accidentally gains unintended access to privileged local-native runtimes.
+- Browser origin accidentally gains unintended access to privileged local runtime endpoints.
 
 Mitigations:
 - Use minimal GitHub scopes or fine-grained PAT.
 - Clearly label local endpoints and require explicit opt-in.
-- Keep browser embedding path default; local-native runtime integration remains explicit and isolated.
+- Keep browser embedding path default; local Ollama runtime integration remains explicit and isolated.
 
 ---
 
