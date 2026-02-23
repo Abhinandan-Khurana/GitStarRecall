@@ -15,6 +15,10 @@ import type {
 import { chunkRepos } from "../chunking/chunker";
 import { Embedder, type EmbeddingBackendPreference } from "../embeddings/Embedder";
 import { EmbeddingWorkerPool } from "../embeddings/WorkerPool";
+import {
+  OllamaEmbeddingClient,
+  type OllamaEmbeddingRuntimeInfo,
+} from "../embeddings/ollamaClient";
 import { float32ToBlob } from "../embeddings/vector";
 import { buildSyncPlan } from "../sync/plan";
 import { sortChatMessages } from "../chat/order";
@@ -101,6 +105,27 @@ type EmbeddingRunMetrics = {
   updatedAt: number;
 };
 
+type EmbeddingBackendIdentity =
+  | {
+      kind: "browser";
+      preferredBackend: EmbeddingBackendPreference;
+      selectedBackend: EmbeddingBackendPreference | null;
+      fallbackReason: string | null;
+    }
+  | {
+      kind: "ollama";
+      runtime: OllamaEmbeddingRuntimeInfo | null;
+      baseUrl: string;
+      model: string;
+    };
+
+type OllamaConnectionStatus = "idle" | "testing" | "connected" | "failed" | "inactive";
+
+type OllamaPreferenceSnapshot = {
+  baseUrl: string;
+  model: string;
+};
+
 function getPreferredEmbeddingBackend(): EmbeddingBackendPreference {
   const envPreferred = import.meta.env.VITE_EMBEDDING_BACKEND_PREFERRED;
   return envPreferred === "wasm" ? "wasm" : "webgpu";
@@ -126,6 +151,21 @@ function formatBackendIdentity(params: {
   return `${selectedBackend} (fallback from ${preferredBackend})`;
 }
 
+function formatEmbeddingBackendIdentity(identity: EmbeddingBackendIdentity): string {
+  if (identity.kind === "ollama") {
+    if (!identity.runtime) {
+      return `ollama (initializing: ${identity.baseUrl})`;
+    }
+    return `ollama-${identity.runtime.endpoint} (${identity.runtime.model})`;
+  }
+
+  return formatBackendIdentity({
+    preferredBackend: identity.preferredBackend,
+    selectedBackend: identity.selectedBackend,
+    fallbackReason: identity.fallbackReason,
+  });
+}
+
 function formatEmbeddingError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   const lower = message.toLowerCase();
@@ -142,6 +182,14 @@ function formatEmbeddingError(err: unknown): string {
   }
 
   return `Embedding failed: ${message}`;
+}
+
+function formatOllamaConnectionError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.toLowerCase().includes("localhost")) {
+    return "Ollama URL must be localhost, 127.0.0.1, or [::1].";
+  }
+  return message;
 }
 
 function computeContextAvailabilityDebug(
@@ -232,6 +280,193 @@ function detectDefaultEmbeddingPoolSize(): number {
   return 2;
 }
 
+function getDefaultOllamaBaseUrl(): string {
+  const raw = import.meta.env.VITE_OLLAMA_BASE_URL;
+  if (typeof raw === "string" && raw.trim()) {
+    return raw.trim();
+  }
+  return "http://localhost:11434";
+}
+
+function getDefaultOllamaModel(): string {
+  const raw = import.meta.env.VITE_OLLAMA_MODEL;
+  if (typeof raw === "string" && raw.trim()) {
+    return raw.trim();
+  }
+  return "nomic-embed-text";
+}
+
+function getOllamaTimeoutMs(): number {
+  const raw = Number(import.meta.env.VITE_OLLAMA_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.max(1_000, Math.trunc(raw));
+  }
+  return 30_000;
+}
+
+function getEmbeddingDbWriteBatchSize(): number {
+  const raw = Number(import.meta.env.VITE_EMBEDDING_DB_WRITE_BATCH_SIZE);
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.max(16, Math.min(2048, Math.trunc(raw)));
+  }
+  return 256;
+}
+
+function getEmbeddingUiUpdateIntervalMs(): number {
+  const raw = Number(import.meta.env.VITE_EMBEDDING_UI_UPDATE_MS);
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.max(100, Math.min(2000, Math.trunc(raw)));
+  }
+  return 300;
+}
+
+function getLargeLibraryThreshold(): number {
+  const raw = Number(import.meta.env.VITE_EMBEDDING_LARGE_LIBRARY_THRESHOLD);
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.max(100, Math.trunc(raw));
+  }
+  return 500;
+}
+
+function getLargeLibraryModeEnabled(): boolean {
+  const raw = import.meta.env.VITE_EMBEDDING_LARGE_LIBRARY_MODE;
+  return raw === undefined || raw === "1" || raw === "true";
+}
+
+function parseIsoToMs(iso: string): number {
+  const timestamp = new Date(iso).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function scoreRepoForEmbeddingPriority(repo: RepoRecord): number {
+  const now = Date.now();
+  const updatedAtMs = parseIsoToMs(repo.updatedAt);
+  const recencyDays = updatedAtMs > 0 ? Math.max(0, (now - updatedAtMs) / 86_400_000) : 3650;
+  const recencyScore = Math.max(0, 1 - recencyDays / 365);
+  const starScore = Math.log10(Math.max(1, repo.stars + 1));
+  const readmeScore = repo.readmeText && repo.readmeText.trim().length > 0 ? 1 : 0;
+  return starScore * 0.4 + recencyScore * 0.4 + readmeScore * 0.2;
+}
+
+const OLLAMA_EMBEDDING_CONSENT_KEY_PREFIX = "gitstarrecall.embedding.ollama.consent";
+const OLLAMA_EMBEDDING_PREF_KEY_PREFIX = "gitstarrecall.embedding.ollama.pref";
+const CHAT_SCOPE_PREFIX = "chat";
+const EMBEDDING_BACKEND_META_KEY = "embedding_active_backend";
+const EMBEDDING_MODEL_META_KEY = "embedding_active_model";
+const BROWSER_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
+const OLLAMA_BATCH_SIZE_CAP = 24;
+const OLLAMA_RESTART_BROWSER_ERROR = "__OLLAMA_RESTART_BROWSER__";
+
+function hashTokenScope(raw: string): string {
+  let hash = 0;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash = (hash << 5) - hash + raw.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function getChatScopeKey(accessToken: string | null): string | null {
+  if (!accessToken) {
+    return null;
+  }
+  return `${CHAT_SCOPE_PREFIX}:${hashTokenScope(accessToken)}`;
+}
+
+function getEmbeddingPreferenceScopeKey(accessToken: string | null): string {
+  if (!accessToken) {
+    return "anon";
+  }
+  return `token:${hashTokenScope(accessToken)}`;
+}
+
+function getOllamaConsentKey(scopeKey: string): string {
+  return `${OLLAMA_EMBEDDING_CONSENT_KEY_PREFIX}.${scopeKey}`;
+}
+
+function getOllamaPreferenceKey(scopeKey: string): string {
+  return `${OLLAMA_EMBEDDING_PREF_KEY_PREFIX}.${scopeKey}`;
+}
+
+function parseOllamaPreference(raw: string | null): OllamaPreferenceSnapshot | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const baseUrl = typeof parsed.baseUrl === "string" ? parsed.baseUrl.trim() : "";
+    const model = typeof parsed.model === "string" ? parsed.model.trim() : "";
+    if (!baseUrl || !model) {
+      return null;
+    }
+    return { baseUrl, model };
+  } catch {
+    return null;
+  }
+}
+
+function makeScopedSessionId(scopeKey: string): string {
+  return `${scopeKey}:${crypto.randomUUID()}`;
+}
+
+function isSessionInScope(sessionId: string, scopeKey: string): boolean {
+  return sessionId.startsWith(`${scopeKey}:`);
+}
+
+function mergeRestoredSessions(
+  restored: SearchSession[],
+  current: SearchSession[],
+): SearchSession[] {
+  const currentById = new Map(current.map((session) => [session.id, session]));
+  const merged: SearchSession[] = restored.map((session) => {
+    const existing = currentById.get(session.id);
+    if (!existing) {
+      return session;
+    }
+    if (existing.results.length === 0) {
+      return session;
+    }
+    return {
+      ...session,
+      results: existing.results,
+    };
+  });
+
+  const mergedIds = new Set(merged.map((session) => session.id));
+  for (const session of current) {
+    if (!mergedIds.has(session.id) && session.results.length > 0) {
+      merged.push(session);
+    }
+  }
+
+  merged.sort((a, b) => b.updatedAt - a.updatedAt);
+  return merged;
+}
+
+function mergeRestoredMessages(
+  restored: Record<string, ChatMessageRecord[]>,
+  current: Record<string, ChatMessageRecord[]>,
+): Record<string, ChatMessageRecord[]> {
+  const merged: Record<string, ChatMessageRecord[]> = { ...restored };
+  const keys = new Set([...Object.keys(restored), ...Object.keys(current)]);
+
+  for (const key of keys) {
+    const restoredList = restored[key] ?? [];
+    const currentList = current[key] ?? [];
+    if (restoredList.length === 0) {
+      merged[key] = currentList;
+      continue;
+    }
+    if (currentList.length === 0) {
+      merged[key] = restoredList;
+      continue;
+    }
+    merged[key] = currentList.length >= restoredList.length ? currentList : restoredList;
+  }
+
+  return merged;
+}
+
 function getEmbeddingPoolSize(): number {
   const fromEnv = Number(import.meta.env.VITE_EMBEDDING_POOL_SIZE);
   if (Number.isFinite(fromEnv) && fromEnv > 0) {
@@ -307,6 +542,11 @@ export default function UsagePage() {
   const [providerApiKey, setProviderApiKey] = useState("");
   const [allowRemoteProvider, setAllowRemoteProvider] = useState(false);
   const [allowLocalProvider, setAllowLocalProvider] = useState(false);
+  const [allowOllamaEmbedding, setAllowOllamaEmbedding] = useState(false);
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState(getDefaultOllamaBaseUrl());
+  const [ollamaModel, setOllamaModel] = useState(getDefaultOllamaModel());
+  const [ollamaConnectionStatus, setOllamaConnectionStatus] = useState<OllamaConnectionStatus>("idle");
+  const [ollamaConnectionMessage, setOllamaConnectionMessage] = useState<string | null>(null);
   const [llmPrompt, setLlmPrompt] = useState("");
   const [llmAnswer, setLlmAnswer] = useState("");
   const [llmError, setLlmError] = useState<string | null>(null);
@@ -315,11 +555,19 @@ export default function UsagePage() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const restoreRequestTrackerRef = useRef(createRestoreRequestTracker());
   const previousIsAuthenticatedRef = useRef(isAuthenticated);
+  const chatScopeKey = useMemo(() => getChatScopeKey(accessToken), [accessToken]);
+  const embeddingPreferenceScopeKey = useMemo(
+    () => getEmbeddingPreferenceScopeKey(accessToken),
+    [accessToken],
+  );
+  const previousChatScopeKeyRef = useRef<string | null>(chatScopeKey);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
     [sessions, activeSessionId],
   );
+  const sessionsRef = useRef<SearchSession[]>(sessions);
+  const sessionMessagesByIdRef = useRef<Record<string, ChatMessageRecord[]>>(sessionMessagesById);
   const selectedProvider = useMemo<LLMProviderDefinition>(() => {
     return (
       providerDefinitions.find((provider) => provider.id === providerId) ?? providerDefinitions[0]
@@ -340,6 +588,14 @@ export default function UsagePage() {
       new Set(activeResults.map((result) => result.language).filter((value): value is string => Boolean(value))),
     ).sort((a, b) => a.localeCompare(b));
   }, [activeResults]);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
+  useEffect(() => {
+    sessionMessagesByIdRef.current = sessionMessagesById;
+  }, [sessionMessagesById]);
 
   const availableTopics = useMemo(() => {
     return Array.from(
@@ -376,6 +632,17 @@ export default function UsagePage() {
   }, [activeResults, languageFilter, topicFilter, updatedWithinDaysFilter]);
 
   const restoreHistory = useCallback(async () => {
+    if (!chatScopeKey) {
+      setSessions([]);
+      setSessionMessagesById({});
+      setActiveSessionId(null);
+      setSessionMode("new");
+      setHistoryDataSource(null);
+      setHistoryLastRestoredAt(null);
+      setHistoryLoadState("empty");
+      return;
+    }
+
     const requestId = restoreRequestTrackerRef.current.nextRequestId();
     setHistoryLoadState("loading");
 
@@ -388,9 +655,28 @@ export default function UsagePage() {
         return;
       }
 
-      setSessions(params.restoreResult.sessions);
-      setSessionMessagesById(params.restoreResult.messagesBySessionId);
-      setActiveSessionId(params.restoreResult.activeSessionId);
+      const mergedSessions = mergeRestoredSessions(
+        params.restoreResult.sessions,
+        sessionsRef.current,
+      );
+      const mergedMessages = mergeRestoredMessages(
+        params.restoreResult.messagesBySessionId,
+        sessionMessagesByIdRef.current,
+      );
+      setSessions(mergedSessions);
+      setSessionMessagesById(mergedMessages);
+      setActiveSessionId((previous) => {
+        if (previous && mergedSessions.some((session) => session.id === previous)) {
+          return previous;
+        }
+        if (
+          params.restoreResult.activeSessionId &&
+          mergedSessions.some((session) => session.id === params.restoreResult.activeSessionId)
+        ) {
+          return params.restoreResult.activeSessionId;
+        }
+        return mergedSessions[0]?.id ?? null;
+      });
       setSessionMode(params.restoreResult.sessionMode);
       setHistoryLoadState(params.restoreResult.historyLoadState);
       setHistoryDataSource(params.source);
@@ -412,8 +698,11 @@ export default function UsagePage() {
 
     try {
       const database = await getLocalDatabase();
+      const scopedPersistedSessions = database
+        .listChatSessions()
+        .filter((session) => isSessionInScope(session.id, chatScopeKey));
       let restoreResult = buildHistoryRestoreResult({
-        persistedSessions: database.listChatSessions(),
+        persistedSessions: scopedPersistedSessions,
         previousActiveSessionId: activeSessionId,
         listSessionMessages: (sessionId) => sortChatMessages(database.listChatMessages(sessionId)),
       });
@@ -421,15 +710,18 @@ export default function UsagePage() {
 
       if (restoreResult.sessions.length === 0) {
         const backupSnapshot = await loadChatBackup();
-        if (backupSnapshot.sessions.length > 0) {
+        const scopedBackupSessions = backupSnapshot.sessions.filter((session) =>
+          isSessionInScope(session.id, chatScopeKey),
+        );
+        if (scopedBackupSessions.length > 0) {
           restoreResult = buildHistoryRestoreResult({
-            persistedSessions: backupSnapshot.sessions,
+            persistedSessions: scopedBackupSessions,
             previousActiveSessionId: activeSessionId,
             listSessionMessages: (sessionId) => backupSnapshot.messagesBySessionId[sessionId] ?? [],
           });
           source = backupSnapshot.source ?? "indexeddb";
 
-          for (const session of backupSnapshot.sessions) {
+          for (const session of scopedBackupSessions) {
             try {
               await database.upsertChatSession(session);
             } catch {
@@ -437,7 +729,10 @@ export default function UsagePage() {
             }
           }
 
-          const backupMessages = Object.values(backupSnapshot.messagesBySessionId).flat();
+          const scopedSessionIds = new Set(scopedBackupSessions.map((session) => session.id));
+          const backupMessages = Object.values(backupSnapshot.messagesBySessionId)
+            .flat()
+            .filter((message) => scopedSessionIds.has(message.sessionId));
           for (const message of backupMessages) {
             try {
               await database.addChatMessage(message);
@@ -467,9 +762,12 @@ export default function UsagePage() {
       }
 
       const backupSnapshot = await loadChatBackup();
-      if (backupSnapshot.sessions.length > 0) {
+      const scopedBackupSessions = backupSnapshot.sessions.filter((session) =>
+        isSessionInScope(session.id, chatScopeKey),
+      );
+      if (scopedBackupSessions.length > 0) {
         const restoreResult = buildHistoryRestoreResult({
-          persistedSessions: backupSnapshot.sessions,
+          persistedSessions: scopedBackupSessions,
           previousActiveSessionId: activeSessionId,
           listSessionMessages: (sessionId) => backupSnapshot.messagesBySessionId[sessionId] ?? [],
         });
@@ -484,7 +782,7 @@ export default function UsagePage() {
       setHistoryLastRestoredAt(null);
       setHistoryLoadState("error");
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, chatScopeKey]);
 
   useEffect(() => {
     void restoreHistory();
@@ -498,6 +796,20 @@ export default function UsagePage() {
       void restoreHistory();
     }
   }, [isAuthenticated, restoreHistory]);
+
+  useEffect(() => {
+    const previousScope = previousChatScopeKeyRef.current;
+    previousChatScopeKeyRef.current = chatScopeKey;
+    if (previousScope === chatScopeKey) {
+      return;
+    }
+
+    setSessions([]);
+    setSessionMessagesById({});
+    setActiveSessionId(null);
+    setSessionMode("new");
+    void restoreHistory();
+  }, [chatScopeKey, restoreHistory]);
 
   useEffect(() => {
     const flushPendingCheckpoint = () => {
@@ -577,6 +889,46 @@ export default function UsagePage() {
     setActiveSessionId(sessions[0].id);
   }, [sessions, activeSessionId]);
 
+  useEffect(() => {
+    const fallbackPreference: OllamaPreferenceSnapshot = {
+      baseUrl: getDefaultOllamaBaseUrl(),
+      model: getDefaultOllamaModel(),
+    };
+    try {
+      const storedConsent = localStorage.getItem(getOllamaConsentKey(embeddingPreferenceScopeKey));
+      const storedPreference = parseOllamaPreference(
+        localStorage.getItem(getOllamaPreferenceKey(embeddingPreferenceScopeKey)),
+      );
+      setAllowOllamaEmbedding(storedConsent === "1");
+      setOllamaBaseUrl(storedPreference?.baseUrl ?? fallbackPreference.baseUrl);
+      setOllamaModel(storedPreference?.model ?? fallbackPreference.model);
+    } catch {
+      setAllowOllamaEmbedding(false);
+      setOllamaBaseUrl(fallbackPreference.baseUrl);
+      setOllamaModel(fallbackPreference.model);
+    }
+    setOllamaConnectionStatus("idle");
+    setOllamaConnectionMessage(null);
+  }, [embeddingPreferenceScopeKey]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        getOllamaConsentKey(embeddingPreferenceScopeKey),
+        allowOllamaEmbedding ? "1" : "0",
+      );
+      localStorage.setItem(
+        getOllamaPreferenceKey(embeddingPreferenceScopeKey),
+        JSON.stringify({
+          baseUrl: ollamaBaseUrl.trim() || getDefaultOllamaBaseUrl(),
+          model: ollamaModel.trim() || getDefaultOllamaModel(),
+        } satisfies OllamaPreferenceSnapshot),
+      );
+    } catch {
+      // ignore local preference persistence errors
+    }
+  }, [allowOllamaEmbedding, embeddingPreferenceScopeKey, ollamaBaseUrl, ollamaModel]);
+
   /* Chat scroll is handled inside SessionChat (only the message list scrolls, not the page) */
 
   const handleProviderChange = (nextProviderId: LLMProviderId) => {
@@ -609,6 +961,28 @@ export default function UsagePage() {
       setError(err instanceof Error ? err.message : "Unable to start OAuth");
     }
   };
+
+  const handleTestOllamaConnection = useCallback(async () => {
+    const normalizedBaseUrl = ollamaBaseUrl.trim() || getDefaultOllamaBaseUrl();
+    const normalizedModel = ollamaModel.trim() || getDefaultOllamaModel();
+    setOllamaConnectionStatus("testing");
+    setOllamaConnectionMessage(null);
+    try {
+      const client = new OllamaEmbeddingClient({
+        baseUrl: normalizedBaseUrl,
+        model: normalizedModel,
+        timeoutMs: getOllamaTimeoutMs(),
+      });
+      const runtime = await client.probeRuntime();
+      setOllamaConnectionStatus("connected");
+      setOllamaConnectionMessage(
+        `Connected (${runtime.endpoint}) · model ${runtime.model} · ${runtime.availableModels.length} models detected`,
+      );
+    } catch (err) {
+      setOllamaConnectionStatus("failed");
+      setOllamaConnectionMessage(formatOllamaConnectionError(err));
+    }
+  }, [ollamaBaseUrl, ollamaModel]);
 
   const syncStarsToLocal = async (
     database: Awaited<ReturnType<typeof getLocalDatabase>>,
@@ -789,7 +1163,7 @@ export default function UsagePage() {
     const localChunkCount = database.getChunkCount();
     const localEmbeddingCount = database.getEmbeddingCount();
     const readmeCount = readmeResult.records.length - readmeResult.missingCount - readmeResult.failedCount;
-    const hasPendingEmbeddingChunks = database.getChunksToEmbed(1).length > 0;
+    const hasPendingEmbeddingChunks = database.getPendingEmbeddingChunkCount() > 0;
     setIndexingStatus((previous) =>
       previous
         ? {
@@ -850,37 +1224,173 @@ export default function UsagePage() {
     }
   };
 
-  const generateEmbeddings = async (database: Awaited<ReturnType<typeof getLocalDatabase>>) => {
+  const generateEmbeddings = async (
+    database: Awaited<ReturnType<typeof getLocalDatabase>>,
+    options?: { forceBrowser?: boolean },
+  ) => {
     let embedder: Embedder | null = null;
     let embeddingPool: EmbeddingWorkerPool | null = null;
+    let restartWithBrowser = false;
     try {
       setFetchPhase("Initializing embedding model (this may take a moment)…");
       setIndexingStatus((previous) =>
         previous
           ? {
-            ...previous,
-            phase: "Initializing embedding model",
-          }
+              ...previous,
+              phase: "Initializing embedding model",
+            }
           : previous,
       );
 
       const preferredBackend = getPreferredEmbeddingBackend();
+      const poolSize = getEmbeddingPoolSize();
+      const workerBatchSize = getEmbeddingWorkerBatchSize();
       embedder = new Embedder({ preferredBackend });
       embeddingPool = new EmbeddingWorkerPool({
-        poolSize: getEmbeddingPoolSize(),
-        workerBatchSize: getEmbeddingWorkerBatchSize(),
+        poolSize,
+        maxPoolSize: 2,
+        workerBatchSize,
         preferredBackend,
       });
-      const BATCH_SIZE = 16;
+      const activeEmbeddingPool = embeddingPool;
+      const dbWriteBatchSize = getEmbeddingDbWriteBatchSize();
+      const uiUpdateIntervalMs = getEmbeddingUiUpdateIntervalMs();
+      const maxBatchChars = 32_000;
+      const largeLibraryModeEnabled = getLargeLibraryModeEnabled();
+      const largeLibraryThreshold = getLargeLibraryThreshold();
+      const forceBrowser = options?.forceBrowser === true;
+      const ollamaEnabled = allowOllamaEmbedding && !forceBrowser;
+      const resolvedOllamaBaseUrl = ollamaBaseUrl.trim() || getDefaultOllamaBaseUrl();
+      const resolvedOllamaModel = ollamaModel.trim() || getDefaultOllamaModel();
+      const ollamaTimeoutMs = getOllamaTimeoutMs();
+      let ollamaRuntime: OllamaEmbeddingRuntimeInfo | null = null;
+      let ollamaClient: OllamaEmbeddingClient | null = null;
       const initialPoolStatus = embeddingPool.getStatus();
-      const initialBackendIdentity = formatBackendIdentity({
+      let backendIdentity: EmbeddingBackendIdentity = {
+        kind: "browser",
         preferredBackend: initialPoolStatus.preferredBackend,
         selectedBackend: initialPoolStatus.selectedBackend,
         fallbackReason: initialPoolStatus.backendFallbackReason,
+      };
+      let activeBackendKind: "browser" | "ollama" = "browser";
+      let activeEmbeddingModel = BROWSER_EMBEDDING_MODEL;
+
+      if (ollamaEnabled) {
+        try {
+          const nextOllamaClient = new OllamaEmbeddingClient({
+            baseUrl: resolvedOllamaBaseUrl,
+            model: resolvedOllamaModel,
+            timeoutMs: ollamaTimeoutMs,
+          });
+          ollamaRuntime = await nextOllamaClient.probeRuntime();
+          ollamaClient = nextOllamaClient;
+          activeBackendKind = "ollama";
+          activeEmbeddingModel = resolvedOllamaModel;
+          backendIdentity = {
+            kind: "ollama",
+            runtime: ollamaRuntime,
+            baseUrl: resolvedOllamaBaseUrl,
+            model: resolvedOllamaModel,
+          };
+          setOllamaConnectionStatus("connected");
+          setOllamaConnectionMessage(
+            `Connected (${ollamaRuntime.endpoint}) · model ${ollamaRuntime.model}`,
+          );
+        } catch (ollamaError) {
+          captureLocalWarn(
+            "ollama_embedding_unavailable",
+            ollamaError instanceof Error ? ollamaError.message : String(ollamaError),
+          );
+          setOllamaConnectionStatus("inactive");
+          setOllamaConnectionMessage(
+            `Ollama unavailable, using browser fallback: ${formatOllamaConnectionError(ollamaError)}`,
+          );
+        }
+      } else if (forceBrowser && allowOllamaEmbedding) {
+        setOllamaConnectionStatus("inactive");
+        setOllamaConnectionMessage("Ollama disabled for this run after fallback to browser.");
+      }
+
+      const existingBackend = database.getIndexMetaValue(EMBEDDING_BACKEND_META_KEY);
+      const existingModel = database.getIndexMetaValue(EMBEDDING_MODEL_META_KEY);
+      if (
+        database.getEmbeddingCount() > 0 &&
+        (existingBackend !== activeBackendKind || existingModel !== activeEmbeddingModel)
+      ) {
+        await database.clearEmbeddings();
+        await database.upsertIndexMeta({
+          key: "embedding_job_cursor",
+          value: "",
+          updatedAt: Date.now(),
+        });
+        setStarsSummary(
+          `Embedding model changed (${existingModel ?? "unknown"} -> ${activeEmbeddingModel}); rebuilding index.`,
+        );
+      }
+      await database.upsertIndexMeta({
+        key: EMBEDDING_BACKEND_META_KEY,
+        value: activeBackendKind,
+        updatedAt: Date.now(),
       });
-      const totalChunkCount = database.getChunkCount();
-      const initialEmbeddingCount = database.getEmbeddingCount();
-      const embeddingTarget = Math.max(totalChunkCount - initialEmbeddingCount, 0);
+      await database.upsertIndexMeta({
+        key: EMBEDDING_MODEL_META_KEY,
+        value: activeEmbeddingModel,
+        updatedAt: Date.now(),
+      });
+
+      const repoCount = database.getRepoCount();
+      const largeLibraryMode = largeLibraryModeEnabled && repoCount > largeLibraryThreshold;
+      const pendingChunks = database.listPendingChunksForEmbedding();
+      if (largeLibraryMode && pendingChunks.length > 0) {
+        const repos = database.listRepos();
+        const rankByRepo = new Map<number, number>();
+        repos
+          .sort((a, b) => scoreRepoForEmbeddingPriority(b) - scoreRepoForEmbeddingPriority(a))
+          .forEach((repo, index) => {
+            rankByRepo.set(repo.id, index);
+          });
+        pendingChunks.sort((a, b) => {
+          const rankA = rankByRepo.get(a.repoId) ?? Number.MAX_SAFE_INTEGER;
+          const rankB = rankByRepo.get(b.repoId) ?? Number.MAX_SAFE_INTEGER;
+          if (rankA !== rankB) {
+            return rankA - rankB;
+          }
+          if (a.createdAt !== b.createdAt) {
+            return a.createdAt - b.createdAt;
+          }
+          return a.id.localeCompare(b.id);
+        });
+      }
+      const embeddingTarget = pendingChunks.length;
+      const pendingPlan = database.getPendingChunksQueryPlan();
+      await database.upsertIndexMeta({
+        key: "embedding_job_mode",
+        value: largeLibraryMode ? "large-library" : "standard",
+        updatedAt: Date.now(),
+      });
+      await database.upsertIndexMeta({
+        key: "embedding_job_started_at",
+        value: String(Date.now()),
+        updatedAt: Date.now(),
+      });
+      await database.upsertIndexMeta({
+        key: "embedding_job_query_plan",
+        value: pendingPlan,
+        updatedAt: Date.now(),
+      });
+      const cursorChunkId = database.getIndexMetaValue("embedding_job_cursor");
+      let queueCursor = 0;
+      if (cursorChunkId) {
+        const foundIndex = pendingChunks.findIndex((chunk) => chunk.id === cursorChunkId);
+        if (foundIndex === 0) {
+          queueCursor = foundIndex;
+        } else if (foundIndex > 0) {
+          captureLocalWarn(
+            "embedding_resume_cursor_reset",
+            `resetting cursor to pending head because ${foundIndex} pending chunks exist before cursor`,
+          );
+        }
+      }
       let processedCount = 0;
       let duplicateHits = 0;
       let batchCount = 0;
@@ -888,21 +1398,27 @@ export default function UsagePage() {
       let totalDbCheckpointMs = 0;
       let lastBatchEmbedLatencyMs = 0;
       let lastDbCheckpointMs = 0;
-      const localEmbeddingCache = new Map<string, Float32Array>();
+      const localEmbeddingCache = new Map<string, { model: string; vector: Float32Array }>();
+      const embeddingBuffer: EmbeddingRecord[] = [];
       const startMs = Date.now();
+      let lastUiUpdateAt = 0;
       const initialCheckpointStatus = database.getEmbeddingCheckpointStatus();
-      let peakQueueDepth = database.getPendingEmbeddingChunkCount();
+      let peakQueueDepth = Math.max(embeddingTarget - queueCursor, 0);
+      let nextWorkerBatchSize = Math.max(
+        1,
+        Math.min(workerBatchSize, ollamaClient ? OLLAMA_BATCH_SIZE_CAP : 32),
+      );
       setIndexingStatus((previous) =>
         previous
           ? {
-            ...previous,
-            phase: "Generating embeddings",
-            embeddingTarget,
-          }
+              ...previous,
+              phase: "Generating embeddings",
+              embeddingTarget,
+            }
           : previous,
       );
       setEmbeddingRunMetrics({
-        backendIdentity: initialBackendIdentity,
+        backendIdentity: formatEmbeddingBackendIdentity(backendIdentity),
         configuredPoolSize: initialPoolStatus.configuredPoolSize,
         activePoolSize: initialPoolStatus.activePoolSize,
         poolDownshifted: initialPoolStatus.downshifted,
@@ -923,32 +1439,121 @@ export default function UsagePage() {
         updatedAt: Date.now(),
       });
 
-      // Process embeddings incrementally so partial results are searchable quickly.
-      while (true) {
-        const chunks = database.getChunksToEmbed(BATCH_SIZE);
+      const flushEmbeddingBuffer = async (forced: boolean) => {
+        if (embeddingBuffer.length === 0) {
+          return;
+        }
+        if (!forced && embeddingBuffer.length < dbWriteBatchSize) {
+          return;
+        }
+        const checkpointStart = performance.now();
+        const flushed = embeddingBuffer.splice(0, embeddingBuffer.length);
+        await database.upsertEmbeddings(flushed);
+        lastDbCheckpointMs = performance.now() - checkpointStart;
+        totalDbCheckpointMs += lastDbCheckpointMs;
+      };
+
+      const publishProgress = async (force: boolean) => {
+        const now = Date.now();
+        if (!force && now - lastUiUpdateAt < uiUpdateIntervalMs) {
+          return;
+        }
+        lastUiUpdateAt = now;
+        const elapsedSeconds = Math.max((now - startMs) / 1000, 1);
+        const speed = processedCount / elapsedSeconds;
+        const remaining = Math.max(embeddingTarget - processedCount, 0);
+        const etaSeconds = speed > 0 ? Math.ceil(remaining / speed) : 0;
+        const queueDepth = Math.max(embeddingTarget - processedCount, 0);
+        const checkpointStatus = database.getEmbeddingCheckpointStatus();
+        const poolStatus = activeEmbeddingPool.getStatus();
+        if (backendIdentity.kind === "browser") {
+          backendIdentity = {
+            kind: "browser",
+            preferredBackend: poolStatus.preferredBackend,
+            selectedBackend: poolStatus.selectedBackend,
+            fallbackReason: poolStatus.backendFallbackReason,
+          };
+        }
+        peakQueueDepth = Math.max(peakQueueDepth, queueDepth);
+        setFetchPhase(`Generating embeddings… ${processedCount}/${embeddingTarget} completed`);
+        setIndexingStatus((previous) =>
+          previous
+            ? {
+                ...previous,
+                phase: "Generating embeddings",
+                embeddingsCreated: processedCount,
+                embeddingTarget,
+                duplicateEmbeddingHits: duplicateHits,
+              }
+            : previous,
+        );
+        setStarsSummary(
+          `Indexing in progress: ${processedCount}/${embeddingTarget} embeddings ` +
+            `(cache hits: ${duplicateHits}, ~${Math.max(0, etaSeconds)}s remaining).`,
+        );
+        setEmbeddingRunMetrics({
+          backendIdentity: formatEmbeddingBackendIdentity(backendIdentity),
+          configuredPoolSize: poolStatus.configuredPoolSize,
+          activePoolSize: poolStatus.activePoolSize,
+          poolDownshifted: poolStatus.downshifted,
+          poolDownshiftReason: poolStatus.downshiftReason,
+          batchCount,
+          embeddingsProcessed: processedCount,
+          embeddingsPerSecond: speed,
+          avgBatchEmbedLatencyMs: batchCount > 0 ? totalBatchEmbedLatencyMs / batchCount : 0,
+          lastBatchEmbedLatencyMs,
+          avgDbCheckpointMs: batchCount > 0 ? totalDbCheckpointMs / batchCount : 0,
+          lastDbCheckpointMs,
+          checkpointEveryEmbeddings: checkpointStatus.everyEmbeddings,
+          checkpointEveryMs: checkpointStatus.everyMs,
+          pendingEmbeddingsSinceCheckpoint: checkpointStatus.pendingEmbeddings,
+          lastCheckpointAt: checkpointStatus.lastCheckpointAt,
+          queueDepth,
+          peakQueueDepth,
+          updatedAt: now,
+        });
+      };
+
+      while (queueCursor < pendingChunks.length) {
+        const batchStart = queueCursor;
+        const batchSizeCap = ollamaClient ? OLLAMA_BATCH_SIZE_CAP : 32;
+        let batchSize = Math.max(1, Math.min(nextWorkerBatchSize, batchSizeCap));
+        let batchChars = 0;
+        while (batchStart + batchSize <= pendingChunks.length) {
+          const nextChunk = pendingChunks[batchStart + batchSize - 1];
+          if (!nextChunk) {
+            break;
+          }
+          batchChars += nextChunk.text.length;
+          if (batchChars > maxBatchChars && batchSize > 1) {
+            batchSize -= 1;
+            break;
+          }
+          if (batchSize >= Math.min(nextWorkerBatchSize, batchSizeCap)) {
+            break;
+          }
+          batchSize += 1;
+        }
+        const chunks = pendingChunks.slice(batchStart, batchStart + batchSize);
+        queueCursor += chunks.length;
         if (chunks.length === 0) {
           break;
         }
 
         const batchEmbedStart = performance.now();
-
-        setFetchPhase(
-          `Generating embeddings… ${processedCount}/${embeddingTarget} completed`,
-        );
-
-        const embeddingRecords: EmbeddingRecord[] = [];
         const uncachedItems: Array<{ chunkId: string; text: string }> = [];
+        const batchModel = ollamaClient ? resolvedOllamaModel : BROWSER_EMBEDDING_MODEL;
 
         for (const chunk of chunks) {
-          const cachedVector = localEmbeddingCache.get(chunk.text);
-          if (cachedVector) {
+          const cachedEntry = localEmbeddingCache.get(chunk.text);
+          if (cachedEntry && cachedEntry.model === batchModel) {
             duplicateHits += 1;
-            embeddingRecords.push({
+            embeddingBuffer.push({
               id: crypto.randomUUID(),
               chunkId: chunk.id,
-              model: "Xenova/all-MiniLM-L6-v2",
-              dimension: cachedVector.length,
-              vectorBlob: float32ToBlob(cachedVector),
+              model: cachedEntry.model,
+              dimension: cachedEntry.vector.length,
+              vectorBlob: float32ToBlob(cachedEntry.vector),
               createdAt: Date.now(),
             });
           } else {
@@ -960,42 +1565,67 @@ export default function UsagePage() {
         }
 
         if (uncachedItems.length > 0) {
-          const batchResults = await embeddingPool.embedBatch(uncachedItems.map((item) => item.text));
-          if (batchResults.length !== uncachedItems.length) {
+          const texts = uncachedItems.map((item) => item.text);
+          let vectors: Array<Float32Array | null> = [];
+          let usedBrowserBatch = false;
+          if (ollamaClient) {
+            try {
+              const ollamaVectors = await ollamaClient.embedBatch(texts);
+              vectors = ollamaVectors;
+            } catch (ollamaError) {
+              captureLocalWarn(
+                "ollama_embedding_batch_failed",
+                ollamaError instanceof Error ? ollamaError.message : String(ollamaError),
+              );
+              setOllamaConnectionStatus("inactive");
+              setOllamaConnectionMessage(
+                `Ollama failed during indexing; restarting on browser backend. ${formatOllamaConnectionError(
+                  ollamaError,
+                )}`,
+              );
+              throw new Error(OLLAMA_RESTART_BROWSER_ERROR);
+            }
+          } else {
+            usedBrowserBatch = true;
+            const poolStatus = activeEmbeddingPool.getStatus();
+            if (poolStatus.selectedBackend === "webgpu") {
+              activeEmbeddingPool.setConcurrency(1);
+            } else if (!poolStatus.downshifted) {
+              activeEmbeddingPool.setConcurrency(getEmbeddingPoolSize());
+            }
+            const batchResults = await activeEmbeddingPool.embedBatch(texts);
+            vectors = batchResults.map((item) => item.embedding);
+          }
+          if (vectors.length !== uncachedItems.length) {
             throw new Error(
-              `embedding batch result length mismatch: expected ${uncachedItems.length}, got ${batchResults.length}`,
+              `embedding batch result length mismatch: expected ${uncachedItems.length}, got ${vectors.length}`,
             );
           }
 
           for (let i = 0; i < uncachedItems.length; i += 1) {
             const item = uncachedItems[i];
-            const batchItem = batchResults[i];
-            let vector = batchItem.embedding;
-
-            // Per-item fallback: retry failed batch entry as a single embedding request.
-            if (!vector || batchItem.error) {
+            let vector = vectors[i];
+            let vectorModel = usedBrowserBatch ? BROWSER_EMBEDDING_MODEL : resolvedOllamaModel;
+            if (!vector) {
               try {
                 vector = await embedder.embed(item.text);
-                captureLocalWarn(
-                  "embedding_batch_item_recovered",
-                  `chunk_id=${item.chunkId}; reason=${batchItem.error ?? "missing embedding in batch response"}`,
-                );
+                vectorModel = BROWSER_EMBEDDING_MODEL;
+                captureLocalWarn("embedding_batch_item_recovered", `chunk_id=${item.chunkId}`);
               } catch (singleErr) {
                 throw new Error(
-                  `embedding batch item failed for chunk ${item.chunkId}: ${batchItem.error ?? "unknown"}; ` +
-                  `single_retry=${singleErr instanceof Error ? singleErr.message : String(singleErr)}`,
+                  `embedding batch item failed for chunk ${item.chunkId}; single_retry=${
+                    singleErr instanceof Error ? singleErr.message : String(singleErr)
+                  }`,
                 );
               }
             }
-
             if (localEmbeddingCache.size < 4_000) {
-              localEmbeddingCache.set(item.text, vector);
+              localEmbeddingCache.set(item.text, { model: vectorModel, vector });
             }
-
-            embeddingRecords.push({
+            embeddingBuffer.push({
               id: crypto.randomUUID(),
               chunkId: item.chunkId,
-              model: "Xenova/all-MiniLM-L6-v2",
+              model: vectorModel,
               dimension: vector.length,
               vectorBlob: float32ToBlob(vector),
               createdAt: Date.now(),
@@ -1003,70 +1633,31 @@ export default function UsagePage() {
           }
         }
 
-        const batchEmbedLatencyMs = performance.now() - batchEmbedStart;
-        const checkpointStart = performance.now();
-        await database.upsertEmbeddings(embeddingRecords);
-        const dbCheckpointMs = performance.now() - checkpointStart;
+        lastBatchEmbedLatencyMs = performance.now() - batchEmbedStart;
         processedCount += chunks.length;
         batchCount += 1;
-        totalBatchEmbedLatencyMs += batchEmbedLatencyMs;
-        totalDbCheckpointMs += dbCheckpointMs;
-        lastBatchEmbedLatencyMs = batchEmbedLatencyMs;
-        lastDbCheckpointMs = dbCheckpointMs;
-        const elapsedSeconds = Math.max((Date.now() - startMs) / 1000, 1);
-        const speed = processedCount / elapsedSeconds;
-        const remaining = Math.max(embeddingTarget - processedCount, 0);
-        const etaSeconds = speed > 0 ? Math.ceil(remaining / speed) : 0;
-        const queueDepth = database.getPendingEmbeddingChunkCount();
-        const checkpointStatus = database.getEmbeddingCheckpointStatus();
-        const poolStatus = embeddingPool.getStatus();
-        const backendIdentity = formatBackendIdentity({
-          preferredBackend: poolStatus.preferredBackend,
-          selectedBackend: poolStatus.selectedBackend,
-          fallbackReason: poolStatus.backendFallbackReason,
-        });
-        peakQueueDepth = Math.max(peakQueueDepth, queueDepth);
-        setIndexingStatus((previous) =>
-          previous
-            ? {
-              ...previous,
-              phase: "Generating embeddings",
-              embeddingsCreated: processedCount,
-              embeddingTarget,
-              duplicateEmbeddingHits: duplicateHits,
-            }
-            : previous,
-        );
-        setStarsSummary(
-          `Indexing in progress: ${processedCount}/${embeddingTarget} embeddings ` +
-          `(cache hits: ${duplicateHits}, ~${Math.max(0, etaSeconds)}s remaining).`,
-        );
-        setEmbeddingRunMetrics({
-          backendIdentity,
-          configuredPoolSize: poolStatus.configuredPoolSize,
-          activePoolSize: poolStatus.activePoolSize,
-          poolDownshifted: poolStatus.downshifted,
-          poolDownshiftReason: poolStatus.downshiftReason,
-          batchCount,
-          embeddingsProcessed: processedCount,
-          embeddingsPerSecond: speed,
-          avgBatchEmbedLatencyMs: totalBatchEmbedLatencyMs / batchCount,
-          lastBatchEmbedLatencyMs,
-          avgDbCheckpointMs: totalDbCheckpointMs / batchCount,
-          lastDbCheckpointMs,
-          checkpointEveryEmbeddings: checkpointStatus.everyEmbeddings,
-          checkpointEveryMs: checkpointStatus.everyMs,
-          pendingEmbeddingsSinceCheckpoint: checkpointStatus.pendingEmbeddings,
-          lastCheckpointAt: checkpointStatus.lastCheckpointAt,
-          queueDepth,
-          peakQueueDepth,
+        totalBatchEmbedLatencyMs += lastBatchEmbedLatencyMs;
+        const dynamicBatchCap = ollamaClient ? OLLAMA_BATCH_SIZE_CAP : 32;
+        if (lastBatchEmbedLatencyMs > 2_500) {
+          nextWorkerBatchSize = Math.max(1, Math.floor(nextWorkerBatchSize / 2));
+        } else if (lastBatchEmbedLatencyMs < 900) {
+          nextWorkerBatchSize = Math.min(dynamicBatchCap, nextWorkerBatchSize + 1);
+        }
+        await flushEmbeddingBuffer(false);
+        await database.upsertIndexMeta({
+          key: "embedding_job_cursor",
+          value: String(chunks[chunks.length - 1]?.id ?? ""),
           updatedAt: Date.now(),
         });
-
-        await new Promise((resolve) => {
-          setTimeout(resolve, 0);
+        await database.upsertIndexMeta({
+          key: "embedding_job_last_repo_id",
+          value: String(chunks[chunks.length - 1]?.repoId ?? 0),
+          updatedAt: Date.now(),
         });
+        await publishProgress(false);
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
+      await flushEmbeddingBuffer(true);
 
       const finalRepoCount = database.getRepoCount();
       const finalChunkCount = database.getChunkCount();
@@ -1075,37 +1666,45 @@ export default function UsagePage() {
       setIndexingStatus((previous) =>
         previous
           ? {
-            ...previous,
-            phase: "Indexing complete",
-            repoTotal: finalRepoCount,
-            readmesCompleted: previous.readmesCompleted,
-            readmesTarget: previous.readmesTarget,
-            chunkTotal: finalChunkCount,
-            embeddingsCreated: finalEmbeddingCount,
-            embeddingTarget,
-            duplicateEmbeddingHits: duplicateHits,
-            elapsedSeconds: totalDurationSec,
-          }
+              ...previous,
+              phase: "Indexing complete",
+              repoTotal: finalRepoCount,
+              readmesCompleted: previous.readmesCompleted,
+              readmesTarget: previous.readmesTarget,
+              chunkTotal: finalChunkCount,
+              embeddingsCreated: finalEmbeddingCount,
+              embeddingTarget,
+              duplicateEmbeddingHits: duplicateHits,
+              elapsedSeconds: totalDurationSec,
+            }
           : previous,
       );
 
       setStarsSummary(
         `Sync complete in ${totalDurationSec}s. ` +
-        `Repos: ${finalRepoCount}, Chunks: ${finalChunkCount}, Embeddings: ${finalEmbeddingCount} ` +
-        `(new: ${processedCount}, cache hits: ${duplicateHits}).`,
+          `Repos: ${finalRepoCount}, Chunks: ${finalChunkCount}, Embeddings: ${finalEmbeddingCount} ` +
+          `(new: ${processedCount}, cache hits: ${duplicateHits}).`,
       );
       const finalElapsedSeconds = Math.max((Date.now() - startMs) / 1000, 1);
-      const finalQueueDepth = database.getPendingEmbeddingChunkCount();
+      const finalQueueDepth = Math.max(embeddingTarget - processedCount, 0);
       await database.flushPendingEmbeddingCheckpoint();
-      const finalCheckpointStatus = database.getEmbeddingCheckpointStatus();
-      const finalPoolStatus = embeddingPool.getStatus();
-      const finalBackendIdentity = formatBackendIdentity({
-        preferredBackend: finalPoolStatus.preferredBackend,
-        selectedBackend: finalPoolStatus.selectedBackend,
-        fallbackReason: finalPoolStatus.backendFallbackReason,
+      await database.upsertIndexMeta({
+        key: "embedding_job_cursor",
+        value: "",
+        updatedAt: Date.now(),
       });
+      const finalCheckpointStatus = database.getEmbeddingCheckpointStatus();
+      const finalPoolStatus = activeEmbeddingPool.getStatus();
+      if (backendIdentity.kind === "browser") {
+        backendIdentity = {
+          kind: "browser",
+          preferredBackend: finalPoolStatus.preferredBackend,
+          selectedBackend: finalPoolStatus.selectedBackend,
+          fallbackReason: finalPoolStatus.backendFallbackReason,
+        };
+      }
       const finalMetrics: EmbeddingRunMetrics = {
-        backendIdentity: finalBackendIdentity,
+        backendIdentity: formatEmbeddingBackendIdentity(backendIdentity),
         configuredPoolSize: finalPoolStatus.configuredPoolSize,
         activePoolSize: finalPoolStatus.activePoolSize,
         poolDownshifted: finalPoolStatus.downshifted,
@@ -1146,15 +1745,46 @@ export default function UsagePage() {
           peakQueueDepth: finalMetrics.peakQueueDepth,
         }),
       );
+      await publishProgress(true);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (import.meta.env.DEV) console.error("Embedding generation failed", err);
-      else console.error("Embedding generation failed:", msg);
-      captureLocalError("embedding_generation_failed", err);
-      setError(formatEmbeddingError(err));
+      if (err instanceof Error && err.message === OLLAMA_RESTART_BROWSER_ERROR) {
+        restartWithBrowser = true;
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (import.meta.env.DEV) console.error("Embedding generation failed", err);
+        else console.error("Embedding generation failed:", msg);
+        captureLocalError("embedding_generation_failed", err);
+        setError(formatEmbeddingError(err));
+      }
     } finally {
       embedder?.terminate();
       embeddingPool?.terminate();
+    }
+
+    if (restartWithBrowser) {
+      try {
+        await database.clearEmbeddings();
+        await database.upsertIndexMeta({
+          key: EMBEDDING_BACKEND_META_KEY,
+          value: "browser",
+          updatedAt: Date.now(),
+        });
+        await database.upsertIndexMeta({
+          key: EMBEDDING_MODEL_META_KEY,
+          value: BROWSER_EMBEDDING_MODEL,
+          updatedAt: Date.now(),
+        });
+        await database.upsertIndexMeta({
+          key: "embedding_job_cursor",
+          value: "",
+          updatedAt: Date.now(),
+        });
+        setFetchPhase("Ollama unavailable. Restarting embedding generation with browser backend…");
+        await generateEmbeddings(database, { forceBrowser: true });
+      } catch (restartError) {
+        captureLocalError("ollama_restart_with_browser_failed", restartError);
+        setError(formatEmbeddingError(restartError));
+      }
     }
   };
 
@@ -1183,7 +1813,6 @@ export default function UsagePage() {
     rawQuery: string,
     options?: {
       preferredSessionId?: string;
-      skipSync?: boolean;
     },
   ) => {
     const trimmedQuery = rawQuery.trim();
@@ -1195,17 +1824,47 @@ export default function UsagePage() {
       setError(null);
 
       const database = await getLocalDatabase();
-      if (accessToken && !options?.skipSync) {
-        setSearchProgress("Syncing starred repos before retrieval…");
-        await syncStarsToLocal(database, "query");
-      }
-
-      const embedder = new Embedder();
 
       // 1. Generate embedding for query
-      setSearchProgress("Generating query embedding…");
-      const vector = await embedder.embed(trimmedQuery);
-      embedder.terminate();
+      let vector: Float32Array;
+      const activeEmbeddingBackend = database.getIndexMetaValue(EMBEDDING_BACKEND_META_KEY);
+      const activeEmbeddingModel = database.getIndexMetaValue(EMBEDDING_MODEL_META_KEY);
+      if (activeEmbeddingBackend === "ollama" && activeEmbeddingModel) {
+        setSearchProgress("Generating query embedding with Ollama…");
+        try {
+          const client = new OllamaEmbeddingClient({
+            baseUrl: ollamaBaseUrl.trim() || getDefaultOllamaBaseUrl(),
+            model: activeEmbeddingModel,
+            timeoutMs: getOllamaTimeoutMs(),
+          });
+          const vectors = await client.embedBatch([trimmedQuery]);
+          if (vectors.length !== 1 || !vectors[0]) {
+            throw new Error("query embedding failed: no vector returned from Ollama");
+          }
+          vector = vectors[0];
+          setOllamaConnectionStatus("connected");
+          setOllamaConnectionMessage(`Search using Ollama model ${activeEmbeddingModel}.`);
+        } catch (ollamaError) {
+          captureLocalWarn(
+            "ollama_query_embedding_failed",
+            ollamaError instanceof Error ? ollamaError.message : String(ollamaError),
+          );
+          setOllamaConnectionStatus("inactive");
+          setOllamaConnectionMessage(
+            `Ollama query embedding failed. Search requires the indexed Ollama model: ${formatOllamaConnectionError(
+              ollamaError,
+            )}`,
+          );
+          throw new Error(
+            "Search unavailable because query embedding with Ollama failed. Restore Ollama connectivity or re-index with the browser embedding backend.",
+          );
+        }
+      } else {
+        setSearchProgress("Generating query embedding…");
+        const embedder = new Embedder();
+        vector = await embedder.embed(trimmedQuery);
+        embedder.terminate();
+      }
 
       // 2. Search DB
       setSearchProgress("Running semantic search…");
@@ -1221,7 +1880,13 @@ export default function UsagePage() {
           ? sessions.find((session) => session.id === activeSessionId) ?? null
           : null);
 
-      const targetSessionId = continuingSession?.id ?? crypto.randomUUID();
+      let targetSessionId = continuingSession?.id ?? null;
+      if (!targetSessionId) {
+        if (!chatScopeKey) {
+          throw new Error("Login required");
+        }
+        targetSessionId = makeScopedSessionId(chatScopeKey);
+      }
       const targetSessionQuery =
         continuingSession?.query && continuingSession.query.trim().length > 0
           ? continuingSession.query
@@ -1304,7 +1969,6 @@ export default function UsagePage() {
     setSearchQuery(activeSession.query);
     await executeSearch(activeSession.query, {
       preferredSessionId: activeSession.id,
-      skipSync: !isAuthenticated,
     });
   };
 
@@ -1472,17 +2136,86 @@ export default function UsagePage() {
                   {isSearching ? "Searching…" : "Search"}
                 </Button>
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void handleFetchStars()}
-                  disabled={fetchingStars}
-                  className="text-accent border-accent/50 hover:bg-accent/10"
-                >
-                  {fetchingStars ? (fetchPhase ?? "Syncing…") : "Fetch Stars"}
-                </Button>
+              <div className="mt-3 border-t border-border pt-3 space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void handleFetchStars()}
+                    disabled={fetchingStars}
+                    className="text-accent border-accent/50 hover:bg-accent/10"
+                  >
+                    {fetchingStars ? (fetchPhase ?? "Syncing…") : "Fetch Stars"}
+                  </Button>
+                  <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={allowOllamaEmbedding}
+                      onChange={(event) => setAllowOllamaEmbedding(event.target.checked)}
+                    />
+                    Use Ollama for local embeddings
+                  </label>
+                  <span className="rounded border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+                    {ollamaConnectionStatus === "connected"
+                      ? "runtime: ollama-active"
+                      : ollamaConnectionStatus === "testing"
+                        ? "runtime: testing"
+                        : ollamaConnectionStatus === "inactive"
+                          ? "runtime: fallback-browser"
+                          : ollamaConnectionStatus === "failed"
+                            ? "runtime: failed"
+                            : "runtime: browser"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Requests go only to localhost. No GitHub token is sent.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                  <div className="space-y-1">
+                    <Label htmlFor="ollama-base-url" className="text-[11px] text-muted-foreground">
+                      Ollama URL
+                    </Label>
+                    <Input
+                      id="ollama-base-url"
+                      value={ollamaBaseUrl}
+                      onChange={(event) => setOllamaBaseUrl(event.target.value)}
+                      placeholder="http://localhost:11434"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="ollama-model" className="text-[11px] text-muted-foreground">
+                      Embedding model
+                    </Label>
+                    <Input
+                      id="ollama-model"
+                      value={ollamaModel}
+                      onChange={(event) => setOllamaModel(event.target.value)}
+                      placeholder="nomic-embed-text"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void handleTestOllamaConnection()}
+                      disabled={ollamaConnectionStatus === "testing"}
+                    >
+                      {ollamaConnectionStatus === "testing" ? "Testing…" : "Test connection"}
+                    </Button>
+                  </div>
+                </div>
+                {ollamaConnectionMessage ? (
+                  <p
+                    className={`text-[11px] ${
+                      ollamaConnectionStatus === "failed" || ollamaConnectionStatus === "inactive"
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {ollamaConnectionMessage}
+                  </p>
+                ) : null}
               </div>
               {/* Index status block */}
               {indexingStatus ? (
@@ -1562,6 +2295,9 @@ export default function UsagePage() {
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
                 Search your stars to create a session; then filter and chat below.
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                To query latest stars, click Fetch Stars first to refresh and re-embed new repositories.
               </p>
             </CardContent>
           </Card>

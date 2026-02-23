@@ -13,6 +13,7 @@ type EmbedderLike = {
 
 type EmbeddingWorkerPoolOptions = {
   poolSize?: number;
+  maxPoolSize?: number;
   maxQueueSize?: number;
   downshiftErrorThreshold?: number;
   workerBatchSize?: number;
@@ -33,6 +34,7 @@ type EmbeddingWorkerPoolStatus = {
 };
 
 const DEFAULT_POOL_SIZE = 2;
+const DEFAULT_MAX_POOL_SIZE = 2;
 const DEFAULT_MAX_QUEUE_SIZE = 1024;
 const DEFAULT_DOWNSHIFT_ERROR_THRESHOLD = 3;
 const DEFAULT_WORKER_BATCH_SIZE = 8;
@@ -65,6 +67,7 @@ function isMemoryPressureError(errorMessage: string | null): boolean {
 export class EmbeddingWorkerPool {
   private readonly createEmbedder: () => EmbedderLike;
   private readonly maxQueueSize: number;
+  private readonly maxPoolSize: number;
   private readonly downshiftErrorThreshold: number;
   private readonly configuredPoolSize: number;
   private readonly workerBatchSize: number;
@@ -76,8 +79,10 @@ export class EmbeddingWorkerPool {
 
   constructor(options: EmbeddingWorkerPoolOptions = {}) {
     const configuredPoolSize = clampPositiveInt(options.poolSize, DEFAULT_POOL_SIZE);
+    const maxPoolSize = clampPositiveInt(options.maxPoolSize, DEFAULT_MAX_POOL_SIZE);
     this.configuredPoolSize = configuredPoolSize;
-    this.activePoolSize = configuredPoolSize;
+    this.maxPoolSize = Math.max(1, maxPoolSize);
+    this.activePoolSize = Math.min(configuredPoolSize, this.maxPoolSize);
     this.maxQueueSize = clampPositiveInt(options.maxQueueSize, DEFAULT_MAX_QUEUE_SIZE);
     this.downshiftErrorThreshold = clampPositiveInt(
       options.downshiftErrorThreshold,
@@ -99,6 +104,26 @@ export class EmbeddingWorkerPool {
     this.activePoolSize = 1;
     if (!this.downshiftReason) {
       this.downshiftReason = reason;
+    }
+  }
+
+  setConcurrency(targetPoolSize: number): void {
+    const normalized = clampPositiveInt(targetPoolSize, 1);
+    this.activePoolSize = Math.max(1, Math.min(normalized, this.maxPoolSize, this.configuredPoolSize));
+    if (this.activePoolSize > 1) {
+      this.downshiftReason = null;
+    }
+  }
+
+  private updateConcurrencyForRuntime(): void {
+    const status = this.getStatus();
+    if (status.selectedBackend === "webgpu") {
+      this.setConcurrency(1);
+      return;
+    }
+
+    if (!status.downshifted && this.activePoolSize < this.configuredPoolSize) {
+      this.setConcurrency(this.configuredPoolSize);
     }
   }
 
@@ -134,6 +159,7 @@ export class EmbeddingWorkerPool {
     }
 
     this.ensureWorkers();
+    this.updateConcurrencyForRuntime();
     const results: BatchEmbeddingResultItem[] = Array.from({ length: texts.length }, () => ({
       embedding: null,
       error: "embedding job was not executed",

@@ -114,7 +114,7 @@ Reference:
 8. User query is embedded locally and run against the local vector index.
 9. Top-K results are shown immediately; optionally, the user can ask an LLM to summarize or suggest.
 10. Each query can open a new chat session, and users can also continue an existing session with follow-up queries.
-11. On each new query, re-check star data and sync diffs using checksums.
+11. Star sync is user-initiated via `Fetch Stars`; search queries run against the current local index.
 
 ### 2.2 Components
 - UI: search, filters, results, suggestions
@@ -453,7 +453,7 @@ Reference:
 5. Minimal GitHub scopes or fine-grained PAT
 6. Dependency review and integrity checks
 7. Rate limiting and backoff to avoid account lockouts
-8. Checksum-based sync on each query to keep stars data fresh
+8. Checksum-based sync when user runs `Fetch Stars` to keep stars data fresh
 9. Worker pool cap + adaptive batch sizing + queue backpressure
 10. Time/record checkpoint policy with final flush and UI status
 11. Backend probe and deterministic fallback from `webgpu` to `wasm`
@@ -495,7 +495,7 @@ Developers star many repositories over time and cannot easily recall them when t
 - Fetch all starred repos with pagination
 - Fetch README for each repo
 - Local RAG index in the browser using SQLite WASM + `sqlite-vec-wasm`
-- Persist repo checksums and sync diffs on each query
+- Persist repo checksums and sync diffs on user-triggered `Fetch Stars`
 - Embedding acceleration controls:
   - micro-batch embedding
   - bounded worker pool
@@ -540,7 +540,7 @@ Developers star many repositories over time and cannot easily recall them when t
 - Repo metadata enrichment (topics, tags)
 - Advanced filters (language, date, stars)
 - Local model manager (model install, health checks, local endpoint validation)
-- Optional local-native embedding runtime bridge (CUDA/Metal/CPU via local providers)
+- Optional local Ollama embedding runtime bridge (CUDA/Metal/CPU via local provider runtime)
 - Production hardening: custom-built SQLite WASM + sqlite-vec bundle with pinned versions
 
 ### 5.11 Migration Checklist (Prebuilt -> Custom Bundle)
@@ -650,4 +650,24 @@ Resolved decisions:
 Active decisions:
 - Final default batch-size adaptation policy for low-memory devices
 - Whether to enable worker pool by default on first release or behind feature flag
-- Whether optional local-native embedding bridge should be added post-MVP
+- Whether optional local Ollama embedding bridge should remain default-off for all users
+
+---
+
+## 8) Implementation Update (2026-02-23)
+
+Implemented architecture deltas:
+- Embedding queue is materialized once per run (pending chunk preload) instead of repeated DB polling in the hot loop.
+- Pending chunk SQL joins now use normalized key join (`e.chunk_id = c.id`) with dedicated indexes.
+- Embedding compute and DB writes are decoupled through an in-memory buffer and size-based flush policy.
+- Progress publishing is throttled to avoid UI/main-thread pressure during large indexing runs.
+- Large-library mode is active with priority ordering and resumable cursor metadata in `index_meta`.
+- Optional local Ollama embedding backend was added as an explicit opt-in path:
+  - localhost-only endpoint validation
+  - `/api/embed` with `/api/embeddings` compatibility fallback
+  - model/backend metadata tracking to avoid mixed vector stores
+  - graceful restart to browser embedding when Ollama fails mid-run
+
+Trust-boundary note:
+- Ollama embedding bridge remains inside local trust boundary only; non-local endpoints are rejected.
+- GitHub auth tokens remain browser-local and are not included in embedding payloads.

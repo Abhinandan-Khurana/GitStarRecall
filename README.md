@@ -69,12 +69,12 @@ Read more:
 ## Product Capabilities
 
 - GitHub OAuth and PAT authentication paths.
-- Star sync with pagination handling.
+- Star sync with pagination handling (manual via `Fetch Stars`).
 - Checksum-based diff sync for changed/new/removed stars.
 - README fetch pipeline with missing/failure tracking.
 - Local chunking + embedding generation.
 - Persistent chat sessions with ordered messages.
-- Session-aware search and follow-up flow.
+- Session-aware search and follow-up flow on existing local embeddings.
 - Local and remote LLM answer modes.
 - Embedding acceleration controls (batching, worker pool, backend fallback).
 
@@ -105,13 +105,13 @@ Notes:
 ### Prerequisites
 
 - Node.js 20+
-- npm 10+
+- pnpm 9+
 - A GitHub OAuth app (recommended) or GitHub PAT
 
 ### Install
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### Configure environment
@@ -129,34 +129,41 @@ Important variables:
 - `VITE_EMBEDDING_BACKEND_PREFERRED` (`webgpu` or `wasm`)
 - `VITE_EMBEDDING_POOL_SIZE` (1..2)
 - `VITE_EMBEDDING_WORKER_BATCH_SIZE` (1..32)
+- `VITE_EMBEDDING_DB_WRITE_BATCH_SIZE` (16..2048)
+- `VITE_EMBEDDING_UI_UPDATE_MS` (100..2000)
+- `VITE_EMBEDDING_LARGE_LIBRARY_MODE` (`1` or `0`)
+- `VITE_EMBEDDING_LARGE_LIBRARY_THRESHOLD` (default `500`)
+- `VITE_OLLAMA_BASE_URL` (optional default, must be localhost/127.0.0.1/[::1])
+- `VITE_OLLAMA_MODEL` (optional default, e.g. `nomic-embed-text`)
+- `VITE_OLLAMA_TIMEOUT_MS`
 - `VITE_LLM_SETTINGS_ENCRYPTION_KEY=` (openssl rand -hex 32)
 
 If using Vercel OAuth exchange, see:
-- `docs/deployment-vercel.md`
-- `api/exchange.js`
+- `docs/vercel-deployment.md`
+- `api/github/oauth/exchange.js`
 
 ### Run dev server
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 ### Production build
 
 ```bash
-npm run build
-npm run preview
+pnpm build
+pnpm preview
 ```
 
 ---
 
 ## Developer Commands
 
-- `npm run dev` - start Vite dev server
-- `npm run lint` - run ESLint
-- `npm run test` - run Vitest test suite
-- `npm run build` - typecheck + production build
-- `npm run ci` - lint + test + build
+- `pnpm dev` - start Vite dev server
+- `pnpm lint` - run ESLint
+- `pnpm test` - run Vitest test suite
+- `pnpm build` - typecheck + production build
+- `pnpm ci` - lint + test + build
 
 ---
 
@@ -174,11 +181,44 @@ The app exposes indexing telemetry in UI so you can see:
 - queue depth,
 - worker pool downshift events.
 
+### Ollama Embedding Mode (Opt-in)
+
+- Default behavior stays browser-local (`webgpu` -> `wasm` fallback).
+- Ollama mode is disabled by default and requires explicit in-app consent toggle.
+- Endpoint is restricted to localhost patterns only.
+- Payload to Ollama includes only embedding text + model (no GitHub token).
+- If Ollama is unavailable, indexing automatically restarts with browser embeddings.
+
+### Ollama Setup
+
+1. Start Ollama locally: `ollama serve`
+2. Pull embedding model: `ollama pull nomic-embed-text`
+3. In the app, enable `Use Ollama for local embeddings`.
+4. Keep base URL as `http://localhost:11434` (or your localhost override).
+5. Click `Test connection`.
+6. Run `Fetch Stars` to index with Ollama.
+7. If Ollama goes down, the app falls back to browser embedding automatically.
+
+### Large-Library Mode
+
+- Automatically enabled when repo count exceeds threshold (`VITE_EMBEDDING_LARGE_LIBRARY_THRESHOLD`, default `500`).
+- Prioritizes high-value repos first (stars + recency + README availability).
+- Stores resume cursor in `index_meta` so interrupted jobs continue without full restart.
+- Search does not refresh stars automatically; click `Fetch Stars` to include newly starred repositories.
+
+### Troubleshooting Large Libraries
+
+1. Check backend/device in embedding run details.
+2. Reduce pool size to `1` for memory-constrained systems.
+3. Lower worker batch size if batch latency spikes.
+4. Keep Ollama enabled only when local endpoint is healthy.
+5. Resume from existing checkpoint instead of clearing local data.
+
 ---
 
 ## Product Docs
 
-- `docs/starting-point-guide-for-codex-claude.md`
+- `docs/codex-claude-build-guide.md`
 - `docs/step-by-step-implementation-plan.md`
 - `docs/embedding-acceleration-plan.md`
 - `docs/tech-stack-architecture-security-prd.md`

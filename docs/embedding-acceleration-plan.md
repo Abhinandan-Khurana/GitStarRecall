@@ -8,6 +8,32 @@ Scope requested:
 3. Small embedding worker pool (parallel workers).
 4. WebGPU acceleration with safe CPU fallback, plus cross-platform local runtime guidance (CUDA/Metal/MPS/CPU fallback).
 
+## Implementation Update (2026-02-23)
+
+Delivered in code:
+- Pending chunk queue materialization (`listPendingChunksForEmbedding`) replaces repeated hot-loop scans.
+- CAST-heavy pending join paths were removed and index coverage improved:
+  - `idx_chunks_created_at`
+  - `idx_embeddings_chunk_id`
+- Embedding loop now decouples compute and DB flush through buffered writes.
+- UI progress publishing is throttled (configurable) to reduce render churn.
+- Large-library mode prioritization is active above threshold (default `500`) with resume cursor metadata.
+- Optional Ollama embedding client path is available via explicit user consent in UI.
+- Ollama path enforces localhost-only endpoint validation, supports `/api/embed` with `/api/embeddings` compatibility fallback, and restarts indexing on browser embedding if Ollama fails mid-run.
+- Embedding model/backend are tracked in `index_meta` (`embedding_active_backend`, `embedding_active_model`) and old embeddings are reset when the active model changes.
+
+Current env controls:
+- `VITE_EMBEDDING_BACKEND_PREFERRED`
+- `VITE_EMBEDDING_POOL_SIZE`
+- `VITE_EMBEDDING_WORKER_BATCH_SIZE`
+- `VITE_EMBEDDING_DB_WRITE_BATCH_SIZE`
+- `VITE_EMBEDDING_UI_UPDATE_MS`
+- `VITE_EMBEDDING_LARGE_LIBRARY_MODE`
+- `VITE_EMBEDDING_LARGE_LIBRARY_THRESHOLD`
+- `VITE_OLLAMA_BASE_URL`
+- `VITE_OLLAMA_MODEL`
+- `VITE_OLLAMA_TIMEOUT_MS`
+
 ---
 
 ## 1) Current State (As Implemented)
@@ -77,7 +103,7 @@ Important clarification:
 
 ## 3.2 Local Runtime Path (Optional Advanced Mode)
 
-If future architecture allows local-native embedding via Ollama/LM Studio:
+Current optional path via Ollama (UI opt-in):
 - Windows/Linux with NVIDIA GPU: CUDA path (runtime-managed).
 - macOS Apple Silicon: Metal path (often described as MPS/Metal acceleration at runtime level).
 - All platforms: CPU fallback when GPU unavailable.
@@ -90,8 +116,8 @@ Use this as optional enhancement, not baseline, to preserve pure in-browser comp
 |---|---|---|---|---|
 | Browser WebGPU | Yes (browser/driver dependent) | Yes (browser/driver dependent; Metal backend) | Yes (browser/driver dependent) | Primary acceleration path |
 | Browser WASM CPU | Yes | Yes | Yes | Guaranteed fallback |
-| Local runtime CUDA (optional) | Yes (NVIDIA) | No | Yes (NVIDIA) | Only via local native runtime |
-| Local runtime Metal/MPS (optional) | No | Yes | No | Only via local native runtime |
+| Local runtime CUDA (optional) | Yes (NVIDIA) | No | Yes (NVIDIA) | Only via local Ollama runtime |
+| Local runtime Metal/MPS (optional) | No | Yes | No | Only via local Ollama runtime |
 | Local runtime CPU (optional) | Yes | Yes | Yes | Fallback for local runtime mode |
 
 ---

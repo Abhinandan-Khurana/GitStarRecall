@@ -2,6 +2,17 @@
 
 This document reviews the GitStarRecall codebase against the threats and mitigations in [threat-modeling-stride.md](./threat-modeling-stride.md). Each STRIDE category is mapped to current implementation status and concrete recommendations.
 
+## 2026-02-23 Update (Embedding Pipeline v2 + Ollama Opt-in)
+
+- Added localhost-only validation for Ollama embedding endpoints (`localhost`, `127.0.0.1`, `[::1]`), enforced in `src/embeddings/ollamaClient.ts`.
+- Ollama embedding path is disabled by default and activated via explicit in-app consent toggle (UI-driven, not env-gated).
+- Ollama embedding payload contains only text + model fields (no GitHub token or PAT values).
+- Ollama API compatibility fallback is handled (`/api/embed` -> `/api/embeddings`).
+- Embedding backend/model metadata is tracked to prevent mixed-model vector stores across runs.
+- Browser embedding remains default path with automatic fallback semantics.
+- Pending embedding SQL hot path now avoids CAST-based joins, reducing failure surface and improving deterministic query plans.
+- Production error logging remains message-oriented while dev keeps richer diagnostics.
+
 ---
 
 ## 1) S – Spoofing
@@ -87,7 +98,7 @@ No material gaps identified for DoS mitigations.
 |------------|--------|-----------------|
 | Minimal GitHub scopes / fine-grained PAT | **Context** | OAuth uses `["read:user", "repo"]` in `getOAuthConfig()`. “repo” is broad (full repo access). For “starred repos + READMEs” the threat model recommends minimal scopes or fine-grained PAT. |
 | Local endpoints clearly labeled; explicit opt-in | **Done** | Local provider is labeled “Local (Ollama)” in SessionChat; base URL is user-editable in the same panel; use requires `allowLocalProvider`. |
-| Browser embedding path default; local-native explicit | **Done** | Default flow is in-browser embedding (worker); no automatic local-native runtime; optional local LLM is user-configured and opt-in. |
+| Browser embedding path default; local Ollama explicit | **Done** | Default flow is in-browser embedding (worker); no automatic local runtime bridge; optional Ollama embedding is user-configured and opt-in. |
 
 **Recommendation:** Document that OAuth scope `repo` is used for starred repos and README access, and that users using PAT should prefer a fine-grained PAT with minimal permissions (e.g. read-only for repos they need). Consider, if GitHub API allows, narrowing OAuth scopes in the future.
 
