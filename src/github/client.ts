@@ -559,7 +559,7 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
             readmeUrl: null,
             readmeEtag: readmeEtag ?? previous?.readmeEtag ?? null,
             readmeLastModified: readmeLastModified ?? previous?.readmeLastModified ?? null,
-            checksum: previous?.checksum ?? null,
+            checksum: previous?.checksum ?? (await sha256Hex(canonicalChecksumInput(repo, await sha256Hex("")))),
             missingReadme: false,
             notModified: true,
           });
