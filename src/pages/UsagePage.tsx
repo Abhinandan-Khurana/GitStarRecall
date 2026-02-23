@@ -1382,8 +1382,13 @@ export default function UsagePage() {
       let queueCursor = 0;
       if (cursorChunkId) {
         const foundIndex = pendingChunks.findIndex((chunk) => chunk.id === cursorChunkId);
-        if (foundIndex >= 0) {
+        if (foundIndex === 0) {
           queueCursor = foundIndex;
+        } else if (foundIndex > 0) {
+          captureLocalWarn(
+            "embedding_resume_cursor_reset",
+            `resetting cursor to pending head because ${foundIndex} pending chunks exist before cursor`,
+          );
         }
       }
       let processedCount = 0;
@@ -1846,13 +1851,13 @@ export default function UsagePage() {
           );
           setOllamaConnectionStatus("inactive");
           setOllamaConnectionMessage(
-            `Ollama query embedding failed, using browser fallback: ${formatOllamaConnectionError(
+            `Ollama query embedding failed. Search requires the indexed Ollama model: ${formatOllamaConnectionError(
               ollamaError,
             )}`,
           );
-          const embedder = new Embedder();
-          vector = await embedder.embed(trimmedQuery);
-          embedder.terminate();
+          throw new Error(
+            "Search unavailable because query embedding with Ollama failed. Restore Ollama connectivity or re-index with the browser embedding backend.",
+          );
         }
       } else {
         setSearchProgress("Generating query embedding…");
