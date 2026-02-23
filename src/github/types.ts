@@ -40,8 +40,11 @@ export type RepoReadmeRecord = {
   repoId: number;
   readmeUrl: string | null;
   readmeText: string | null;
+  readmeEtag: string | null;
+  readmeLastModified: string | null;
   checksum: string;
   missingReadme: boolean;
+  notModified: boolean;
 };
 
 export type FetchReadmesResult = {
@@ -55,4 +58,15 @@ export type ReadmeFetchProgress = {
   total: number;
   missingCount: number;
   failedCount: number;
+};
+
+export type ReadmeFetchStats = {
+  requested: number;
+  succeeded: number;
+  missing: number;
+  failed: number;
+  retryCount: number;
+  rateLimitHits: number;
+  avgLatencyMs: number;
+  p95LatencyMs: number;
 };

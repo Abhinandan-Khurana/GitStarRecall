@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS repos (
   updated_at TEXT NOT NULL,
   readme_url TEXT,
   readme_text TEXT,
+  readme_etag TEXT,
+  readme_last_modified TEXT,
   checksum TEXT,
   last_synced_at INTEGER NOT NULL
 );
