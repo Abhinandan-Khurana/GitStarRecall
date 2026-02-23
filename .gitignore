@@ -76,6 +76,7 @@ coverage/
 # Vite specific
 .vite/
 vite.config.ts.timestamp-*
+vite.config.js
 
 # Next.js (if optional backend used)
 .next/
@@ -177,3 +178,6 @@ docs/.cache/
 docs/dist/
 
 .codex
+
+research.md
+plan.md

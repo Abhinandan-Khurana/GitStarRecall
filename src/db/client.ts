@@ -1,6 +1,7 @@
 import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import wasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { DATABASE_SCHEMA_SQL } from "./schema";
+import { backupChatMessage, backupChatSession, clearChatBackup } from "./chatBackup";
 import type {
   ChatMessageRecord,
   ChatSessionRecord,
@@ -1465,6 +1466,13 @@ export class LocalDatabase {
       }
     }
 
+    await backupChatSession({
+      id,
+      query,
+      createdAt,
+      updatedAt,
+    });
+
     await this.persist();
   }
 
@@ -1613,6 +1621,15 @@ export class LocalDatabase {
       }
     }
 
+    await backupChatMessage({
+      id,
+      sessionId,
+      role,
+      content,
+      sequence,
+      createdAt,
+    });
+
     await this.persist();
   }
 
@@ -1628,6 +1645,7 @@ export class LocalDatabase {
 
     await clearOpfsFile();
     clearLocalStorageBytes();
+    await clearChatBackup();
     await this.persist();
   }
 }

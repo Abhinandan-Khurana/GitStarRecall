@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import { createGitHubApiClient } from "../github/client";
 import type { GitHubStarredRepo, RepoReadmeRecord } from "../github/types";
 import { getLocalDatabase } from "../db/client";
-import type { ChatMessageRecord, RepoRecord, EmbeddingRecord, SearchResult } from "../db/types";
+import { backupChatSnapshot, loadChatBackup } from "../db/chatBackup";
+import type {
+  ChatMessageRecord,
+  ChatSessionRecord,
+  RepoRecord,
+  EmbeddingRecord,
+  SearchResult,
+} from "../db/types";
 import { chunkRepos } from "../chunking/chunker";
 import { Embedder, type EmbeddingBackendPreference } from "../embeddings/Embedder";
 import { EmbeddingWorkerPool } from "../embeddings/WorkerPool";
@@ -14,6 +21,13 @@ import { sortChatMessages } from "../chat/order";
 import { captureLocalError, captureLocalWarn } from "../observability/localLog";
 import SafeMarkdown from "../components/SafeMarkdown";
 import { SessionChat } from "../components/SessionChat";
+import {
+  buildHistoryRestoreResult,
+  createRestoreRequestTracker,
+  shouldRestoreOnAuthTransition,
+  type HistoryLoadState,
+  type SearchSession,
+} from "./historyRestore";
 import {
   formatProviderError,
   getProviderById,
@@ -39,15 +53,6 @@ import {
 } from "@/components/ui/collapsible";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-
-type SearchSession = {
-  id: string;
-  query: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  results: SearchResult[];
-};
 
 type IndexingStatus = {
   phase: string;
@@ -283,6 +288,9 @@ export default function UsagePage() {
   const [sessions, setSessions] = useState<SearchSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionMessagesById, setSessionMessagesById] = useState<Record<string, ChatMessageRecord[]>>({});
+  const [historyLoadState, setHistoryLoadState] = useState<HistoryLoadState>("idle");
+  const [historyLastRestoredAt, setHistoryLastRestoredAt] = useState<number | null>(null);
+  const [historyDataSource, setHistoryDataSource] = useState<"sqlite" | "indexeddb" | "local-storage" | null>(null);
   const [sessionMode, setSessionMode] = useState<"new" | "continue">("new");
   const [languageFilter, setLanguageFilter] = useState("all");
   const [topicFilter, setTopicFilter] = useState("all");
@@ -305,6 +313,8 @@ export default function UsagePage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const generationControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const restoreRequestTrackerRef = useRef(createRestoreRequestTracker());
+  const previousIsAuthenticatedRef = useRef(isAuthenticated);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
@@ -365,46 +375,129 @@ export default function UsagePage() {
     });
   }, [activeResults, languageFilter, topicFilter, updatedWithinDaysFilter]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const restoreHistory = useCallback(async () => {
+    const requestId = restoreRequestTrackerRef.current.nextRequestId();
+    setHistoryLoadState("loading");
 
-    const loadPersistedSessions = async () => {
-      const database = await getLocalDatabase();
-      const persistedSessions = database.listChatSessions().map((session) => {
-        const title = session.query.length > 48 ? `${session.query.slice(0, 48)}…` : session.query;
-        return {
-          id: session.id,
-          query: session.query,
-          title,
-          createdAt: session.createdAt,
-          updatedAt: session.updatedAt,
-          results: [],
-        } satisfies SearchSession;
-      });
-
-      const messagesById: Record<string, ChatMessageRecord[]> = {};
-      for (const session of persistedSessions) {
-        messagesById[session.id] = sortChatMessages(database.listChatMessages(session.id));
-      }
-
-      if (cancelled) {
+    const applyRestore = async (params: {
+      restoreResult: ReturnType<typeof buildHistoryRestoreResult>;
+      source: "sqlite" | "indexeddb" | "local-storage";
+      database?: Awaited<ReturnType<typeof getLocalDatabase>>;
+    }) => {
+      if (!restoreRequestTrackerRef.current.isCurrent(requestId)) {
         return;
       }
 
-      setSessions(persistedSessions);
-      setSessionMessagesById(messagesById);
-      if (persistedSessions.length > 0) {
-        setActiveSessionId((previous) => previous ?? persistedSessions[0].id);
-        setSessionMode("continue");
+      setSessions(params.restoreResult.sessions);
+      setSessionMessagesById(params.restoreResult.messagesBySessionId);
+      setActiveSessionId(params.restoreResult.activeSessionId);
+      setSessionMode(params.restoreResult.sessionMode);
+      setHistoryLoadState(params.restoreResult.historyLoadState);
+      setHistoryDataSource(params.source);
+      const restoredAt = Date.now();
+      setHistoryLastRestoredAt(restoredAt);
+
+      if (params.database) {
+        try {
+          await params.database.upsertIndexMeta({
+            key: "history_last_restored_at",
+            value: String(restoredAt),
+            updatedAt: restoredAt,
+          });
+        } catch {
+          // history metadata should not block restore
+        }
       }
     };
 
-    void loadPersistedSessions();
+    try {
+      const database = await getLocalDatabase();
+      let restoreResult = buildHistoryRestoreResult({
+        persistedSessions: database.listChatSessions(),
+        previousActiveSessionId: activeSessionId,
+        listSessionMessages: (sessionId) => sortChatMessages(database.listChatMessages(sessionId)),
+      });
+      let source: "sqlite" | "indexeddb" | "local-storage" = "sqlite";
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+      if (restoreResult.sessions.length === 0) {
+        const backupSnapshot = await loadChatBackup();
+        if (backupSnapshot.sessions.length > 0) {
+          restoreResult = buildHistoryRestoreResult({
+            persistedSessions: backupSnapshot.sessions,
+            previousActiveSessionId: activeSessionId,
+            listSessionMessages: (sessionId) => backupSnapshot.messagesBySessionId[sessionId] ?? [],
+          });
+          source = backupSnapshot.source ?? "indexeddb";
+
+          for (const session of backupSnapshot.sessions) {
+            try {
+              await database.upsertChatSession(session);
+            } catch {
+              // best effort: restore UI from backup even if primary DB write fails
+            }
+          }
+
+          const backupMessages = Object.values(backupSnapshot.messagesBySessionId).flat();
+          for (const message of backupMessages) {
+            try {
+              await database.addChatMessage(message);
+            } catch {
+              // best effort: restore UI from backup even if primary DB write fails
+            }
+          }
+        }
+      } else {
+        const sessionsForBackup: ChatSessionRecord[] = restoreResult.sessions.map((session) => ({
+          id: session.id,
+          query: session.query,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+        }));
+        void backupChatSnapshot({
+          sessions: sessionsForBackup,
+          messagesBySessionId: restoreResult.messagesBySessionId,
+        });
+      }
+
+      await applyRestore({ restoreResult, source, database });
+    } catch (err) {
+      captureLocalError("history_restore_failed", err);
+      if (!restoreRequestTrackerRef.current.isCurrent(requestId)) {
+        return;
+      }
+
+      const backupSnapshot = await loadChatBackup();
+      if (backupSnapshot.sessions.length > 0) {
+        const restoreResult = buildHistoryRestoreResult({
+          persistedSessions: backupSnapshot.sessions,
+          previousActiveSessionId: activeSessionId,
+          listSessionMessages: (sessionId) => backupSnapshot.messagesBySessionId[sessionId] ?? [],
+        });
+        await applyRestore({
+          restoreResult,
+          source: backupSnapshot.source ?? "indexeddb",
+        });
+        return;
+      }
+
+      setHistoryDataSource(null);
+      setHistoryLastRestoredAt(null);
+      setHistoryLoadState("error");
+    }
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    void restoreHistory();
+  }, [restoreHistory]);
+
+  useEffect(() => {
+    const wasAuthenticated = previousIsAuthenticatedRef.current;
+    previousIsAuthenticatedRef.current = isAuthenticated;
+
+    if (shouldRestoreOnAuthTransition(wasAuthenticated, isAuthenticated)) {
+      void restoreHistory();
+    }
+  }, [isAuthenticated, restoreHistory]);
 
   useEffect(() => {
     const flushPendingCheckpoint = () => {
@@ -470,6 +563,19 @@ export default function UsagePage() {
       });
     }
   }, [accessToken, providerId, providerBaseUrl, providerModel, providerApiKey, allowRemoteProvider, allowLocalProvider]);
+
+  useEffect(() => {
+    if (sessions.length === 0) {
+      setActiveSessionId(null);
+      return;
+    }
+
+    if (activeSessionId && sessions.some((session) => session.id === activeSessionId)) {
+      return;
+    }
+
+    setActiveSessionId(sessions[0].id);
+  }, [sessions, activeSessionId]);
 
   /* Chat scroll is handled inside SessionChat (only the message list scrolls, not the page) */
 
@@ -1062,6 +1168,9 @@ export default function UsagePage() {
       setSessionMessagesById({});
       setActiveSessionId(null);
       setSessionMode("new");
+      setHistoryLoadState("empty");
+      setHistoryLastRestoredAt(null);
+      setHistoryDataSource(null);
       setDbStorageMode(database.storageMode);
       setError(null);
     } catch (err) {
@@ -1070,8 +1179,15 @@ export default function UsagePage() {
     }
   };
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
+  const executeSearch = async (
+    rawQuery: string,
+    options?: {
+      preferredSessionId?: string;
+      skipSync?: boolean;
+    },
+  ) => {
+    const trimmedQuery = rawQuery.trim();
+    if (!trimmedQuery) return;
 
     try {
       setIsSearching(true);
@@ -1079,7 +1195,7 @@ export default function UsagePage() {
       setError(null);
 
       const database = await getLocalDatabase();
-      if (accessToken) {
+      if (accessToken && !options?.skipSync) {
         setSearchProgress("Syncing starred repos before retrieval…");
         await syncStarsToLocal(database, "query");
       }
@@ -1088,19 +1204,22 @@ export default function UsagePage() {
 
       // 1. Generate embedding for query
       setSearchProgress("Generating query embedding…");
-      const vector = await embedder.embed(searchQuery);
+      const vector = await embedder.embed(trimmedQuery);
       embedder.terminate();
 
       // 2. Search DB
       setSearchProgress("Running semantic search…");
       const results = await database.findSimilarChunks(vector, 20); // Top 20
-      const trimmedQuery = searchQuery.trim();
       const now = Date.now();
 
-      const continuingSession =
-        sessionMode === "continue" && activeSessionId
-          ? sessions.find((session) => session.id === activeSessionId) ?? null
+      const preferredSession =
+        options?.preferredSessionId != null
+          ? sessions.find((session) => session.id === options.preferredSessionId) ?? null
           : null;
+      const continuingSession = preferredSession ??
+        (sessionMode === "continue" && activeSessionId
+          ? sessions.find((session) => session.id === activeSessionId) ?? null
+          : null);
 
       const targetSessionId = continuingSession?.id ?? crypto.randomUUID();
       const targetSessionQuery =
@@ -1148,6 +1267,11 @@ export default function UsagePage() {
       setLanguageFilter("all");
       setTopicFilter("all");
       setUpdatedWithinDaysFilter("all");
+      await database.upsertIndexMeta({
+        key: `session_context_ids:${targetSessionId}`,
+        value: JSON.stringify(results.map((result) => result.chunkId)),
+        updatedAt: now,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (import.meta.env.DEV) console.error("Search failed", err);
@@ -1166,6 +1290,22 @@ export default function UsagePage() {
       setIsSearching(false);
       setSearchProgress(null);
     }
+  };
+
+  const handleSearch = async () => {
+    await executeSearch(searchQuery);
+  };
+
+  const handleRehydrateSession = async () => {
+    if (!activeSession) {
+      return;
+    }
+
+    setSearchQuery(activeSession.query);
+    await executeSearch(activeSession.query, {
+      preferredSessionId: activeSession.id,
+      skipSync: !isAuthenticated,
+    });
   };
 
   const handleGenerateAnswer = async () => {
@@ -1398,6 +1538,28 @@ export default function UsagePage() {
                 </>
               ) : null}
               {searchProgress ? <p className="mt-2 text-xs text-muted-foreground">{searchProgress}</p> : null}
+              {historyLoadState === "loading" ? (
+                <p className="mt-2 text-xs text-muted-foreground">Loading local chat history…</p>
+              ) : null}
+              {historyLoadState === "error" ? (
+                <div className="mt-2 flex items-center gap-2 text-xs">
+                  <p className="text-destructive">Failed to load local chat history.</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => void restoreHistory()}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : null}
+              <p className="mt-2 text-xs text-muted-foreground">
+                History restore: {historyLoadState}
+                {historyDataSource ? ` · source: ${historyDataSource}` : ""}
+                {historyLastRestoredAt ? ` · ${new Date(historyLastRestoredAt).toLocaleString()}` : ""}
+              </p>
               <p className="mt-2 text-xs text-muted-foreground">
                 Search your stars to create a session; then filter and chat below.
               </p>
@@ -1422,10 +1584,7 @@ export default function UsagePage() {
                       variant="secondary"
                       size="sm"
                       className="mt-2"
-                      onClick={() => {
-                        setSearchQuery(activeSession.query);
-                        void handleSearch();
-                      }}
+                      onClick={() => void handleRehydrateSession()}
                     >
                       Re-run search
                     </Button>
@@ -1435,7 +1594,7 @@ export default function UsagePage() {
                     <p className="text-[11px] text-muted-foreground">Filter repos in this session</p>
                     <RadioGroup
                       value={sessionMode}
-                      onValueChange={(v) => setSessionMode(v as "new" | "continue")}
+                      onValueChange={(value: string) => setSessionMode(value as "new" | "continue")}
                       className="flex flex-wrap items-center gap-3 text-xs"
                     >
                       <Label className="w-full shrink-0 text-muted-foreground sm:w-auto">Session:</Label>
@@ -1668,6 +1827,25 @@ export default function UsagePage() {
             <p className="mt-2 text-sm text-muted-foreground">
               Connect GitHub with OAuth or provide a PAT. Token stays in memory by default.
             </p>
+            {sessions.length > 0 ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Local chat history is available ({sessions.length} session{sessions.length === 1 ? "" : "s"}). Login to search/sync and continue chats.
+              </p>
+            ) : null}
+            {historyLoadState === "error" ? (
+              <div className="mt-2 flex items-center gap-2 text-xs">
+                <p className="text-destructive">Local history could not be loaded.</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  onClick={() => void restoreHistory()}
+                >
+                  Retry history load
+                </Button>
+              </div>
+            ) : null}
             <div className="mt-4 flex flex-wrap gap-3">
               <Button onClick={() => void handleOAuth()}>
                 Login with GitHub OAuth
