@@ -11,6 +11,12 @@ Scope requested:
 ## Implementation Update (2026-02-23)
 
 Delivered in code:
+- Feature-flagged README batch pipeline (`VITE_README_BATCH_PIPELINE_V2`) with staged ingestion.
+- Adaptive README concurrency controller (`min/max/initial`) with rate-limit aware downshift.
+- Incremental README mini-batch callbacks wired to rolling chunk upserts.
+- Conditional README revalidation support (`If-None-Match`, `If-Modified-Since`) and persisted validators (`readme_etag`, `readme_last_modified`).
+- Rolling embedding windows can start before full README stage completion (`VITE_EMBED_TRIGGER_THRESHOLD`, `VITE_EMBED_WINDOW_SIZE`).
+- Pipeline metrics are persisted in `index_meta` (`last_star_sync_pipeline_metrics`) including README latency stats and first-embedding timing.
 - Pending chunk queue materialization (`listPendingChunksForEmbedding`) replaces repeated hot-loop scans.
 - CAST-heavy pending join paths were removed and index coverage improved:
   - `idx_chunks_created_at`

@@ -461,6 +461,12 @@ export function runSchema(database: Database): void {
   if (!repoColumns.has("readme_text")) {
     database.run("ALTER TABLE repos ADD COLUMN readme_text TEXT;");
   }
+  if (!repoColumns.has("readme_etag")) {
+    database.run("ALTER TABLE repos ADD COLUMN readme_etag TEXT;");
+  }
+  if (!repoColumns.has("readme_last_modified")) {
+    database.run("ALTER TABLE repos ADD COLUMN readme_last_modified TEXT;");
+  }
 
   ensureChatSchema(database);
 
@@ -711,7 +717,13 @@ export class LocalDatabase {
     }
 
     if (this._storageMode === "local-storage") {
-      writeBytesToLocalStorage(bytes);
+      try {
+        writeBytesToLocalStorage(bytes);
+      } catch {
+        // localStorage quota can be exceeded for large DB snapshots; degrade to in-memory
+        // mode instead of failing the active operation.
+        this._storageMode = "memory";
+      }
     }
   }
 
@@ -770,8 +782,8 @@ export class LocalDatabase {
     const statement = this.db.prepare(`
       INSERT INTO repos (
         id, full_name, name, description, topics_json, language, html_url, stars, forks,
-        updated_at, readme_url, readme_text, checksum, last_synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        updated_at, readme_url, readme_text, readme_etag, readme_last_modified, checksum, last_synced_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         full_name = excluded.full_name,
         name = excluded.name,
@@ -784,6 +796,8 @@ export class LocalDatabase {
         updated_at = excluded.updated_at,
         readme_url = excluded.readme_url,
         readme_text = excluded.readme_text,
+        readme_etag = excluded.readme_etag,
+        readme_last_modified = excluded.readme_last_modified,
         checksum = excluded.checksum,
         last_synced_at = excluded.last_synced_at;
     `);
@@ -805,6 +819,8 @@ export class LocalDatabase {
           repo.updatedAt,
           repo.readmeUrl,
           repo.readmeText,
+          repo.readmeEtag ?? null,
+          repo.readmeLastModified ?? null,
           repo.checksum,
           repo.lastSyncedAt,
         ]);
@@ -825,7 +841,7 @@ export class LocalDatabase {
     const result = this.db.exec(`
       SELECT
         id, full_name, name, description, topics_json, language, html_url, stars, forks,
-        updated_at, readme_url, readme_text, checksum, last_synced_at
+        updated_at, readme_url, readme_text, readme_etag, readme_last_modified, checksum, last_synced_at
       FROM repos
       ORDER BY id ASC;
     `);
@@ -848,14 +864,16 @@ export class LocalDatabase {
       updatedAt: String(row[9]),
       readmeUrl: row[10] == null ? null : String(row[10]),
       readmeText: row[11] == null ? null : String(row[11]),
-      checksum: row[12] == null ? null : String(row[12]),
-      lastSyncedAt: Number(row[13]),
+      readmeEtag: row[12] == null ? null : String(row[12]),
+      readmeLastModified: row[13] == null ? null : String(row[13]),
+      checksum: row[14] == null ? null : String(row[14]),
+      lastSyncedAt: Number(row[15]),
     }));
   }
 
   listRepoSyncState(): RepoSyncState[] {
     const result = this.db.exec(`
-      SELECT id, full_name, description, topics_json, language, updated_at, checksum
+      SELECT id, full_name, description, topics_json, language, updated_at, readme_etag, readme_last_modified, checksum
       FROM repos
       ORDER BY id ASC;
     `);
@@ -872,7 +890,9 @@ export class LocalDatabase {
       topics: JSON.parse(String(row[3] ?? "[]")) as string[],
       language: row[4] == null ? null : String(row[4]),
       updatedAt: String(row[5]),
-      checksum: row[6] == null ? null : String(row[6]),
+      readmeEtag: row[6] == null ? null : String(row[6]),
+      readmeLastModified: row[7] == null ? null : String(row[7]),
+      checksum: row[8] == null ? null : String(row[8]),
     }));
   }
 

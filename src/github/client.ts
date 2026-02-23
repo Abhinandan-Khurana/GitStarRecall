@@ -3,6 +3,7 @@ import type {
   FetchReadmesResult,
   FetchStarredResult,
   GitHubRateLimit,
+  ReadmeFetchStats,
   ReadmeFetchProgress,
   GitHubStarredRepo,
   RepoReadmeRecord,
@@ -32,7 +33,19 @@ type FetchStarredOptions = {
 type FetchReadmesOptions = {
   signal?: AbortSignal;
   concurrency?: number;
+  minConcurrency?: number;
+  maxConcurrency?: number;
+  batchSize?: number;
+  previousSyncStateByRepoId?: Map<
+    number,
+    { checksum: string | null; readmeEtag: string | null; readmeLastModified: string | null }
+  >;
   onProgress?: (progress: ReadmeFetchProgress) => void;
+  onBatch?: (
+    records: RepoReadmeRecord[],
+    progress: ReadmeFetchProgress,
+    stats: ReadmeFetchStats,
+  ) => Promise<void> | void;
 };
 
 const API_BASE_URL = "https://api.github.com";
@@ -102,6 +115,57 @@ function shouldRetry(response: Response): boolean {
 
   const remaining = response.headers.get("x-ratelimit-remaining");
   return remaining === "0";
+}
+
+function isRateLimitedResponse(response: Response): boolean {
+  return response.status === 429 || (response.status === 403 && shouldRetry(response));
+}
+
+function computeAverageLatency(latencies: number[]): number {
+  if (latencies.length === 0) {
+    return 0;
+  }
+  const total = latencies.reduce((sum, value) => sum + value, 0);
+  return total / latencies.length;
+}
+
+function computePercentile(latencies: number[], percentile: number): number {
+  if (latencies.length === 0) {
+    return 0;
+  }
+  const sorted = [...latencies].sort((a, b) => a - b);
+  const rank = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.ceil((percentile / 100) * sorted.length) - 1),
+  );
+  return sorted[rank] ?? 0;
+}
+
+class AdaptiveConcurrency {
+  private current: number;
+
+  constructor(
+    private readonly min: number,
+    private readonly max: number,
+    initial: number,
+  ) {
+    this.current = Math.max(this.min, Math.min(this.max, Math.trunc(initial)));
+  }
+
+  onWindow(stats: { errorRate: number; p95Ms: number; rateLimited: boolean }): void {
+    if (stats.rateLimited || stats.errorRate > 0.12) {
+      this.current = Math.max(this.min, Math.floor(this.current * 0.7));
+      return;
+    }
+
+    if (stats.p95Ms < 900 && stats.errorRate < 0.03) {
+      this.current = Math.min(this.max, this.current + 1);
+    }
+  }
+
+  value(): number {
+    return this.current;
+  }
 }
 
 function extractNextLink(headerValue: string | null): string | null {
@@ -175,6 +239,8 @@ async function requestWithBackoff(args: {
   signal?: AbortSignal;
   logger: Logger;
   maxRetries: number;
+  headers?: Record<string, string>;
+  onRetry?: (meta: { status: number; waitMs: number; attempt: number; rateLimited: boolean }) => void;
 }): Promise<Response> {
   let attempt = 0;
 
@@ -186,10 +252,11 @@ async function requestWithBackoff(args: {
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         Authorization: `Bearer ${args.accessToken}`,
+        ...(args.headers ?? {}),
       },
     });
 
-    if (response.ok) {
+    if (response.ok || response.status === 304 || response.status === 404) {
       return response;
     }
 
@@ -209,6 +276,12 @@ async function requestWithBackoff(args: {
       attempt: attempt + 1,
       status: response.status,
       waitMs,
+    });
+    args.onRetry?.({
+      status: response.status,
+      waitMs,
+      attempt: attempt + 1,
+      rateLimited: isRateLimitedResponse(response),
     });
 
     await sleep(waitMs);
@@ -319,185 +392,323 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
     repos: GitHubStarredRepo[],
     options: FetchReadmesOptions = {},
   ): Promise<FetchReadmesResult> {
-    const concurrency = options.concurrency ?? DEFAULT_README_CONCURRENCY;
+    const initialConcurrency = options.concurrency ?? DEFAULT_README_CONCURRENCY;
+    const minConcurrency = Math.max(1, options.minConcurrency ?? 4);
+    const maxConcurrency = Math.max(minConcurrency, options.maxConcurrency ?? 20);
+    const batchSize = Math.max(1, options.batchSize ?? 40);
+    const concurrencyController = new AdaptiveConcurrency(
+      minConcurrency,
+      maxConcurrency,
+      Math.max(minConcurrency, Math.min(maxConcurrency, initialConcurrency)),
+    );
     const records: RepoReadmeRecord[] = [];
     let missingCount = 0;
     let failedCount = 0;
     let completed = 0;
+    let succeeded = 0;
+    let retryCount = 0;
+    let rateLimitHits = 0;
+    const latenciesMs: number[] = [];
+    let windowCompleted = 0;
+    let windowFailed = 0;
+    let windowRateLimited = false;
+    let cooldownUntil = 0;
+    let batchQueue = Promise.resolve();
+    let batchBuffer: RepoReadmeRecord[] = [];
 
-    // Concurrency-limited pool: process at most `concurrency` repos at once.
     let cursor = 0;
 
+    const createProgress = (): ReadmeFetchProgress => ({
+      completed,
+      total: repos.length,
+      missingCount,
+      failedCount,
+    });
+
+    const createStats = (): ReadmeFetchStats => ({
+      requested: repos.length,
+      succeeded,
+      missing: missingCount,
+      failed: failedCount,
+      retryCount,
+      rateLimitHits,
+      avgLatencyMs: computeAverageLatency(latenciesMs),
+      p95LatencyMs: computePercentile(latenciesMs, 95),
+    });
+
     const reportProgress = () => {
-      options.onProgress?.({
-        completed,
-        total: repos.length,
-        missingCount,
-        failedCount,
+      options.onProgress?.(createProgress());
+    };
+
+    const flushBatch = (force: boolean) => {
+      if (!options.onBatch) {
+        return;
+      }
+      if (!force && batchBuffer.length < batchSize) {
+        return;
+      }
+      const next = batchBuffer;
+      batchBuffer = [];
+      if (next.length === 0) {
+        return;
+      }
+      batchQueue = batchQueue.then(async () => {
+        await options.onBatch?.(next, createProgress(), createStats());
       });
     };
 
-    async function next(): Promise<void> {
-      while (cursor < repos.length) {
-        const index = cursor;
-        cursor += 1;
-        const repo = repos[index];
+    const applyAdaptiveWindow = () => {
+      const windowSize = 24;
+      if (windowCompleted < windowSize) {
+        return;
+      }
+      const windowErrorRate = windowFailed / Math.max(1, windowCompleted);
+      const windowStart = Math.max(latenciesMs.length - windowCompleted, 0);
+      const windowLatencies = latenciesMs.slice(windowStart);
+      const p95Ms = computePercentile(windowLatencies, 95);
+      concurrencyController.onWindow({
+        errorRate: windowErrorRate,
+        p95Ms,
+        rateLimited: windowRateLimited,
+      });
+      windowCompleted = 0;
+      windowFailed = 0;
+      windowRateLimited = false;
+    };
 
-        const url = `${API_BASE_URL}/repos/${repo.full_name}/readme`;
+    const buildReadmeRecord = async (params: {
+      repo: GitHubStarredRepo;
+      readmeText: string | null;
+      readmeUrl: string | null;
+      readmeEtag: string | null;
+      readmeLastModified: string | null;
+      checksum: string | null;
+      missingReadme: boolean;
+      notModified: boolean;
+    }): Promise<RepoReadmeRecord> => {
+      const resolvedChecksum =
+        params.checksum ??
+        (await sha256Hex(canonicalChecksumInput(params.repo, await sha256Hex(params.readmeText ?? ""))));
+      return {
+        repoId: params.repo.id,
+        readmeUrl: params.readmeUrl,
+        readmeText: params.readmeText,
+        readmeEtag: params.readmeEtag,
+        readmeLastModified: params.readmeLastModified,
+        checksum: resolvedChecksum,
+        missingReadme: params.missingReadme,
+        notModified: params.notModified,
+      };
+    };
 
-        try {
-          const response = await fetchImpl(url, {
-            method: "GET",
-            signal: options.signal,
-            headers: {
-              Accept: "application/vnd.github+json",
-              "X-GitHub-Api-Version": "2022-11-28",
-              Authorization: `Bearer ${authToken}`,
-            },
-          });
+    const fetchSingleReadme = async (repo: GitHubStarredRepo) => {
+      const startedAt = performance.now();
+      const previous = options.previousSyncStateByRepoId?.get(repo.id);
+      const conditionalHeaders: Record<string, string> = {};
+      if (previous?.readmeEtag) {
+        conditionalHeaders["If-None-Match"] = previous.readmeEtag;
+      }
+      if (previous?.readmeLastModified) {
+        conditionalHeaders["If-Modified-Since"] = previous.readmeLastModified;
+      }
+      let readmeFailed = false;
+      let rateLimited = false;
 
-          if (response.status === 404) {
-            const emptyHash = await sha256Hex("");
-            const checksum = await sha256Hex(canonicalChecksumInput(repo, emptyHash));
-            records.push({
-              repoId: repo.id,
-              readmeUrl: null,
-              readmeText: null,
-              checksum,
-              missingReadme: true,
-            });
-            missingCount += 1;
-            completed += 1;
-            reportProgress();
-
-            logger.debug("no README for repo", { repo: repo.full_name });
-            continue;
-          }
-
-          if (response.status === 429 || (response.status === 403 && shouldRetry(response))) {
-            // Rate-limited during README fetch — use backoff then retry this repo.
-            const retried = await requestWithBackoff({
-              url,
-              fetchImpl,
-              accessToken: authToken,
-              signal: options.signal,
-              logger,
-              maxRetries,
-            });
-
-            const payload = (await retried.json()) as unknown;
-            assertReadmePayload(payload);
-
-            const readmeText =
-              payload.content && payload.encoding === "base64"
-                ? decodeBase64Utf8(payload.content)
-                : null;
-
-            const readmeSha256 = await sha256Hex(readmeText ?? "");
-            const checksum = await sha256Hex(canonicalChecksumInput(repo, readmeSha256));
-
-            records.push({
-              repoId: repo.id,
-              readmeUrl: payload.html_url ?? null,
-              readmeText,
-              checksum,
-              missingReadme: readmeText === null,
-            });
-
-            if (readmeText === null) {
-              missingCount += 1;
+      try {
+        const response = await requestWithBackoff({
+          url: `${API_BASE_URL}/repos/${repo.full_name}/readme`,
+          fetchImpl,
+          accessToken: authToken,
+          signal: options.signal,
+          logger,
+          maxRetries,
+          headers: conditionalHeaders,
+          onRetry: (meta) => {
+            retryCount += 1;
+            if (meta.rateLimited) {
+              rateLimitHits += 1;
+              rateLimited = true;
             }
+          },
+        });
 
-            completed += 1;
-            reportProgress();
-            continue;
-          }
+        const latencyMs = performance.now() - startedAt;
+        const readmeEtag = response.headers.get("etag");
+        const readmeLastModified = response.headers.get("last-modified");
 
-          if (!response.ok) {
-            logger.warn("README fetch failed", {
-              repo: repo.full_name,
-              status: response.status,
-            });
-            const emptyHash = await sha256Hex("");
-            const checksum = await sha256Hex(canonicalChecksumInput(repo, emptyHash));
-            records.push({
-              repoId: repo.id,
-              readmeUrl: null,
-              readmeText: null,
-              checksum,
-              missingReadme: true,
-            });
-            failedCount += 1;
-            completed += 1;
-            reportProgress();
-            continue;
-          }
-
-          const payload = (await response.json()) as unknown;
-          assertReadmePayload(payload);
-
-          const readmeText =
-            payload.content && payload.encoding === "base64"
-              ? decodeBase64Utf8(payload.content)
-              : null;
-
-          const readmeSha256 = await sha256Hex(readmeText ?? "");
-          const checksum = await sha256Hex(canonicalChecksumInput(repo, readmeSha256));
-
-          records.push({
-            repoId: repo.id,
-            readmeUrl: payload.html_url ?? null,
-            readmeText,
-            checksum,
-            missingReadme: readmeText === null,
-          });
-
-          if (readmeText === null) {
-            missingCount += 1;
-          }
-
-          completed += 1;
-          reportProgress();
-
-          logger.debug("fetched README", {
-            repo: repo.full_name,
-            length: readmeText?.length ?? 0,
-          });
-        } catch (err) {
-          if (options.signal?.aborted) {
-            throw err;
-          }
-
-          logger.warn("README fetch error", {
-            repo: repo.full_name,
-            error: err instanceof Error ? err.message : String(err),
-          });
-
+        if (response.status === 404) {
           const emptyHash = await sha256Hex("");
           const checksum = await sha256Hex(canonicalChecksumInput(repo, emptyHash));
-          records.push({
-            repoId: repo.id,
-            readmeUrl: null,
+          const record = await buildReadmeRecord({
+            repo,
             readmeText: null,
+            readmeUrl: null,
+            readmeEtag: readmeEtag ?? previous?.readmeEtag ?? null,
+            readmeLastModified: readmeLastModified ?? previous?.readmeLastModified ?? null,
             checksum,
             missingReadme: true,
+            notModified: false,
           });
-          failedCount += 1;
-          completed += 1;
-          reportProgress();
+          return { record, latencyMs, failed: false, rateLimited };
         }
-      }
-    }
 
-    // Launch `concurrency` workers in parallel.
-    const workers = Array.from({ length: Math.min(concurrency, repos.length) }, () => next());
-    await Promise.all(workers);
+        if (response.status === 304) {
+          const record = await buildReadmeRecord({
+            repo,
+            readmeText: null,
+            readmeUrl: null,
+            readmeEtag: readmeEtag ?? previous?.readmeEtag ?? null,
+            readmeLastModified: readmeLastModified ?? previous?.readmeLastModified ?? null,
+            checksum: previous?.checksum ?? null,
+            missingReadme: false,
+            notModified: true,
+          });
+          return { record, latencyMs, failed: false, rateLimited };
+        }
+
+        if (!response.ok) {
+          const emptyHash = await sha256Hex("");
+          const checksum = await sha256Hex(canonicalChecksumInput(repo, emptyHash));
+          const record = await buildReadmeRecord({
+            repo,
+            readmeText: null,
+            readmeUrl: null,
+            readmeEtag: readmeEtag ?? previous?.readmeEtag ?? null,
+            readmeLastModified: readmeLastModified ?? previous?.readmeLastModified ?? null,
+            checksum,
+            missingReadme: true,
+            notModified: false,
+          });
+          return { record, latencyMs, failed: true, rateLimited };
+        }
+
+        const payload = (await response.json()) as GitHubReadmePayload;
+        assertReadmePayload(payload);
+        const readmeText =
+          payload.content && payload.encoding === "base64" ? decodeBase64Utf8(payload.content) : null;
+        const readmeSha256 = await sha256Hex(readmeText ?? "");
+        const checksum = await sha256Hex(canonicalChecksumInput(repo, readmeSha256));
+        const record = await buildReadmeRecord({
+          repo,
+          readmeText,
+          readmeUrl: payload.html_url ?? null,
+          readmeEtag,
+          readmeLastModified,
+          checksum,
+          missingReadme: readmeText == null,
+          notModified: false,
+        });
+        return { record, latencyMs, failed: false, rateLimited };
+      } catch (err) {
+        if (options.signal?.aborted) {
+          throw err;
+        }
+        readmeFailed = true;
+        logger.warn("README fetch error", {
+          repo: repo.full_name,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        const latencyMs = performance.now() - startedAt;
+        const emptyHash = await sha256Hex("");
+        const checksum = await sha256Hex(canonicalChecksumInput(repo, emptyHash));
+        const record = await buildReadmeRecord({
+          repo,
+          readmeText: null,
+          readmeUrl: null,
+          readmeEtag: previous?.readmeEtag ?? null,
+          readmeLastModified: previous?.readmeLastModified ?? null,
+          checksum,
+          missingReadme: true,
+          notModified: false,
+        });
+        return { record, latencyMs, failed: readmeFailed, rateLimited };
+      }
+    };
+
+    const processRepo = async (repo: GitHubStarredRepo) => {
+      if (cooldownUntil > Date.now()) {
+        await sleep(cooldownUntil - Date.now());
+      }
+
+      const result = await fetchSingleReadme(repo);
+      records.push(result.record);
+      batchBuffer.push(result.record);
+      latenciesMs.push(result.latencyMs);
+      completed += 1;
+      windowCompleted += 1;
+
+      if (result.record.notModified || !result.record.missingReadme) {
+        succeeded += 1;
+      }
+      if (result.record.missingReadme && !result.failed) {
+        missingCount += 1;
+      }
+      if (result.failed) {
+        failedCount += 1;
+        windowFailed += 1;
+      }
+      if (result.rateLimited) {
+        windowRateLimited = true;
+      }
+
+      if (result.rateLimited && windowFailed >= 3) {
+        cooldownUntil = Date.now() + 1500;
+      }
+
+      flushBatch(false);
+      reportProgress();
+      applyAdaptiveWindow();
+    };
+
+    await new Promise<void>((resolve, reject) => {
+      let running = 0;
+      let ended = false;
+      const launch = () => {
+        if (ended) {
+          return;
+        }
+        while (running < concurrencyController.value() && cursor < repos.length) {
+          const repo = repos[cursor];
+          cursor += 1;
+          running += 1;
+          void processRepo(repo)
+            .catch((error) => {
+              ended = true;
+              reject(error);
+            })
+            .finally(() => {
+              running -= 1;
+              if (ended) {
+                return;
+              }
+              if (cursor >= repos.length && running === 0) {
+                ended = true;
+                resolve();
+                return;
+              }
+              launch();
+            });
+        }
+      };
+
+      if (repos.length === 0) {
+        resolve();
+        return;
+      }
+      launch();
+    });
+    flushBatch(true);
+    await batchQueue;
 
     logger.debug("README fetch complete", {
       total: repos.length,
       fetched: records.length,
       missing: missingCount,
       failed: failedCount,
+      retryCount,
+      rateLimitHits,
+      avgLatencyMs: Number(computeAverageLatency(latenciesMs).toFixed(2)),
+      p95LatencyMs: Number(computePercentile(latenciesMs, 95).toFixed(2)),
     });
 
     return { records, missingCount, failedCount };

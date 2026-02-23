@@ -11,6 +11,8 @@ export type RepoRecord = {
   updatedAt: string;
   readmeUrl: string | null;
   readmeText: string | null;
+  readmeEtag?: string | null;
+  readmeLastModified?: string | null;
   checksum: string | null;
   lastSyncedAt: number;
 };
@@ -22,6 +24,8 @@ export type RepoSyncState = {
   topics: string[];
   language: string | null;
   updatedAt: string;
+  readmeEtag?: string | null;
+  readmeLastModified?: string | null;
   checksum: string | null;
 };
 

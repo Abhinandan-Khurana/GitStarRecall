@@ -12,6 +12,8 @@ This document reviews the GitStarRecall codebase against the threats and mitigat
 - Browser embedding remains default path with automatic fallback semantics.
 - Pending embedding SQL hot path now avoids CAST-based joins, reducing failure surface and improving deterministic query plans.
 - Production error logging remains message-oriented while dev keeps richer diagnostics.
+- README batch pipeline now uses adaptive concurrency + cooldown for rate-limit resilience (reduces abusive retry bursts).
+- Conditional README revalidation headers (`If-None-Match`, `If-Modified-Since`) use repo-local validator metadata only; no auth token/session data is written to these fields.
 
 ---
 

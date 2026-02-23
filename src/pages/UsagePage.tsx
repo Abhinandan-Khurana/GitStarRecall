@@ -20,7 +20,7 @@ import {
   type OllamaEmbeddingRuntimeInfo,
 } from "../embeddings/ollamaClient";
 import { float32ToBlob } from "../embeddings/vector";
-import { buildSyncPlan } from "../sync/plan";
+import { buildSyncPlan, repoMetadataChanged } from "../sync/plan";
 import { sortChatMessages } from "../chat/order";
 import { captureLocalError, captureLocalWarn } from "../observability/localLog";
 import SafeMarkdown from "../components/SafeMarkdown";
@@ -333,6 +333,35 @@ function getLargeLibraryModeEnabled(): boolean {
   return raw === undefined || raw === "1" || raw === "true";
 }
 
+function getReadmePipelineV2Enabled(): boolean {
+  const raw = import.meta.env.VITE_README_BATCH_PIPELINE_V2;
+  return raw === "1" || raw === "true";
+}
+
+function getReadmeBatchSize(): number {
+  const raw = Number(import.meta.env.VITE_README_BATCH_SIZE);
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.max(10, Math.min(100, Math.trunc(raw)));
+  }
+  return 40;
+}
+
+function getEmbedTriggerThreshold(): number {
+  const raw = Number(import.meta.env.VITE_EMBED_TRIGGER_THRESHOLD);
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.max(32, Math.trunc(raw));
+  }
+  return 256;
+}
+
+function getEmbedWindowSize(): number {
+  const raw = Number(import.meta.env.VITE_EMBED_WINDOW_SIZE);
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.max(32, Math.trunc(raw));
+  }
+  return 512;
+}
+
 function parseIsoToMs(iso: string): number {
   const timestamp = new Date(iso).getTime();
   return Number.isFinite(timestamp) ? timestamp : 0;
@@ -497,6 +526,8 @@ function mapStarredRepoToRecord(repo: GitHubStarredRepo, syncedAt: number): Repo
     updatedAt: repo.updated_at,
     readmeUrl: null,
     readmeText: null,
+    readmeEtag: null,
+    readmeLastModified: null,
     checksum: null,
     lastSyncedAt: syncedAt,
   };
@@ -1010,8 +1041,13 @@ export default function UsagePage() {
 
     const client = createGitHubApiClient({ accessToken });
     const existingStates = database.listRepoSyncState();
+    const existingRepos = database.listRepos();
     const existingById = new Map(existingStates.map((repo) => [repo.id, repo]));
+    const existingReposById = new Map(existingRepos.map((repo) => [repo.id, repo]));
     const previousRepoIds = existingStates.map((repo) => repo.id);
+    const usePipelineV2 = getReadmePipelineV2Enabled();
+    const runStartedAt = Date.now();
+    const starFetchStartedAt = performance.now();
 
     const starResult = await client.fetchAllStarredRepos({
       previousRepoIds,
@@ -1030,8 +1066,10 @@ export default function UsagePage() {
         );
       },
     });
+    const starFetchDurationMs = performance.now() - starFetchStartedAt;
     const syncedAt = Date.now();
     const syncPlan = buildSyncPlan(existingStates, starResult.repos);
+    const remoteById = new Map(starResult.repos.map((repo) => [repo.id, repo]));
 
     setIndexingStatus((previous) =>
       previous
@@ -1049,6 +1087,31 @@ export default function UsagePage() {
 
     const candidateIds = new Set(syncPlan.candidateRepoIds);
     const candidates = starResult.repos.filter((repo) => candidateIds.has(repo.id));
+    const previousSyncStateByRepoId = new Map(
+      existingStates.map((state) => [
+        state.id,
+        {
+          checksum: state.checksum,
+          readmeEtag: state.readmeEtag ?? null,
+          readmeLastModified: state.readmeLastModified ?? null,
+        },
+      ]),
+    );
+    let chunkUpsertLatencyTotalMs = 0;
+    let chunkUpsertCount = 0;
+    let firstEmbeddingAvailableAt: number | null = null;
+    let lastReadmeStats = {
+      requested: candidates.length,
+      succeeded: 0,
+      missing: 0,
+      failed: 0,
+      retryCount: 0,
+      rateLimitHits: 0,
+      avgLatencyMs: 0,
+      p95LatencyMs: 0,
+    };
+    let embeddingWindowRunning = false;
+    let lastEmbeddingWindowAt = 0;
 
     setIndexingStatus((previous) =>
       previous
@@ -1063,81 +1126,151 @@ export default function UsagePage() {
         : previous,
     );
 
+    const processReadmeBatch = async (batch: RepoReadmeRecord[]): Promise<void> => {
+      if (batch.length === 0) {
+        return;
+      }
+      const upserts: RepoRecord[] = [];
+      const changedForChunk: RepoRecord[] = [];
+      for (const readme of batch) {
+        const remoteRepo = remoteById.get(readme.repoId);
+        if (!remoteRepo) {
+          continue;
+        }
+
+        const localRepo = existingReposById.get(readme.repoId);
+        const localState = existingById.get(readme.repoId);
+        const record = mapStarredRepoToRecord(remoteRepo, syncedAt);
+        if (readme.notModified && localRepo) {
+          record.readmeUrl = localRepo.readmeUrl;
+          record.readmeText = localRepo.readmeText;
+          record.checksum = localRepo.checksum;
+          record.readmeEtag = readme.readmeEtag ?? localRepo.readmeEtag;
+          record.readmeLastModified = readme.readmeLastModified ?? localRepo.readmeLastModified;
+        } else {
+          record.readmeUrl = readme.readmeUrl;
+          record.readmeText = readme.readmeText;
+          record.checksum = readme.checksum;
+          record.readmeEtag = readme.readmeEtag;
+          record.readmeLastModified = readme.readmeLastModified;
+        }
+
+        const metadataChanged = localState ? repoMetadataChanged(localState, remoteRepo) : true;
+        const checksumChanged = localRepo ? localRepo.checksum !== record.checksum : true;
+        if (!localRepo || checksumChanged || metadataChanged) {
+          upserts.push(record);
+        }
+        if (checksumChanged) {
+          changedForChunk.push(record);
+        }
+
+        existingReposById.set(record.id, record);
+        existingById.set(record.id, {
+          id: record.id,
+          fullName: record.fullName,
+          description: record.description,
+          topics: record.topics,
+          language: record.language,
+          updatedAt: record.updatedAt,
+          readmeEtag: record.readmeEtag,
+          readmeLastModified: record.readmeLastModified,
+          checksum: record.checksum,
+        });
+      }
+
+      if (upserts.length > 0) {
+        await database.upsertRepos(upserts);
+      }
+
+      if (changedForChunk.length > 0) {
+        setFetchPhase("Chunking changed repos…");
+        setIndexingStatus((previous) =>
+          previous
+            ? {
+                ...previous,
+                phase: "Chunking changed repositories",
+              }
+            : previous,
+        );
+        const repoIds = changedForChunk.map((repo) => repo.id);
+        const chunkStart = performance.now();
+        await database.deleteChunksByRepoIds(repoIds);
+        const chunks = chunkRepos(changedForChunk);
+        await database.upsertChunks(chunks);
+        chunkUpsertLatencyTotalMs += performance.now() - chunkStart;
+        chunkUpsertCount += 1;
+      }
+
+      const now = Date.now();
+      const shouldRunEmbeddingWindow =
+        usePipelineV2 &&
+        !embeddingWindowRunning &&
+        now - lastEmbeddingWindowAt >= 1500 &&
+        database.getPendingEmbeddingChunkCount() >= getEmbedTriggerThreshold();
+      if (shouldRunEmbeddingWindow) {
+        embeddingWindowRunning = true;
+        lastEmbeddingWindowAt = now;
+        const beforeCount = database.getEmbeddingCount();
+        try {
+          await generateEmbeddings(database, {
+            incremental: true,
+            maxChunks: getEmbedWindowSize(),
+          });
+          const afterCount = database.getEmbeddingCount();
+          if (afterCount > beforeCount && firstEmbeddingAvailableAt == null) {
+            firstEmbeddingAvailableAt = Date.now();
+          }
+        } finally {
+          embeddingWindowRunning = false;
+        }
+      }
+
+      setIndexingStatus((previous) =>
+        previous
+          ? {
+              ...previous,
+              chunkTotal: database.getChunkCount(),
+            }
+          : previous,
+      );
+    };
+
+    const readmeStageStartedAt = performance.now();
     const readmeResult = await client.fetchReadmes(candidates, {
+      batchSize: getReadmeBatchSize(),
+      previousSyncStateByRepoId,
       onProgress: (progress) => {
         setIndexingStatus((previous) =>
           previous
             ? {
-              ...previous,
-              readmesCompleted: progress.completed,
-              readmesMissing: progress.missingCount,
-              readmesFailed: progress.failedCount,
-            }
+                ...previous,
+                readmesCompleted: progress.completed,
+                readmesMissing: progress.missingCount,
+                readmesFailed: progress.failedCount,
+              }
             : previous,
         );
         setFetchPhase(`Fetching changed READMEs… ${progress.completed}/${progress.total}`);
       },
+      onBatch: usePipelineV2
+        ? async (records, progress, stats) => {
+            await processReadmeBatch(records);
+            lastReadmeStats = stats;
+            setFetchPhase(
+              `Fetching changed READMEs… ${progress.completed}/${progress.total} · p95 ${Math.round(
+                stats.p95LatencyMs,
+              )}ms`,
+            );
+          }
+        : undefined,
     });
+    const readmeStageDurationMs = performance.now() - readmeStageStartedAt;
 
-    const readmeByRepoId = new Map<number, RepoReadmeRecord>();
-    for (const record of readmeResult.records) {
-      readmeByRepoId.set(record.repoId, record);
+    if (!usePipelineV2) {
+      await processReadmeBatch(readmeResult.records);
     }
-
-    setIndexingStatus((previous) =>
-      previous
-        ? {
-          ...previous,
-          readmesTarget: candidates.length,
-          readmesCompleted: candidates.length,
-          readmesMissing: readmeResult.missingCount,
-          readmesFailed: readmeResult.failedCount,
-        }
-        : previous,
-    );
-
-    const changedRecords: RepoRecord[] = [];
-    for (const repo of candidates) {
-      const readme = readmeByRepoId.get(repo.id);
-      if (!readme) {
-        continue;
-      }
-
-      const record = mapStarredRepoToRecord(repo, syncedAt);
-      record.readmeUrl = readme.readmeUrl;
-      record.readmeText = readme.readmeText;
-      record.checksum = readme.checksum;
-
-      const local = existingById.get(repo.id);
-      if (!local || local.checksum !== record.checksum) {
-        changedRecords.push(record);
-      }
-    }
-
-    if (changedRecords.length > 0) {
-      await database.upsertRepos(changedRecords);
-      await database.deleteChunksByRepoIds(changedRecords.map((repo) => repo.id));
-
-      setFetchPhase("Chunking changed repos…");
-      setIndexingStatus((previous) =>
-        previous
-          ? {
-            ...previous,
-            phase: "Chunking changed repositories",
-          }
-          : previous,
-      );
-
-      const chunks = chunkRepos(changedRecords);
-      await database.upsertChunks(chunks);
-      setIndexingStatus((previous) =>
-        previous
-          ? {
-            ...previous,
-            chunkTotal: chunks.length,
-          }
-          : previous,
-      );
+    if (firstEmbeddingAvailableAt == null && database.getEmbeddingCount() > 0) {
+      firstEmbeddingAvailableAt = Date.now();
     }
 
     await database.upsertIndexMeta({
@@ -1152,8 +1285,25 @@ export default function UsagePage() {
         totalRepos: starResult.repos.length,
         removedRepos: syncPlan.removedRepoIds.length,
         candidateRepos: candidates.length,
-        changedRepos: changedRecords.length,
+        changedRepos: readmeResult.records.filter((record) => !record.notModified).length,
         fetchedPages: starResult.fetchedPages,
+      }),
+      updatedAt: Date.now(),
+    });
+    await database.upsertIndexMeta({
+      key: "last_star_sync_pipeline_metrics",
+      value: JSON.stringify({
+        source,
+        pipeline: usePipelineV2 ? "batch-v2" : "legacy",
+        starFetchMs: Math.round(starFetchDurationMs),
+        readmeFetchMs: Math.round(readmeStageDurationMs),
+        chunkUpsertMsAvg:
+          chunkUpsertCount > 0 ? Math.round(chunkUpsertLatencyTotalMs / chunkUpsertCount) : 0,
+        firstEmbeddingAvailableMs:
+          firstEmbeddingAvailableAt == null
+            ? null
+            : Math.max(0, firstEmbeddingAvailableAt - runStartedAt),
+        readmeStats: lastReadmeStats,
       }),
       updatedAt: Date.now(),
     });
@@ -1186,9 +1336,10 @@ export default function UsagePage() {
 
     setStarsSummary(
       `Sync complete: ${starResult.repos.length} stars scanned (${starResult.fetchedPages} pages), ` +
-      `${changedRecords.length} changed/new, ${syncPlan.removedRepoIds.length} removed. ` +
+      `${readmeResult.records.filter((record) => !record.notModified).length} changed/new, ${syncPlan.removedRepoIds.length} removed. ` +
       `READMEs fetched: ${readmeCount}, missing: ${readmeResult.missingCount}, failed: ${readmeResult.failedCount}. ` +
-      `Local DB: ${localRepoCount} repos, ${localChunkCount} chunks, ${localEmbeddingCount} embeddings.`,
+      `Local DB: ${localRepoCount} repos, ${localChunkCount} chunks, ${localEmbeddingCount} embeddings. ` +
+      `Pipeline: ${usePipelineV2 ? "batch-v2" : "legacy"} · README p95 ${Math.round(lastReadmeStats.p95LatencyMs)}ms.`,
     );
 
     if (hasPendingEmbeddingChunks) {
@@ -1226,7 +1377,7 @@ export default function UsagePage() {
 
   const generateEmbeddings = async (
     database: Awaited<ReturnType<typeof getLocalDatabase>>,
-    options?: { forceBrowser?: boolean },
+    options?: { forceBrowser?: boolean; maxChunks?: number; repoIds?: number[]; incremental?: boolean },
   ) => {
     let embedder: Embedder | null = null;
     let embeddingPool: EmbeddingWorkerPool | null = null;
@@ -1259,6 +1410,9 @@ export default function UsagePage() {
       const largeLibraryModeEnabled = getLargeLibraryModeEnabled();
       const largeLibraryThreshold = getLargeLibraryThreshold();
       const forceBrowser = options?.forceBrowser === true;
+      const incrementalMode = options?.incremental === true;
+      const repoIdsFilter = options?.repoIds;
+      const maxChunks = options?.maxChunks;
       const ollamaEnabled = allowOllamaEmbedding && !forceBrowser;
       const resolvedOllamaBaseUrl = ollamaBaseUrl.trim() || getDefaultOllamaBaseUrl();
       const resolvedOllamaModel = ollamaModel.trim() || getDefaultOllamaModel();
@@ -1340,7 +1494,10 @@ export default function UsagePage() {
 
       const repoCount = database.getRepoCount();
       const largeLibraryMode = largeLibraryModeEnabled && repoCount > largeLibraryThreshold;
-      const pendingChunks = database.listPendingChunksForEmbedding();
+      const pendingChunks = database.listPendingChunksForEmbedding({
+        repoIds: repoIdsFilter,
+        limit: maxChunks,
+      });
       if (largeLibraryMode && pendingChunks.length > 0) {
         const repos = database.listRepos();
         const rankByRepo = new Map<number, number>();
@@ -1363,22 +1520,24 @@ export default function UsagePage() {
       }
       const embeddingTarget = pendingChunks.length;
       const pendingPlan = database.getPendingChunksQueryPlan();
-      await database.upsertIndexMeta({
-        key: "embedding_job_mode",
-        value: largeLibraryMode ? "large-library" : "standard",
-        updatedAt: Date.now(),
-      });
-      await database.upsertIndexMeta({
-        key: "embedding_job_started_at",
-        value: String(Date.now()),
-        updatedAt: Date.now(),
-      });
-      await database.upsertIndexMeta({
-        key: "embedding_job_query_plan",
-        value: pendingPlan,
-        updatedAt: Date.now(),
-      });
-      const cursorChunkId = database.getIndexMetaValue("embedding_job_cursor");
+      if (!incrementalMode) {
+        await database.upsertIndexMeta({
+          key: "embedding_job_mode",
+          value: largeLibraryMode ? "large-library" : "standard",
+          updatedAt: Date.now(),
+        });
+        await database.upsertIndexMeta({
+          key: "embedding_job_started_at",
+          value: String(Date.now()),
+          updatedAt: Date.now(),
+        });
+        await database.upsertIndexMeta({
+          key: "embedding_job_query_plan",
+          value: pendingPlan,
+          updatedAt: Date.now(),
+        });
+      }
+      const cursorChunkId = incrementalMode ? null : database.getIndexMetaValue("embedding_job_cursor");
       let queueCursor = 0;
       if (cursorChunkId) {
         const foundIndex = pendingChunks.findIndex((chunk) => chunk.id === cursorChunkId);
@@ -1408,16 +1567,19 @@ export default function UsagePage() {
         1,
         Math.min(workerBatchSize, ollamaClient ? OLLAMA_BATCH_SIZE_CAP : 32),
       );
-      setIndexingStatus((previous) =>
-        previous
-          ? {
-              ...previous,
-              phase: "Generating embeddings",
-              embeddingTarget,
-            }
-          : previous,
-      );
-      setEmbeddingRunMetrics({
+      if (!incrementalMode) {
+        setIndexingStatus((previous) =>
+          previous
+            ? {
+                ...previous,
+                phase: "Generating embeddings",
+                embeddingTarget,
+              }
+            : previous,
+        );
+      }
+      if (!incrementalMode) {
+        setEmbeddingRunMetrics({
         backendIdentity: formatEmbeddingBackendIdentity(backendIdentity),
         configuredPoolSize: initialPoolStatus.configuredPoolSize,
         activePoolSize: initialPoolStatus.activePoolSize,
@@ -1437,7 +1599,8 @@ export default function UsagePage() {
         queueDepth: peakQueueDepth,
         peakQueueDepth,
         updatedAt: Date.now(),
-      });
+        });
+      }
 
       const flushEmbeddingBuffer = async (forced: boolean) => {
         if (embeddingBuffer.length === 0) {
@@ -1475,22 +1638,24 @@ export default function UsagePage() {
           };
         }
         peakQueueDepth = Math.max(peakQueueDepth, queueDepth);
-        setFetchPhase(`Generating embeddings… ${processedCount}/${embeddingTarget} completed`);
-        setIndexingStatus((previous) =>
-          previous
-            ? {
-                ...previous,
-                phase: "Generating embeddings",
-                embeddingsCreated: processedCount,
-                embeddingTarget,
-                duplicateEmbeddingHits: duplicateHits,
-              }
-            : previous,
-        );
-        setStarsSummary(
-          `Indexing in progress: ${processedCount}/${embeddingTarget} embeddings ` +
-            `(cache hits: ${duplicateHits}, ~${Math.max(0, etaSeconds)}s remaining).`,
-        );
+        if (!incrementalMode) {
+          setFetchPhase(`Generating embeddings… ${processedCount}/${embeddingTarget} completed`);
+          setIndexingStatus((previous) =>
+            previous
+              ? {
+                  ...previous,
+                  phase: "Generating embeddings",
+                  embeddingsCreated: processedCount,
+                  embeddingTarget,
+                  duplicateEmbeddingHits: duplicateHits,
+                }
+              : previous,
+          );
+          setStarsSummary(
+            `Indexing in progress: ${processedCount}/${embeddingTarget} embeddings ` +
+              `(cache hits: ${duplicateHits}, ~${Math.max(0, etaSeconds)}s remaining).`,
+          );
+        }
         setEmbeddingRunMetrics({
           backendIdentity: formatEmbeddingBackendIdentity(backendIdentity),
           configuredPoolSize: poolStatus.configuredPoolSize,
@@ -1644,16 +1809,18 @@ export default function UsagePage() {
           nextWorkerBatchSize = Math.min(dynamicBatchCap, nextWorkerBatchSize + 1);
         }
         await flushEmbeddingBuffer(false);
-        await database.upsertIndexMeta({
-          key: "embedding_job_cursor",
-          value: String(chunks[chunks.length - 1]?.id ?? ""),
-          updatedAt: Date.now(),
-        });
-        await database.upsertIndexMeta({
-          key: "embedding_job_last_repo_id",
-          value: String(chunks[chunks.length - 1]?.repoId ?? 0),
-          updatedAt: Date.now(),
-        });
+        if (!incrementalMode) {
+          await database.upsertIndexMeta({
+            key: "embedding_job_cursor",
+            value: String(chunks[chunks.length - 1]?.id ?? ""),
+            updatedAt: Date.now(),
+          });
+          await database.upsertIndexMeta({
+            key: "embedding_job_last_repo_id",
+            value: String(chunks[chunks.length - 1]?.repoId ?? 0),
+            updatedAt: Date.now(),
+          });
+        }
         await publishProgress(false);
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
@@ -1663,36 +1830,40 @@ export default function UsagePage() {
       const finalChunkCount = database.getChunkCount();
       const finalEmbeddingCount = database.getEmbeddingCount();
       const totalDurationSec = Math.max(Math.round((Date.now() - startMs) / 1000), 1);
-      setIndexingStatus((previous) =>
-        previous
-          ? {
-              ...previous,
-              phase: "Indexing complete",
-              repoTotal: finalRepoCount,
-              readmesCompleted: previous.readmesCompleted,
-              readmesTarget: previous.readmesTarget,
-              chunkTotal: finalChunkCount,
-              embeddingsCreated: finalEmbeddingCount,
-              embeddingTarget,
-              duplicateEmbeddingHits: duplicateHits,
-              elapsedSeconds: totalDurationSec,
-            }
-          : previous,
-      );
+      if (!incrementalMode) {
+        setIndexingStatus((previous) =>
+          previous
+            ? {
+                ...previous,
+                phase: "Indexing complete",
+                repoTotal: finalRepoCount,
+                readmesCompleted: previous.readmesCompleted,
+                readmesTarget: previous.readmesTarget,
+                chunkTotal: finalChunkCount,
+                embeddingsCreated: finalEmbeddingCount,
+                embeddingTarget,
+                duplicateEmbeddingHits: duplicateHits,
+                elapsedSeconds: totalDurationSec,
+              }
+            : previous,
+        );
 
-      setStarsSummary(
-        `Sync complete in ${totalDurationSec}s. ` +
-          `Repos: ${finalRepoCount}, Chunks: ${finalChunkCount}, Embeddings: ${finalEmbeddingCount} ` +
-          `(new: ${processedCount}, cache hits: ${duplicateHits}).`,
-      );
+        setStarsSummary(
+          `Sync complete in ${totalDurationSec}s. ` +
+            `Repos: ${finalRepoCount}, Chunks: ${finalChunkCount}, Embeddings: ${finalEmbeddingCount} ` +
+            `(new: ${processedCount}, cache hits: ${duplicateHits}).`,
+        );
+      }
       const finalElapsedSeconds = Math.max((Date.now() - startMs) / 1000, 1);
       const finalQueueDepth = Math.max(embeddingTarget - processedCount, 0);
       await database.flushPendingEmbeddingCheckpoint();
-      await database.upsertIndexMeta({
-        key: "embedding_job_cursor",
-        value: "",
-        updatedAt: Date.now(),
-      });
+      if (!incrementalMode) {
+        await database.upsertIndexMeta({
+          key: "embedding_job_cursor",
+          value: "",
+          updatedAt: Date.now(),
+        });
+      }
       const finalCheckpointStatus = database.getEmbeddingCheckpointStatus();
       const finalPoolStatus = activeEmbeddingPool.getStatus();
       if (backendIdentity.kind === "browser") {
@@ -1725,26 +1896,28 @@ export default function UsagePage() {
         updatedAt: Date.now(),
       };
       setEmbeddingRunMetrics(finalMetrics);
-      captureLocalWarn(
-        "embedding_instrumentation_run",
-        JSON.stringify({
-          backendIdentity: finalMetrics.backendIdentity,
-          configuredPoolSize: finalMetrics.configuredPoolSize,
-          activePoolSize: finalMetrics.activePoolSize,
-          poolDownshifted: finalMetrics.poolDownshifted,
-          poolDownshiftReason: finalMetrics.poolDownshiftReason,
-          batchCount: finalMetrics.batchCount,
-          embeddingsProcessed: finalMetrics.embeddingsProcessed,
-          embeddingsPerSecond: Number(finalMetrics.embeddingsPerSecond.toFixed(2)),
-          avgBatchEmbedLatencyMs: Number(finalMetrics.avgBatchEmbedLatencyMs.toFixed(2)),
-          avgDbCheckpointMs: Number(finalMetrics.avgDbCheckpointMs.toFixed(2)),
-          checkpointEveryEmbeddings: finalMetrics.checkpointEveryEmbeddings,
-          checkpointEveryMs: finalMetrics.checkpointEveryMs,
-          pendingEmbeddingsSinceCheckpoint: finalMetrics.pendingEmbeddingsSinceCheckpoint,
-          lastCheckpointAt: finalMetrics.lastCheckpointAt,
-          peakQueueDepth: finalMetrics.peakQueueDepth,
-        }),
-      );
+      if (!incrementalMode) {
+        captureLocalWarn(
+          "embedding_instrumentation_run",
+          JSON.stringify({
+            backendIdentity: finalMetrics.backendIdentity,
+            configuredPoolSize: finalMetrics.configuredPoolSize,
+            activePoolSize: finalMetrics.activePoolSize,
+            poolDownshifted: finalMetrics.poolDownshifted,
+            poolDownshiftReason: finalMetrics.poolDownshiftReason,
+            batchCount: finalMetrics.batchCount,
+            embeddingsProcessed: finalMetrics.embeddingsProcessed,
+            embeddingsPerSecond: Number(finalMetrics.embeddingsPerSecond.toFixed(2)),
+            avgBatchEmbedLatencyMs: Number(finalMetrics.avgBatchEmbedLatencyMs.toFixed(2)),
+            avgDbCheckpointMs: Number(finalMetrics.avgDbCheckpointMs.toFixed(2)),
+            checkpointEveryEmbeddings: finalMetrics.checkpointEveryEmbeddings,
+            checkpointEveryMs: finalMetrics.checkpointEveryMs,
+            pendingEmbeddingsSinceCheckpoint: finalMetrics.pendingEmbeddingsSinceCheckpoint,
+            lastCheckpointAt: finalMetrics.lastCheckpointAt,
+            peakQueueDepth: finalMetrics.peakQueueDepth,
+          }),
+        );
+      }
       await publishProgress(true);
     } catch (err) {
       if (err instanceof Error && err.message === OLLAMA_RESTART_BROWSER_ERROR) {
@@ -2108,6 +2281,14 @@ export default function UsagePage() {
       {error ? (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+      {dbStorageMode === "memory" ? (
+        <Alert variant="destructive">
+          <AlertDescription>
+            Local persistence quota was exceeded. Running in memory-only mode for this tab; data may be lost on refresh.
+            Clear local data or reduce indexed content to restore persistent storage.
+          </AlertDescription>
         </Alert>
       ) : null}
 
