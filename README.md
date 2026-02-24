@@ -1,17 +1,29 @@
 <p align="center">
-  <img src="./gitstarrecall-logo.png">
+  <img src="./static/gitstarrecall-logo.png" width="220" alt="GitStarRecall logo">
 </p>
 
+<h1 align="center">GitStarRecall</h1>
 
-**Find your starred repos by memory, not by name.**
+<p align="center">
+  <strong>Find your starred repos by memory, not by name.</strong>
+</p>
+
+<p align="center">
+  <a href="https://deepwiki.com/Abhinandan-Khurana/GitStarRecall"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+  <a href="./docs/Usage.md"><img alt="Usage Guide" src="https://img.shields.io/badge/docs-Usage_Guide-0ea5e9"></a>
+  <a href="./docs/release-notes.md"><img alt="Release Notes" src="https://img.shields.io/badge/docs-Release_Notes-1d4ed8"></a>
+  <a href="./docs/security-review-stride.md"><img alt="Security Review" src="https://img.shields.io/badge/security-STRIDE_Reviewed-059669"></a>
+</p>
 
 **GitStarRecall** is a local-first web app that turns your GitHub stars into a searchable memory system.
-You can ask things like:
+
+### Ask it like this
+
 - "I starred a GraphQL security testing repo months ago, what was it?"
 - "Show me TypeScript auth projects with clean architecture vibes."
 - "Recommend the best-fit repos from my stars for my use case."
 
-**This project exists because starred repos are great until your brain says, "I know what it does, but not what it is called."**
+> **This project exists because starred repos are great until your brain says, "I know what it does, but not what it is called."**
 
 ---
 
@@ -27,6 +39,9 @@ GitStarRecall solves this by:
 - Chunking and embedding content locally.
 - Letting you search in natural language.
 - Optionally generating an LLM answer from the top local matches.
+
+Full usage instructions:
+- `docs/Usage.md`
 
 ---
 
@@ -62,7 +77,7 @@ Built-in security posture:
 Read more:
 - `docs/tech-stack-architecture-security-prd.md`
 - `docs/threat-modeling-stride.md`
-- `docs/dfd-and-trust-boundary.md`
+- `docs/dfd-diagrams.md`
 
 ---
 
@@ -87,18 +102,25 @@ Read more:
 ```mermaid
 flowchart LR
     A[Browser UI] --> B[GitHub API]
-    A --> C[Local DB: sql.js + OPFS/localStorage]
-    A --> D[Embedding Workers]
-    D --> E[Xenova Transformers]
+    A --> X[OAuth Exchange API]
+    A --> C[Local DB: sql.js + OPFS]
+    A --> C2[Chat Backup: IndexedDB/localStorage]
+    A --> D[Embedding Pipeline]
+    D --> E[Browser Workers + Xenova]
+    D --> G[Ollama Embeddings - opt-in]
+    C --> S[Local Semantic Search]
     A --> F[LLM Provider Adapter]
-    F --> G[Local endpoint: Ollama/LM Studio]
-    F --> H[Remote providers: opt-in]
+    F --> W[WebLLM in Browser - opt-in]
+    F --> L[Local LLM: Ollama/LM Studio - opt-in]
+    F --> R[Remote OpenAI-Compatible - opt-in]
 ```
 
 Notes:
+- Star sync is user-triggered via `Fetch Stars`; search runs on existing local embeddings.
 - Vector data is stored as Float32 blobs in local SQLite tables.
-- Retrieval is local; no server index required.
-- Backend preference is configurable: `webgpu` first, `wasm` fallback.
+- Retrieval/search is local; no server-side vector index is required.
+- Embedding backend policy is browser `webgpu` preferred with deterministic `wasm` fallback.
+- WebLLM/local/remote generation paths are explicit opt-in with consent controls.
 
 ---
 
@@ -124,30 +146,8 @@ Copy `.env.example` to `.env` and set values:
 cp .env.example .env
 ```
 
-Important variables:
-- `VITE_GITHUB_CLIENT_ID`
-- `VITE_GITHUB_REDIRECT_URI`
-- `VITE_GITHUB_OAUTH_EXCHANGE_URL`
-- `VITE_EMBEDDING_BACKEND_PREFERRED` (`webgpu` or `wasm`)
-- `VITE_EMBEDDING_POOL_SIZE` (1..2)
-- `VITE_EMBEDDING_WORKER_BATCH_SIZE` (1..32)
-- `VITE_EMBEDDING_DB_WRITE_BATCH_SIZE` (16..2048)
-- `VITE_EMBEDDING_UI_UPDATE_MS` (100..2000)
-- `VITE_EMBEDDING_LARGE_LIBRARY_MODE` (`1` or `0`)
-- `VITE_EMBEDDING_LARGE_LIBRARY_THRESHOLD` (default `500`)
-- `VITE_README_BATCH_PIPELINE_V2` (`1` enables staged README->chunk->embed pipeline)
-- `VITE_README_BATCH_SIZE` (default `40`)
-- `VITE_EMBED_TRIGGER_THRESHOLD` (pending chunk threshold for rolling embed windows)
-- `VITE_EMBED_WINDOW_SIZE` (per rolling embed window)
-- `VITE_OLLAMA_BASE_URL` (optional default, must be localhost/127.0.0.1/[::1])
-- `VITE_OLLAMA_MODEL` (optional default, e.g. `nomic-embed-text`)
-- `VITE_OLLAMA_TIMEOUT_MS`
-- `VITE_WEBLLM_ENABLED` (`1` enables Browser WebLLM provider)
-- `VITE_LLM_SETTINGS_ENCRYPTION_KEY=` (openssl rand -hex 32)
-
-If using Vercel OAuth exchange, see:
-- `docs/vercel-deployment.md`
-- `api/github/oauth/exchange.js`
+Then follow the complete setup and environment guide:
+- `docs/Usage.md`
 
 ### Run dev server
 
@@ -174,88 +174,22 @@ pnpm preview
 
 ---
 
-## Performance Tuning
+## Usage Guide
 
-If embedding feels slow on your machine, tune these first:
-- `VITE_EMBEDDING_POOL_SIZE=1` on memory-constrained systems.
-- `VITE_EMBEDDING_WORKER_BATCH_SIZE=8` (or try `12`/`16`).
-- `VITE_EMBEDDING_BACKEND_PREFERRED=wasm` for backend stability diagnostics.
-
-The app exposes indexing telemetry in UI so you can see:
-- backend selection/fallback reason,
-- throughput,
-- checkpoint behavior,
-- queue depth,
-- worker pool downshift events.
-
-README batching pipeline controls:
-- `VITE_README_BATCH_PIPELINE_V2=1` enables batched README ingestion with adaptive concurrency and incremental chunk writes.
-- `VITE_README_BATCH_SIZE` tunes mini-batch write size (higher improves throughput, lower reduces memory spikes).
-- `VITE_EMBED_TRIGGER_THRESHOLD` and `VITE_EMBED_WINDOW_SIZE` control rolling embedding windows during README ingestion.
-
-### Ollama Embedding Mode (Opt-in)
-
-- Default behavior stays browser-local (`webgpu` -> `wasm` fallback).
-- Ollama mode is disabled by default and requires explicit in-app consent toggle.
-- Endpoint is restricted to localhost patterns only.
-- Payload to Ollama includes only embedding text + model (no GitHub token).
-- If Ollama is unavailable, indexing automatically restarts with browser embeddings.
-
-### Ollama Setup
-
-1. Start Ollama locally: `ollama serve`
-2. Pull embedding model: `ollama pull nomic-embed-text`
-3. In the app, enable `Use Ollama for local embeddings`.
-4. Keep base URL as `http://localhost:11434` (or your localhost override).
-5. Click `Test connection`.
-6. Run `Fetch Stars` to index with Ollama.
-7. If Ollama goes down, the app falls back to browser embedding automatically.
-
-### Browser WebLLM Provider (Opt-in, Feature-Flagged)
-
-- Enable with `VITE_WEBLLM_ENABLED=1`.
-- Provider appears as `Local (Browser WebLLM)` in chat model settings.
-- Before first model download, app requires explicit consent in modal UI.
-- No GitHub token/PAT is sent in WebLLM requests.
-- Recommendation policy:
-  - Mobile or weak/no-WebGPU device -> `SmolLM2-360M-Instruct-q4f16_1-MLC`
-  - Strong desktop -> `Llama-3.2-1B-Instruct-q4f16_1-MLC`
-- Desktop strength uses multi-signal scoring (`WebGPU`, cores, memory hint, perf probe).
-- On Safari/macOS where `navigator.deviceMemory` is often unavailable, missing memory is treated as neutral (not auto-weak).
-- Recommendation diagnostics are shown in chat (reason, webgpu, cores, memory/perf hints) to explain model suggestion.
-- Supported selectable models:
-  - `Llama-3.2-1B-Instruct-q4f16_1-MLC`
-  - `SmolLM2-360M-Instruct-q4f16_1-MLC`
-  - `Qwen2.5-1.5B-Instruct-q4f16_1-MLC`
-  - `Gemma-2-2B-Instruct-q4f16_1-MLC`
-  - `Hermes-3-Llama-3-3B-Instruct-q4f16_1-MLC` (auto-substitutes when unavailable)
-  - `Llama-3.1-3B-Instruct-q4f16_1-MLC`
-- If WebLLM fails, app retries once with 360M fallback model and can then auto-fallback to other configured providers.
-
-### Large-Library Mode
-
-- Automatically enabled when repo count exceeds threshold (`VITE_EMBEDDING_LARGE_LIBRARY_THRESHOLD`, default `500`).
-- Prioritizes high-value repos first (stars + recency + README availability).
-- Stores resume cursor in `index_meta` so interrupted jobs continue without full restart.
-- Search does not refresh stars automatically; click `Fetch Stars` to include newly starred repositories.
-
-### Troubleshooting Large Libraries
-
-1. Check backend/device in embedding run details.
-2. Reduce pool size to `1` for memory-constrained systems.
-3. Lower worker batch size if batch latency spikes.
-4. Keep Ollama enabled only when local endpoint is healthy.
-5. Resume from existing checkpoint instead of clearing local data.
+For full setup, auth, deployment, runtime modes, tuning, and troubleshooting:
+- `docs/Usage.md`
 
 ---
 
 ## Product Docs
 
+- `docs/Usage.md`
 - `docs/codex-claude-build-guide.md`
-- `docs/step-by-step-implementation-plan.md`
 - `docs/embedding-acceleration-plan.md`
 - `docs/tech-stack-architecture-security-prd.md`
 - `docs/threat-modeling-stride.md`
+- `docs/security-review-stride.md`
+- `docs/release-notes.md`
 
 ---
 
@@ -279,11 +213,4 @@ We prioritize:
 
 ## Author
 
-- [Abhinandan-Khurana](https://github.com/Abhinandan-Khurana)
-
-### Co-authored with multiple LLMs
-
-This project has been iterated with help from multiple LLM collaborators (GPT, Claude, Gemini, DeepSeek, and others) for design exploration, threat modeling, implementation planning, debugging, and review.
-
-> [!NOTE]
-> No AI agents were harmed in the process, lol.
+- Made with <3 by [Abhinandan-Khurana](https://github.com/Abhinandan-Khurana)
