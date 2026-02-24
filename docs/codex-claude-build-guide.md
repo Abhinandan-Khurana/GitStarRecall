@@ -1,7 +1,7 @@
 # GitStarRecall - Codex/Claude Build Guide (Starting Point + Prompting Workflow)
 
 This guide is a starting point for using Codex or Claude Code to build the GitHub Stars RAG app efficiently. It provides a recommended first prompt, a follow-up prompting pattern, and a reading strategy for the planning docs:
-- `docs/step-by-step-implementation-plan.md`
+- `docs/Usage.md`
 - `docs/tech-stack-architecture-security-prd.md`
 - `docs/embedding-acceleration-plan.md`
 It also references the UI baseline in `rought-UI-design`.
@@ -36,15 +36,12 @@ Focus on:
 
 Use it as the "rules of the build" and cross-check any proposed change against it.
 
-### 2.2 `docs/step-by-step-implementation-plan.md`
-Read this second to plan execution.
+### 2.2 `docs/Usage.md`
+Read this second to align setup/runtime behavior.
 Focus on:
-- The ordered tasks
-- Exit criteria per task
-- One-task-at-a-time discipline
-
-Treat this as the canonical build sequence. Do not skip tasks.
-Use `rought-UI-design` to match layout and styling as you build the UI tasks.
+- auth and environment setup
+- usage and runtime toggles
+- deployment and troubleshooting behavior
 
 ### 2.3 `docs/embedding-acceleration-plan.md`
 Read this when implementing performance tasks.
@@ -62,13 +59,13 @@ Copy-paste this as the first instruction to the agent:
 ```text
 Read these docs:
 1) docs/tech-stack-architecture-security-prd.md
-2) docs/step-by-step-implementation-plan.md
+2) docs/Usage.md
 3) docs/embedding-acceleration-plan.md
 
 Summarize the build constraints in 6-10 bullets.
-Then start Task 1 from the plan only.
-Do not jump ahead or combine tasks.
-After finishing Task 1, report the exit criteria check.
+Then suggest a concrete implementation order in 5-8 steps.
+Do not jump ahead while implementing.
+After finishing Step 1, report verification status.
 ```
 
 Why this works:
@@ -82,13 +79,13 @@ Why this works:
 Use this template for each next task:
 
 ```text
-Continue with Task N from docs/step-by-step-implementation-plan.md.
-Do only this task.
-Show what you changed and verify the exit criteria.
+Continue with Step N from your implementation order.
+Do only this step.
+Show what you changed and verify completion checks.
 If anything blocks you, stop and explain the blocker.
 ```
 
-Replace `N` with the next task number.
+Replace `N` with the next step number.
 
 ---
 
@@ -133,21 +130,21 @@ Risks: none
 ---
 
 ## 8) Lightweight Checkpoints
-At major milestones (Tasks 1, 4, 7, 9, 11), ask the agent for:
+At major milestones (Steps 1, 3, 5, 7), ask the agent for:
 - A short recap
 - Any deviations from plan
 - Updated next step
 
 ---
 
-## 9) Final Delivery Prompt (End of MVP)
-Once Task 9 is done (search UI), use:
+## 9) Final Delivery Prompt
+Once your planned steps are done, use:
 
 ```text
-We have completed the MVP tasks. Please provide:
+We have completed the planned steps. Please provide:
 1) A short summary of what works.
 2) Any known gaps or bugs.
-3) The next recommended task from the plan.
+3) The next recommended improvement.
 ```
 
 ---
