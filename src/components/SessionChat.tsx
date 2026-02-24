@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { ChatMessageRecord } from "../db/types";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
+import type { WebLLMModelProfile } from "../llm/webllm/modelCatalog";
 import SafeMarkdown from "./SafeMarkdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -49,6 +50,7 @@ export interface SessionChatProps {
   allowLocalProvider: boolean;
   onAllowRemoteChange: (value: boolean) => void;
   onAllowLocalChange: (value: boolean) => void;
+  webllmModels: WebLLMModelProfile[];
 }
 
 function TypingDots() {
@@ -145,6 +147,7 @@ type ModelSettingsPopoverProps = {
   onAllowRemoteChange: (value: boolean) => void;
   allowLocalProvider: boolean;
   onAllowLocalChange: (value: boolean) => void;
+  webllmModels: WebLLMModelProfile[];
 };
 
 function ModelSettingsPopover({
@@ -164,7 +167,10 @@ function ModelSettingsPopover({
   onAllowRemoteChange,
   allowLocalProvider,
   onAllowLocalChange,
+  webllmModels,
 }: Readonly<ModelSettingsPopoverProps>) {
+  const isWebLLM = providerId === "webllm";
+
   return (
     <div className="flex items-center gap-1">
       <Select value={providerId} onValueChange={(v) => onProviderIdChange(v as LLMProviderId)}>
@@ -203,29 +209,54 @@ function ModelSettingsPopover({
             </div>
 
             <div className="space-y-2">
-              <div>
-                <Label htmlFor="chat-base-url" className="text-muted-foreground">Base URL</Label>
-                <Input
-                  id="chat-base-url"
-                  value={providerBaseUrl}
-                  onChange={(e) => onProviderBaseUrlChange(e.target.value)}
-                  placeholder="Base URL"
-                  className="session-chat-settings-input mt-1 h-8 text-xs"
-                />
-              </div>
-              <div>
-                <Label htmlFor="chat-model" className="text-muted-foreground">Model</Label>
-                <Input
-                  id="chat-model"
-                  value={providerModel}
-                  onChange={(e) => onProviderModelChange(e.target.value)}
-                  placeholder="Model"
-                  className="session-chat-settings-input mt-1 h-8 text-xs"
-                />
-              </div>
+              {!isWebLLM ? (
+                <div>
+                  <Label htmlFor="chat-base-url" className="text-muted-foreground">Base URL</Label>
+                  <Input
+                    id="chat-base-url"
+                    value={providerBaseUrl}
+                    onChange={(e) => onProviderBaseUrlChange(e.target.value)}
+                    placeholder="Base URL"
+                    className="session-chat-settings-input mt-1 h-8 text-xs"
+                  />
+                </div>
+              ) : null}
+              {isWebLLM ? (
+                <div>
+                  <Label htmlFor="chat-model-webllm" className="text-muted-foreground">Model</Label>
+                  <Select value={providerModel} onValueChange={onProviderModelChange}>
+                    <SelectTrigger id="chat-model-webllm" className="mt-1 h-8 text-xs">
+                      <SelectValue placeholder="Select WebLLM model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {webllmModels.map((model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          {model.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div>
+                  <Label htmlFor="chat-model" className="text-muted-foreground">Model</Label>
+                  <Input
+                    id="chat-model"
+                    value={providerModel}
+                    onChange={(e) => onProviderModelChange(e.target.value)}
+                    placeholder="Model"
+                    className="session-chat-settings-input mt-1 h-8 text-xs"
+                  />
+                </div>
+              )}
             </div>
+            {isWebLLM ? (
+              <p className="rounded border border-border/80 px-2 py-2 text-muted-foreground">
+                Runs in your browser. First run downloads model assets locally after confirmation.
+              </p>
+            ) : null}
 
-            {selectedProvider.requiresApiKey ? (
+            {selectedProvider.requiresApiKey && !isWebLLM ? (
               <div>
                 <Label htmlFor="chat-api-key" className="text-muted-foreground">API key</Label>
                 <Input
@@ -283,6 +314,7 @@ type ChatComposerProps = {
   onAllowRemoteChange: (value: boolean) => void;
   allowLocalProvider: boolean;
   onAllowLocalChange: (value: boolean) => void;
+  webllmModels: WebLLMModelProfile[];
 };
 
 function ChatComposer({
@@ -306,6 +338,7 @@ function ChatComposer({
   onAllowRemoteChange,
   allowLocalProvider,
   onAllowLocalChange,
+  webllmModels,
 }: Readonly<ChatComposerProps>) {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
 
@@ -345,6 +378,7 @@ function ChatComposer({
             onAllowRemoteChange={onAllowRemoteChange}
             allowLocalProvider={allowLocalProvider}
             onAllowLocalChange={onAllowLocalChange}
+            webllmModels={webllmModels}
           />
           <div className="flex items-center gap-1">
             <Button
@@ -400,6 +434,7 @@ export function SessionChat({
   allowLocalProvider,
   onAllowRemoteChange,
   onAllowLocalChange,
+  webllmModels,
 }: Readonly<SessionChatProps>) {
   return (
     <div className="session-chat-root flex min-h-0 flex-1 flex-col gap-3">
@@ -443,6 +478,7 @@ export function SessionChat({
         onAllowRemoteChange={onAllowRemoteChange}
         allowLocalProvider={allowLocalProvider}
         onAllowLocalChange={onAllowLocalChange}
+        webllmModels={webllmModels}
       />
 
       {error ? (

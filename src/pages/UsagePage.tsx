@@ -25,6 +25,7 @@ import { sortChatMessages } from "../chat/order";
 import { captureLocalError, captureLocalWarn } from "../observability/localLog";
 import SafeMarkdown from "../components/SafeMarkdown";
 import { SessionChat } from "../components/SessionChat";
+import { WebLLMDownloadDialog } from "../components/WebLLMDownloadDialog";
 import {
   buildHistoryRestoreResult,
   createRestoreRequestTracker,
@@ -36,9 +37,22 @@ import {
   formatProviderError,
   getProviderById,
   getProviderDefinitions,
+  isWebLLMEnabled,
 } from "../llm/providers";
+import { resolveProviderFallback } from "../llm/fallback";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
 import { loadSettings, loadSettingsAsync, saveSettings } from "../lib/settings";
+import {
+  getWebLLMSelectableModels,
+  WEBLLM_FALLBACK_MODEL_ID,
+  WEBLLM_PRIMARY_MODEL_ID,
+} from "../llm/webllm/modelCatalog";
+import {
+  recommendWebLLMModel,
+  resolveHermesModelSelection,
+  type WebLLMRecommendation,
+} from "../llm/webllm/capability";
+import { WebLLMProviderError } from "../llm/webllm/engine";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -263,6 +277,8 @@ function computeContextAvailabilityDebug(
 }
 
 const providerDefinitions = getProviderDefinitions();
+const webLLMEnabled = isWebLLMEnabled();
+const webLLMModels = getWebLLMSelectableModels();
 
 function detectDefaultEmbeddingPoolSize(): number {
   const concurrency = typeof navigator !== "undefined" ? navigator.hardwareConcurrency : 0;
@@ -533,6 +549,22 @@ function mapStarredRepoToRecord(repo: GitHubStarredRepo, syncedAt: number): Repo
   };
 }
 
+async function clearWebLLMRuntimeCaches(): Promise<void> {
+  if (!("caches" in globalThis)) {
+    return;
+  }
+
+  const keys = await caches.keys();
+  await Promise.all(
+    keys
+      .filter((key) => {
+        const lower = key.toLowerCase();
+        return lower.includes("webllm") || lower.includes("mlc") || lower.includes("model");
+      })
+      .map((key) => caches.delete(key)),
+  );
+}
+
 export default function UsagePage() {
   const { accessToken, isAuthenticated, authMethod, loginWithPat, beginOAuthLogin, oauthConfig, logout } =
     useAuth();
@@ -561,18 +593,31 @@ export default function UsagePage() {
   const [languageFilter, setLanguageFilter] = useState("all");
   const [topicFilter, setTopicFilter] = useState("all");
   const [updatedWithinDaysFilter, setUpdatedWithinDaysFilter] = useState("all");
-  const [providerId, setProviderId] = useState<LLMProviderId>("openai-compatible");
+  const defaultProviderId = webLLMEnabled ? "webllm" : "openai-compatible";
+  const [providerId, setProviderId] = useState<LLMProviderId>(defaultProviderId);
   const [providerBaseUrl, setProviderBaseUrl] = useState(
-    providerDefinitions.find((provider) => provider.id === "openai-compatible")?.defaultBaseUrl ??
-    "https://api.openai.com",
+    providerDefinitions.find((provider) => provider.id === defaultProviderId)?.defaultBaseUrl ??
+    (defaultProviderId === "openai-compatible" ? "https://api.openai.com" : ""),
   );
   const [providerModel, setProviderModel] = useState(
-    providerDefinitions.find((provider) => provider.id === "openai-compatible")?.defaultModel ??
-    "gpt-4o-mini",
+    providerDefinitions.find((provider) => provider.id === defaultProviderId)?.defaultModel ??
+    (defaultProviderId === "webllm" ? WEBLLM_PRIMARY_MODEL_ID : "gpt-4o-mini"),
   );
   const [providerApiKey, setProviderApiKey] = useState("");
   const [allowRemoteProvider, setAllowRemoteProvider] = useState(false);
   const [allowLocalProvider, setAllowLocalProvider] = useState(false);
+  const [webllmConsent, setWebllmConsent] = useState(false);
+  const [webllmRuntimeState, setWebllmRuntimeState] = useState<
+    "idle" | "probing" | "needs-consent" | "downloading" | "ready" | "failed"
+  >("idle");
+  const [webllmRecommendation, setWebllmRecommendation] = useState<WebLLMRecommendation | null>(null);
+  const [webllmSelectedModel, setWebllmSelectedModel] = useState(WEBLLM_PRIMARY_MODEL_ID);
+  const [webllmModelManuallySet, setWebllmModelManuallySet] = useState(false);
+  const [webllmDownloadProgress, setWebllmDownloadProgress] = useState(0);
+  const [webllmProgressText, setWebllmProgressText] = useState<string | null>(null);
+  const [webllmDialogOpen, setWebllmDialogOpen] = useState(false);
+  const [webllmAllowModelDownload, setWebllmAllowModelDownload] = useState(false);
+  const [webllmLastRecommendedModel, setWebllmLastRecommendedModel] = useState("");
   const [allowOllamaEmbedding, setAllowOllamaEmbedding] = useState(false);
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState(getDefaultOllamaBaseUrl());
   const [ollamaModel, setOllamaModel] = useState(getDefaultOllamaModel());
@@ -585,6 +630,7 @@ export default function UsagePage() {
   const generationControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const restoreRequestTrackerRef = useRef(createRestoreRequestTracker());
+  const webllmPreviousRecommendationRef = useRef<WebLLMRecommendation | null>(null);
   const previousIsAuthenticatedRef = useRef(isAuthenticated);
   const chatScopeKey = useMemo(() => getChatScopeKey(accessToken), [accessToken]);
   const embeddingPreferenceScopeKey = useMemo(
@@ -606,6 +652,21 @@ export default function UsagePage() {
   }, [providerId]);
 
   const activeResults = useMemo(() => activeSession?.results ?? [], [activeSession]);
+  const webllmRecommendationDebugLabel = useMemo(() => {
+    if (!webllmRecommendation || !webllmRecommendation.capability) {
+      return null;
+    }
+
+    const capability = webllmRecommendation.capability;
+    const parts = [
+      `reason=${webllmRecommendation.reason}`,
+      `webgpu=${capability.hasWebGPU ? "yes" : "no"}`,
+      `cores=${capability.hardwareConcurrency}`,
+      `mem=${capability.deviceMemoryGB ?? "unknown"}`,
+      `perf=${webllmRecommendation.score ?? capability.perfScore ?? "unknown"}`,
+    ];
+    return parts.join(" · ");
+  }, [webllmRecommendation]);
   const activeSessionMessages = useMemo(() => {
     if (!activeSessionId) {
       return [];
@@ -870,23 +931,39 @@ export default function UsagePage() {
     if (!accessToken) return;
     const sync = loadSettings(accessToken);
     if (sync) {
-      setProviderId(sync.providerId);
-      setProviderBaseUrl(sync.baseUrl);
-      setProviderModel(sync.model);
+      const savedProviderId =
+        !webLLMEnabled && sync.providerId === "webllm" ? "openai-compatible" : sync.providerId;
+      const savedProviderDefinition =
+        providerDefinitions.find((provider) => provider.id === savedProviderId) ?? providerDefinitions[0];
+      setProviderId(savedProviderId);
+      setProviderBaseUrl(sync.baseUrl || savedProviderDefinition.defaultBaseUrl);
+      setProviderModel(sync.model || savedProviderDefinition.defaultModel);
       setProviderApiKey(sync.apiKey);
       setAllowRemoteProvider(sync.allowRemoteProvider);
       setAllowLocalProvider(sync.allowLocalProvider);
+      setWebllmConsent(sync.webllmConsent);
+      setWebllmSelectedModel(sync.webllmPreferredModel || sync.model || WEBLLM_PRIMARY_MODEL_ID);
+      setWebllmModelManuallySet(Boolean(sync.webllmPreferredModel));
+      setWebllmLastRecommendedModel(sync.webllmLastRecommendedModel ?? "");
       return;
     }
     let cancelled = false;
     loadSettingsAsync(accessToken).then((saved) => {
       if (cancelled || !saved) return;
-      setProviderId(saved.providerId);
-      setProviderBaseUrl(saved.baseUrl);
-      setProviderModel(saved.model);
+      const savedProviderId =
+        !webLLMEnabled && saved.providerId === "webllm" ? "openai-compatible" : saved.providerId;
+      const savedProviderDefinition =
+        providerDefinitions.find((provider) => provider.id === savedProviderId) ?? providerDefinitions[0];
+      setProviderId(savedProviderId);
+      setProviderBaseUrl(saved.baseUrl || savedProviderDefinition.defaultBaseUrl);
+      setProviderModel(saved.model || savedProviderDefinition.defaultModel);
       setProviderApiKey(saved.apiKey);
       setAllowRemoteProvider(saved.allowRemoteProvider);
       setAllowLocalProvider(saved.allowLocalProvider);
+      setWebllmConsent(saved.webllmConsent);
+      setWebllmSelectedModel(saved.webllmPreferredModel || saved.model || WEBLLM_PRIMARY_MODEL_ID);
+      setWebllmModelManuallySet(Boolean(saved.webllmPreferredModel));
+      setWebllmLastRecommendedModel(saved.webllmLastRecommendedModel ?? "");
     });
     return () => {
       cancelled = true;
@@ -903,9 +980,23 @@ export default function UsagePage() {
         apiKey: providerApiKey,
         allowRemoteProvider,
         allowLocalProvider,
+        webllmConsent,
+        webllmPreferredModel: webllmSelectedModel,
+        webllmLastRecommendedModel,
       });
     }
-  }, [accessToken, providerId, providerBaseUrl, providerModel, providerApiKey, allowRemoteProvider, allowLocalProvider]);
+  }, [
+    accessToken,
+    providerId,
+    providerBaseUrl,
+    providerModel,
+    providerApiKey,
+    allowRemoteProvider,
+    allowLocalProvider,
+    webllmConsent,
+    webllmSelectedModel,
+    webllmLastRecommendedModel,
+  ]);
 
   useEffect(() => {
     if (sessions.length === 0) {
@@ -919,6 +1010,59 @@ export default function UsagePage() {
 
     setActiveSessionId(sessions[0].id);
   }, [sessions, activeSessionId]);
+
+  useEffect(() => {
+    if (!webLLMEnabled) {
+      return;
+    }
+
+    let cancelled = false;
+    setWebllmRuntimeState("probing");
+    void recommendWebLLMModel({
+      previousRecommendation: webllmPreviousRecommendationRef.current,
+    })
+      .then((recommendation) => {
+        if (cancelled) {
+          return;
+        }
+        webllmPreviousRecommendationRef.current = recommendation;
+        setWebllmRecommendation(recommendation);
+        setWebllmLastRecommendedModel(recommendation.modelId);
+        const allowAutoSelect =
+          !webllmModelManuallySet &&
+          (
+            !webllmSelectedModel ||
+            webllmSelectedModel === WEBLLM_PRIMARY_MODEL_ID ||
+            webllmSelectedModel === webllmLastRecommendedModel
+          );
+        if (allowAutoSelect) {
+          setWebllmSelectedModel(recommendation.modelId);
+          if (providerId === "webllm") {
+            setProviderModel(resolveHermesModelSelection(recommendation.modelId));
+          }
+        }
+        setWebllmRuntimeState("idle");
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        const fallbackRecommendation: WebLLMRecommendation = {
+          modelId: WEBLLM_FALLBACK_MODEL_ID,
+          reason: "probe-failed",
+          score: null,
+          threshold: null,
+          capability: null,
+        };
+        webllmPreviousRecommendationRef.current = fallbackRecommendation;
+        setWebllmRecommendation(fallbackRecommendation);
+        setWebllmRuntimeState("idle");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [providerId, webllmLastRecommendedModel, webllmModelManuallySet, webllmSelectedModel]);
 
   useEffect(() => {
     const fallbackPreference: OllamaPreferenceSnapshot = {
@@ -967,7 +1111,12 @@ export default function UsagePage() {
       providerDefinitions.find((provider) => provider.id === nextProviderId) ?? providerDefinitions[0];
     setProviderId(nextProviderId);
     setProviderBaseUrl(nextProvider.defaultBaseUrl);
-    setProviderModel(nextProvider.defaultModel);
+    if (nextProviderId === "webllm") {
+      const nextModel = resolveHermesModelSelection(webllmSelectedModel || nextProvider.defaultModel);
+      setProviderModel(nextModel);
+    } else {
+      setProviderModel(nextProvider.defaultModel);
+    }
     setLlmError(null);
   };
 
@@ -1965,6 +2114,7 @@ export default function UsagePage() {
     try {
       const database = await getLocalDatabase();
       await database.clearAllData();
+      await clearWebLLMRuntimeCaches();
       setStarsSummary("Local database cleared.");
       setIndexingStatus(null);
       setSessions([]);
@@ -2145,6 +2295,66 @@ export default function UsagePage() {
     });
   };
 
+  const canReachLocalProvider = useCallback(async (provider: "ollama" | "lmstudio"): Promise<boolean> => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 2000);
+    try {
+      const url =
+        provider === "ollama"
+          ? `${(ollamaBaseUrl.trim() || "http://localhost:11434").replace(/\/+$/, "")}/api/tags`
+          : `${(
+              providerDefinitions.find((item) => item.id === "lmstudio")?.defaultBaseUrl ||
+              "http://localhost:1234"
+            ).replace(/\/+$/, "")}/v1/models`;
+      const response = await fetch(url, { method: "GET", signal: controller.signal });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }, [ollamaBaseUrl]);
+
+  const runProviderStream = useCallback(async (args: {
+    provider: LLMProviderId;
+    model: string;
+    promptText: string;
+    snippets: string[];
+    controller: AbortController;
+    onToken: (token: string) => void;
+    allowModelDownload: boolean;
+  }): Promise<void> => {
+    const provider = getProviderById(args.provider);
+    const lmStudioDefaultBase =
+      providerDefinitions.find((item) => item.id === "lmstudio")?.defaultBaseUrl ||
+      "http://localhost:1234";
+    const providerBase =
+      args.provider === "ollama"
+        ? (ollamaBaseUrl.trim() || "http://localhost:11434")
+        : args.provider === "lmstudio"
+          ? lmStudioDefaultBase
+          : providerBaseUrl.trim();
+    await provider.stream(
+      {
+        baseUrl: providerBase,
+        model: args.model,
+        apiKey: providerApiKey.trim(),
+        allowModelDownload: args.allowModelDownload,
+      },
+      {
+        prompt: args.promptText,
+        contextSnippets: args.snippets,
+        signal: args.controller.signal,
+        onToken: args.onToken,
+        onInitProgress: (progress, text) => {
+          setWebllmDownloadProgress(progress);
+          setWebllmProgressText(text);
+          setWebllmRuntimeState("downloading");
+        },
+      },
+    );
+  }, [ollamaBaseUrl, providerApiKey, providerBaseUrl]);
+
   const handleGenerateAnswer = async () => {
     if (!activeSession) {
       setLlmError("No active session. Run a search first.");
@@ -2163,6 +2373,18 @@ export default function UsagePage() {
 
     if (selectedProvider.kind === "local" && !allowLocalProvider) {
       setLlmError("Enable local provider consent before generating.");
+      return;
+    }
+
+    if (providerId === "webllm" && !webLLMEnabled) {
+      setLlmError("WebLLM is disabled. Enable VITE_WEBLLM_ENABLED=1 to use browser models.");
+      return;
+    }
+
+    if (providerId === "webllm" && !webllmConsent) {
+      setWebllmRuntimeState("needs-consent");
+      setWebllmDialogOpen(true);
+      setLlmError(null);
       return;
     }
 
@@ -2226,23 +2448,95 @@ export default function UsagePage() {
         };
       });
 
-      const provider = getProviderById(providerId);
-      await provider.stream(
-        {
-          baseUrl: providerBaseUrl.trim(),
-          model: providerModel.trim(),
-          apiKey: providerApiKey.trim(),
-        },
-        {
-          prompt: promptText,
-          contextSnippets: snippets,
-          signal: controller.signal,
-          onToken: (token) => {
-            streamedAnswer += token;
-            setLlmAnswer((previous) => previous + token);
-          },
-        },
-      );
+      const streamToken = (token: string) => {
+        streamedAnswer += token;
+        setLlmAnswer((previous) => previous + token);
+      };
+
+      const activeModel = resolveHermesModelSelection(providerModel.trim() || WEBLLM_PRIMARY_MODEL_ID);
+      let effectiveProviderId = providerId;
+      let effectiveModel = activeModel;
+
+      try {
+        await runProviderStream({
+          provider: effectiveProviderId,
+          model: effectiveModel,
+          promptText,
+          snippets,
+          controller,
+          onToken: streamToken,
+          allowModelDownload: webllmAllowModelDownload,
+        });
+        if (effectiveProviderId === "webllm") {
+          setWebllmRuntimeState("ready");
+        }
+      } catch (streamError) {
+        if (effectiveProviderId === "webllm" && streamError instanceof WebLLMProviderError) {
+          if (streamError.code === "WEBLLM_DOWNLOAD_REQUIRED") {
+            setWebllmRuntimeState("needs-consent");
+            setWebllmDialogOpen(true);
+            setLlmError(null);
+            return;
+          }
+
+          if (effectiveModel !== WEBLLM_FALLBACK_MODEL_ID) {
+            effectiveModel = WEBLLM_FALLBACK_MODEL_ID;
+            setProviderModel(effectiveModel);
+            setWebllmSelectedModel(effectiveModel);
+            try {
+              setWebllmRuntimeState("downloading");
+              await runProviderStream({
+                provider: "webllm",
+                model: effectiveModel,
+                promptText,
+                snippets,
+                controller,
+                onToken: streamToken,
+                allowModelDownload: true,
+              });
+              setWebllmRuntimeState("ready");
+            } catch {
+              setWebllmRuntimeState("failed");
+            }
+          } else {
+            setWebllmRuntimeState("failed");
+          }
+
+          if (streamedAnswer.trim().length === 0) {
+            const fallbackProviderId = resolveProviderFallback({
+              canUseOllama: allowLocalProvider && await canReachLocalProvider("ollama"),
+              canUseLmStudio: allowLocalProvider && await canReachLocalProvider("lmstudio"),
+              canUseOpenAICompatible: allowRemoteProvider && providerApiKey.trim().length > 0,
+            });
+            if (fallbackProviderId == null) {
+              throw streamError;
+            }
+
+            effectiveProviderId = fallbackProviderId;
+            const fallbackDefinition =
+              providerDefinitions.find((provider) => provider.id === fallbackProviderId) ?? null;
+            const fallbackModel = fallbackDefinition?.defaultModel ?? "gpt-4o-mini";
+            setProviderId(fallbackProviderId);
+            setProviderModel(fallbackModel);
+            setProviderBaseUrl(fallbackDefinition?.defaultBaseUrl ?? providerBaseUrl);
+            setLlmError(`WebLLM failed, switched to ${fallbackDefinition?.label ?? fallbackProviderId}.`);
+
+            await runProviderStream({
+              provider: fallbackProviderId,
+              model: fallbackModel,
+              promptText,
+              snippets,
+              controller,
+              onToken: streamToken,
+              allowModelDownload: false,
+            });
+          } else {
+            throw streamError;
+          }
+        } else {
+          throw streamError;
+        }
+      }
 
       if (activeSessionId && streamedAnswer.trim()) {
         const assistantSequence = database.getNextChatMessageSequence(activeSessionId);
@@ -2269,6 +2563,7 @@ export default function UsagePage() {
     } finally {
       setIsGenerating(false);
       generationControllerRef.current = null;
+      setWebllmAllowModelDownload(false);
     }
   };
 
@@ -2276,8 +2571,40 @@ export default function UsagePage() {
     generationControllerRef.current?.abort();
   };
 
+  const handleConfirmWebllmDownload = () => {
+    setWebllmConsent(true);
+    setWebllmAllowModelDownload(true);
+    setProviderId("webllm");
+    setProviderModel(resolveHermesModelSelection(webllmSelectedModel));
+    setWebllmDialogOpen(false);
+    setWebllmRuntimeState("downloading");
+    void handleGenerateAnswer();
+  };
+
+  const handleCancelWebllmDownload = () => {
+    setWebllmDialogOpen(false);
+    setWebllmRuntimeState("idle");
+  };
+
   return (
     <article className="space-y-6">
+      <WebLLMDownloadDialog
+        open={webllmDialogOpen}
+        recommendedModelId={webllmRecommendation?.modelId ?? WEBLLM_FALLBACK_MODEL_ID}
+        selectedModelId={webllmSelectedModel}
+        models={webLLMModels}
+        recommendationReason={webllmRecommendation?.reason ?? "manual-selection"}
+        downloading={webllmRuntimeState === "downloading"}
+        progress={webllmDownloadProgress}
+        progressText={webllmProgressText}
+        onSelectModel={(modelId) => {
+          setWebllmSelectedModel(resolveHermesModelSelection(modelId));
+          setProviderModel(resolveHermesModelSelection(modelId));
+          setWebllmModelManuallySet(true);
+        }}
+        onConfirm={handleConfirmWebllmDownload}
+        onCancel={handleCancelWebllmDownload}
+      />
       {error ? (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
@@ -2656,6 +2983,17 @@ export default function UsagePage() {
                     <p className="text-[11px] text-muted-foreground">
                       Top 8 filtered snippets are sent as context.
                     </p>
+                    {providerId === "webllm" ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        WebLLM runtime: {webllmRuntimeState}
+                        {webllmProgressText ? ` · ${webllmProgressText}` : ""}
+                      </p>
+                    ) : null}
+                    {providerId === "webllm" && webllmRecommendationDebugLabel ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        WebLLM recommendation: {webllmRecommendationDebugLabel}
+                      </p>
+                    ) : null}
                   </CardHeader>
                   <CardContent className="flex min-h-0 flex-1 flex-col pt-0">
                     <SessionChat
@@ -2676,7 +3014,13 @@ export default function UsagePage() {
                       providerApiKey={providerApiKey}
                       onProviderIdChange={(id) => handleProviderChange(id)}
                       onProviderBaseUrlChange={setProviderBaseUrl}
-                      onProviderModelChange={setProviderModel}
+                      onProviderModelChange={(value) => {
+                        setProviderModel(value);
+                        if (providerId === "webllm") {
+                          setWebllmSelectedModel(resolveHermesModelSelection(value));
+                          setWebllmModelManuallySet(true);
+                        }
+                      }}
                       onProviderApiKeyChange={setProviderApiKey}
                       selectedProvider={selectedProvider}
                       providerDefinitions={providerDefinitions}
@@ -2684,6 +3028,7 @@ export default function UsagePage() {
                       allowLocalProvider={allowLocalProvider}
                       onAllowRemoteChange={setAllowRemoteProvider}
                       onAllowLocalChange={setAllowLocalProvider}
+                      webllmModels={webLLMModels}
                     />
                   </CardContent>
                 </Card>
