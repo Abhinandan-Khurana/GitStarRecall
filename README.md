@@ -25,6 +25,10 @@
 
 > **This project exists because starred repos are great until your brain says, "I know what it does, but not what it is called."**
 
+### Keywords
+
+`github stars search` · `semantic search` · `local-first rag` · `browser embeddings` · `webllm` · `ollama` · `privacy-focused ai` · `vector search`
+
 ---
 
 ## Why This Exists
