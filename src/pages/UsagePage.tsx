@@ -944,8 +944,15 @@ export default function UsagePage() {
       setAllowRemoteProvider(sync.allowRemoteProvider);
       setAllowLocalProvider(sync.allowLocalProvider);
       setWebllmConsent(sync.webllmConsent);
-      setWebllmSelectedModel(sync.webllmPreferredModel || sync.model || WEBLLM_PRIMARY_MODEL_ID);
-      setWebllmModelManuallySet(Boolean(sync.webllmPreferredModel));
+      if (savedProviderDefinition.id === "webllm") {
+        setWebllmSelectedModel(sync.webllmPreferredModel || sync.model || WEBLLM_PRIMARY_MODEL_ID);
+        setWebllmModelManuallySet(Boolean(sync.webllmPreferredModel));
+      } else {
+        setWebllmSelectedModel(
+          sync.webllmPreferredModel || sync.webllmLastRecommendedModel || WEBLLM_PRIMARY_MODEL_ID,
+        );
+        setWebllmModelManuallySet(Boolean(sync.webllmPreferredModel));
+      }
       setWebllmLastRecommendedModel(sync.webllmLastRecommendedModel ?? "");
       return;
     }
@@ -963,8 +970,15 @@ export default function UsagePage() {
       setAllowRemoteProvider(saved.allowRemoteProvider);
       setAllowLocalProvider(saved.allowLocalProvider);
       setWebllmConsent(saved.webllmConsent);
-      setWebllmSelectedModel(saved.webllmPreferredModel || saved.model || WEBLLM_PRIMARY_MODEL_ID);
-      setWebllmModelManuallySet(Boolean(saved.webllmPreferredModel));
+      if (savedProviderDefinition.id === "webllm") {
+        setWebllmSelectedModel(saved.webllmPreferredModel || saved.model || WEBLLM_PRIMARY_MODEL_ID);
+        setWebllmModelManuallySet(Boolean(saved.webllmPreferredModel));
+      } else {
+        setWebllmSelectedModel(
+          saved.webllmPreferredModel || saved.webllmLastRecommendedModel || WEBLLM_PRIMARY_MODEL_ID,
+        );
+        setWebllmModelManuallySet(Boolean(saved.webllmPreferredModel));
+      }
       setWebllmLastRecommendedModel(saved.webllmLastRecommendedModel ?? "");
     });
     return () => {

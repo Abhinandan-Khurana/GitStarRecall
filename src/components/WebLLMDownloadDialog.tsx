@@ -1,3 +1,4 @@
+import { type KeyboardEvent, useEffect, useId, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -33,6 +34,33 @@ function normalizeProgress(value: number): number {
 }
 
 export function WebLLMDownloadDialog(props: Readonly<Props>) {
+  const headerId = useId();
+  const descriptionId = useId();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previousFocusedElementRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!props.open) {
+      const previousFocus = previousFocusedElementRef.current;
+      previousFocusedElementRef.current = null;
+      previousFocus?.focus();
+      return;
+    }
+
+    previousFocusedElementRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const id = window.requestAnimationFrame(() => {
+      const initialTarget = props.downloading ? dialogRef.current : cancelButtonRef.current;
+      initialTarget?.focus();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(id);
+    };
+  }, [props.downloading, props.open]);
+
   if (!props.open) {
     return null;
   }
@@ -41,12 +69,67 @@ export function WebLLMDownloadDialog(props: Readonly<Props>) {
   const selected = props.models.find((model) => model.id === props.selectedModelId) ?? null;
   const progress = normalizeProgress(props.progress);
 
+  const handleContainerKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape" && !props.downloading) {
+      event.preventDefault();
+      props.onCancel();
+      return;
+    }
+
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const container = dialogRef.current;
+    if (!container) {
+      return;
+    }
+
+    const focusableElements = Array.from(
+      container.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+
+    if (focusableElements.length === 0) {
+      event.preventDefault();
+      container.focus();
+      return;
+    }
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+    const activeElement = document.activeElement;
+
+    if (event.shiftKey) {
+      if (activeElement === firstElement || !container.contains(activeElement)) {
+        event.preventDefault();
+        lastElement.focus();
+      }
+      return;
+    }
+
+    if (activeElement === lastElement || !container.contains(activeElement)) {
+      event.preventDefault();
+      firstElement.focus();
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <Card className="w-full max-w-lg border-border">
-        <CardHeader className="pb-2">
+      <Card
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headerId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+        onKeyDown={handleContainerKeyDown}
+        className="w-full max-w-lg border-border"
+      >
+        <CardHeader id={headerId} className="pb-2">
           <p className="text-base font-semibold">Download local WebLLM model</p>
-          <p className="text-xs text-muted-foreground">
+          <p id={descriptionId} className="text-xs text-muted-foreground">
             Model files are downloaded locally to this browser. No GitHub token is sent.
           </p>
         </CardHeader>
@@ -96,7 +179,7 @@ export function WebLLMDownloadDialog(props: Readonly<Props>) {
           ) : null}
 
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={props.onCancel} disabled={props.downloading}>
+            <Button ref={cancelButtonRef} variant="outline" onClick={props.onCancel} disabled={props.downloading}>
               Cancel
             </Button>
             <Button onClick={props.onConfirm} disabled={props.downloading}>
