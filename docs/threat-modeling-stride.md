@@ -13,6 +13,7 @@ In scope:
 - Embedding model artifacts downloaded at runtime (browser cache)
 - Embedding runtime selection state (`webgpu` / `wasm`) and performance diagnostics
 - Optional local Ollama embedding endpoint configuration (`localhost` only)
+- Optional Browser WebLLM model runtime and downloaded model artifacts
 - Chat sessions and messages
 - User queries
 
@@ -29,6 +30,7 @@ Threats:
 - Attacker impersonates user in the browser (session spoofing).
 - Malicious site tricks user into pasting PAT into a fake UI.
 - Malicious local endpoint impersonates trusted local runtime.
+- Unintended model artifact host access when Browser WebLLM is enabled.
 
 Mitigations:
 - Use OAuth PKCE and avoid tokens in URL.
@@ -37,6 +39,7 @@ Mitigations:
 - Use strict Content Security Policy (CSP).
 - Require explicit opt-in for local endpoints and show endpoint origin clearly.
 - Enforce localhost-only allowlist for Ollama embedding service base URL.
+- Gate Browser WebLLM behind explicit feature flag and user consent-before-download.
 
 ### T - Tampering
 Threats:
@@ -52,17 +55,20 @@ Mitigations:
 - Validate checksum format and store checksum for integrity checks.
 - Use write operations only through controlled code paths.
 - Pin model source hosts and versions where possible.
+- Restrict CSP `connect-src` to required model artifact hosts only.
 - Add end-to-end embedding count reconciliation (`chunks_pending + embeddings_created`).
 
 ### R - Repudiation
 Threats:
 - User cannot confirm what data was fetched or sent externally.
 - No record of consent to external LLM usage.
+- No record of Browser WebLLM model-download consent.
 - User cannot confirm which embedding backend was active when results were generated.
 
 Mitigations:
 - Store audit metadata locally: last sync time, LLM usage toggle timestamps.
 - Display a “data sent” notice when remote LLMs are enabled.
+- Store and restore per-auth WebLLM consent + model preference locally.
 - Store embedding run metadata: backend, worker pool size, checkpoint policy version, fallback reason.
 
 ### I - Information Disclosure
@@ -74,6 +80,7 @@ Threats:
 
 Mitigations:
 - External LLM off by default, explicit opt-in.
+- Browser WebLLM download is explicit opt-in; no GitHub token in request payloads.
 - Send only top-K snippets, not full repo content.
 - Token stored in memory or encrypted storage.
 - Add “Clear all data” and “Clear token” actions.
@@ -104,11 +111,15 @@ Threats:
 - Over-scoped GitHub token allows repo access beyond need.
 - Local LLM endpoints expose sensitive data to other local services.
 - Browser origin accidentally gains unintended access to privileged local runtime endpoints.
+- Browser model runtime unsupported/failing causes repeated initialization attempts.
+- Capability probe misclassification can force unnecessarily weak local model selection on strong desktops.
 
 Mitigations:
 - Use minimal GitHub scopes or fine-grained PAT.
 - Clearly label local endpoints and require explicit opt-in.
 - Keep browser embedding path default; local Ollama runtime integration remains explicit and isolated.
+- Add deterministic fallback chain when WebLLM fails to avoid repeated hard-fail loops.
+- Use tolerant recommendation heuristics for missing browser capability hints (e.g., Safari/macOS memory hints), plus threshold anti-flap behavior.
 
 ---
 

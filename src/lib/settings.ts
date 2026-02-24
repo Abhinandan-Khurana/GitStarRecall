@@ -7,6 +7,9 @@ export type LLMProviderSettings = {
   apiKey: string;
   allowRemoteProvider: boolean;
   allowLocalProvider: boolean;
+  webllmConsent: boolean;
+  webllmPreferredModel: string;
+  webllmLastRecommendedModel: string;
 };
 
 const STORAGE_KEY_PREFIX = "gitstarrecall.llm.settings.";
@@ -69,6 +72,9 @@ function isValidStoredShape(parsed: unknown): parsed is StoredSettings {
     typeof p.model === "string" &&
     typeof p.allowRemoteProvider === "boolean" &&
     typeof p.allowLocalProvider === "boolean" &&
+    (p.webllmConsent === undefined || typeof p.webllmConsent === "boolean") &&
+    (p.webllmPreferredModel === undefined || typeof p.webllmPreferredModel === "string") &&
+    (p.webllmLastRecommendedModel === undefined || typeof p.webllmLastRecommendedModel === "string") &&
     (p.apiKey === undefined || typeof p.apiKey === "string") &&
     (p.apiKeyEncrypted === undefined || typeof p.apiKeyEncrypted === "string")
   );
@@ -91,6 +97,11 @@ export function loadSettings(token: string | null): LLMProviderSettings | null {
       model: parsed.model,
       allowRemoteProvider: parsed.allowRemoteProvider,
       allowLocalProvider: parsed.allowLocalProvider,
+      webllmConsent: parsed.webllmConsent === true,
+      webllmPreferredModel:
+        typeof parsed.webllmPreferredModel === "string" ? parsed.webllmPreferredModel : "",
+      webllmLastRecommendedModel:
+        typeof parsed.webllmLastRecommendedModel === "string" ? parsed.webllmLastRecommendedModel : "",
     };
 
     if (typeof parsed.apiKeyEncrypted === "string") {
@@ -124,6 +135,11 @@ export async function loadSettingsAsync(token: string | null): Promise<LLMProvid
       model: parsed.model,
       allowRemoteProvider: parsed.allowRemoteProvider,
       allowLocalProvider: parsed.allowLocalProvider,
+      webllmConsent: parsed.webllmConsent === true,
+      webllmPreferredModel:
+        typeof parsed.webllmPreferredModel === "string" ? parsed.webllmPreferredModel : "",
+      webllmLastRecommendedModel:
+        typeof parsed.webllmLastRecommendedModel === "string" ? parsed.webllmLastRecommendedModel : "",
     };
 
     if (typeof parsed.apiKeyEncrypted === "string") {
@@ -160,6 +176,9 @@ export function saveSettings(token: string | null, settings: LLMProviderSettings
     model: settings.model,
     allowRemoteProvider: settings.allowRemoteProvider,
     allowLocalProvider: settings.allowLocalProvider,
+    webllmConsent: settings.webllmConsent,
+    webllmPreferredModel: settings.webllmPreferredModel,
+    webllmLastRecommendedModel: settings.webllmLastRecommendedModel,
   };
 
   if (hasApiKey && envSecret && typeof crypto !== "undefined" && crypto.subtle) {

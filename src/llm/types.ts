@@ -1,6 +1,6 @@
 export type LLMProviderKind = "remote" | "local";
 
-export type LLMProviderId = "openai-compatible" | "ollama" | "lmstudio";
+export type LLMProviderId = "openai-compatible" | "ollama" | "lmstudio" | "webllm";
 
 export type LLMProviderDefinition = {
   id: LLMProviderId;
@@ -16,12 +16,14 @@ export type LLMStreamRequest = {
   contextSnippets: string[];
   signal: AbortSignal;
   onToken: (token: string) => void;
+  onInitProgress?: (progress: number, text: string) => void;
 };
 
 export type LLMProviderConfig = {
   baseUrl: string;
   model: string;
   apiKey?: string;
+  allowModelDownload?: boolean;
 };
 
 export type LLMStreamProvider = {

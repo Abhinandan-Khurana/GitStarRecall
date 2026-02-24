@@ -5,6 +5,7 @@ import type {
   LLMStreamProvider,
   LLMStreamRequest,
 } from "./types";
+import { getWebLLMEngineManager, WebLLMProviderError } from "./webllm/engine";
 
 const TOP_K_LIMIT = 8;
 
@@ -126,7 +127,12 @@ async function parseJsonLineStream(response: Response, onToken: (token: string) 
   }
 }
 
-function buildMessages(prompt: string, snippets: string[]) {
+type ProviderMessage = {
+  role: "system" | "user";
+  content: string;
+};
+
+function buildMessages(prompt: string, snippets: string[]): ProviderMessage[] {
   return [
     {
       role: "system",
@@ -138,6 +144,11 @@ function buildMessages(prompt: string, snippets: string[]) {
       content: `${prompt}\n\n${buildContextBlock(snippets)}`,
     },
   ];
+}
+
+export function isWebLLMEnabled(): boolean {
+  const raw = import.meta.env.VITE_WEBLLM_ENABLED;
+  return raw === "1" || raw === "true";
 }
 
 const definitions: LLMProviderDefinition[] = [
@@ -163,6 +174,14 @@ const definitions: LLMProviderDefinition[] = [
     kind: "local",
     defaultBaseUrl: "http://localhost:1234",
     defaultModel: "local-model",
+    requiresApiKey: false,
+  },
+  {
+    id: "webllm",
+    label: "Local (Browser WebLLM)",
+    kind: "local",
+    defaultBaseUrl: "",
+    defaultModel: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
     requiresApiKey: false,
   },
 ];
@@ -238,9 +257,34 @@ const providersById: Record<LLMProviderId, LLMStreamProvider> = {
       await parseSseStream(response, request.onToken);
     },
   },
+  webllm: {
+    definition: definitions[3],
+    async stream(config: LLMProviderConfig, request: LLMStreamRequest): Promise<void> {
+      if (!isWebLLMEnabled()) {
+        throw new WebLLMProviderError("WEBLLM_UNSUPPORTED", "WebLLM is disabled by feature flag.");
+      }
+
+      const manager = getWebLLMEngineManager();
+      await manager.ensureReady(config.model, {
+        allowDownload: config.allowModelDownload === true,
+        onProgress: (progress, text) => {
+          request.onInitProgress?.(progress, text);
+        },
+      });
+      await manager.stream(
+        config.model,
+        buildMessages(request.prompt, request.contextSnippets),
+        request.signal,
+        request.onToken,
+      );
+    },
+  },
 };
 
 export function getProviderDefinitions(): LLMProviderDefinition[] {
+  if (!isWebLLMEnabled()) {
+    return definitions.filter((definition) => definition.id !== "webllm");
+  }
   return definitions;
 }
 
@@ -259,6 +303,16 @@ export function formatProviderError(error: unknown, providerKind: "local" | "rem
 
   if (providerKind === "local" && /Failed to fetch|NetworkError/i.test(message)) {
     return "Local provider unreachable. Ensure Ollama/LM Studio is running and CORS/network access allows localhost calls.";
+  }
+
+  if (normalized instanceof WebLLMProviderError) {
+    if (normalized.code === "WEBLLM_DOWNLOAD_REQUIRED") {
+      return "WebLLM model download requires explicit consent.";
+    }
+    if (normalized.code === "WEBLLM_UNSUPPORTED") {
+      return "WebLLM is unavailable in this browser/device.";
+    }
+    return normalized.message;
   }
 
   return message;
