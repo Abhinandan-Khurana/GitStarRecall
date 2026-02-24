@@ -628,6 +628,8 @@ export default function UsagePage() {
   const [llmError, setLlmError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const generationControllerRef = useRef<AbortController | null>(null);
+  const pendingWebllmGenerationRef = useRef(false);
+  const generateAnswerRef = useRef<() => Promise<void>>(async () => undefined);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const restoreRequestTrackerRef = useRef(createRestoreRequestTracker());
   const webllmPreviousRecommendationRef = useRef<WebLLMRecommendation | null>(null);
@@ -2567,21 +2569,37 @@ export default function UsagePage() {
     }
   };
 
+  generateAnswerRef.current = handleGenerateAnswer;
+
   const handleCancelGeneration = () => {
     generationControllerRef.current?.abort();
   };
 
+  useEffect(() => {
+    if (!pendingWebllmGenerationRef.current) {
+      return;
+    }
+
+    if (providerId !== "webllm" || !webllmConsent || !webllmAllowModelDownload) {
+      return;
+    }
+
+    pendingWebllmGenerationRef.current = false;
+    void generateAnswerRef.current();
+  }, [providerId, webllmAllowModelDownload, webllmConsent]);
+
   const handleConfirmWebllmDownload = () => {
+    pendingWebllmGenerationRef.current = true;
     setWebllmConsent(true);
     setWebllmAllowModelDownload(true);
     setProviderId("webllm");
     setProviderModel(resolveHermesModelSelection(webllmSelectedModel));
     setWebllmDialogOpen(false);
     setWebllmRuntimeState("downloading");
-    void handleGenerateAnswer();
   };
 
   const handleCancelWebllmDownload = () => {
+    pendingWebllmGenerationRef.current = false;
     setWebllmDialogOpen(false);
     setWebllmRuntimeState("idle");
   };
