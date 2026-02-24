@@ -77,6 +77,7 @@ Read more:
 - Persistent chat sessions with ordered messages.
 - Session-aware search and follow-up flow on existing local embeddings.
 - Local and remote LLM answer modes.
+- Browser-local LLM mode via WebLLM (feature-flagged, explicit download consent).
 - Embedding acceleration controls (batching, worker pool, backend fallback).
 
 ---
@@ -141,6 +142,7 @@ Important variables:
 - `VITE_OLLAMA_BASE_URL` (optional default, must be localhost/127.0.0.1/[::1])
 - `VITE_OLLAMA_MODEL` (optional default, e.g. `nomic-embed-text`)
 - `VITE_OLLAMA_TIMEOUT_MS`
+- `VITE_WEBLLM_ENABLED` (`1` enables Browser WebLLM provider)
 - `VITE_LLM_SETTINGS_ENCRYPTION_KEY=` (openssl rand -hex 32)
 
 If using Vercel OAuth exchange, see:
@@ -208,6 +210,27 @@ README batching pipeline controls:
 5. Click `Test connection`.
 6. Run `Fetch Stars` to index with Ollama.
 7. If Ollama goes down, the app falls back to browser embedding automatically.
+
+### Browser WebLLM Provider (Opt-in, Feature-Flagged)
+
+- Enable with `VITE_WEBLLM_ENABLED=1`.
+- Provider appears as `Local (Browser WebLLM)` in chat model settings.
+- Before first model download, app requires explicit consent in modal UI.
+- No GitHub token/PAT is sent in WebLLM requests.
+- Recommendation policy:
+  - Mobile or weak/no-WebGPU device -> `SmolLM2-360M-Instruct-q4f16_1-MLC`
+  - Strong desktop -> `Llama-3.2-1B-Instruct-q4f16_1-MLC`
+- Desktop strength uses multi-signal scoring (`WebGPU`, cores, memory hint, perf probe).
+- On Safari/macOS where `navigator.deviceMemory` is often unavailable, missing memory is treated as neutral (not auto-weak).
+- Recommendation diagnostics are shown in chat (reason, webgpu, cores, memory/perf hints) to explain model suggestion.
+- Supported selectable models:
+  - `Llama-3.2-1B-Instruct-q4f16_1-MLC`
+  - `SmolLM2-360M-Instruct-q4f16_1-MLC`
+  - `Qwen2.5-1.5B-Instruct-q4f16_1-MLC`
+  - `Gemma-2-2B-Instruct-q4f16_1-MLC`
+  - `Hermes-3-Llama-3-3B-Instruct-q4f16_1-MLC` (auto-substitutes when unavailable)
+  - `Llama-3.1-3B-Instruct-q4f16_1-MLC`
+- If WebLLM fails, app retries once with 360M fallback model and can then auto-fallback to other configured providers.
 
 ### Large-Library Mode
 

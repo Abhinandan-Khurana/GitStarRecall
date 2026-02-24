@@ -53,12 +53,20 @@ Design reference:
 ### 1.5 LLM Provider Abstraction
 - Remote providers: OpenAI, Anthropic, Gemini, DeepSeek, etc.
 - Local providers: Ollama and LM Studio (optional)
+- Browser provider: WebLLM (feature-flagged, opt-in download consent)
 - Streaming responses with abort support
 - Provider interface with consistent request/response shape
 - Unified prompt contract: `system`, `user`, `context` (top-K chunks)
 - Transport:
   - Remote: HTTPS via provider SDK or REST
   - Local: HTTP to `http://localhost` endpoints
+  - Browser WebLLM: in-browser WebGPU runtime + locally cached model assets
+
+WebLLM model policy:
+- Primary: `Llama-3.2-1B-Instruct-q4f16_1-MLC`
+- Fallback: `SmolLM2-360M-Instruct-q4f16_1-MLC`
+- Additional selectable models: Qwen2.5 1.5B, Gemma 2 2B, Hermes 3 Llama 3 3B, Llama 3.1 3B
+- No model download starts before explicit user confirmation in UI
 
 ### 1.6 Local Provider Integration (Ollama, LM Studio)
 - Ollama:
@@ -95,6 +103,11 @@ Optional local runtime path (future enhancement):
 - Windows/Linux NVIDIA: CUDA via local runtime (Ollama/LM Studio runtime-managed)
 - macOS Apple Silicon: Metal/MPS-style acceleration via local runtime
 - CPU fallback on all platforms
+
+Browser local LLM path (implemented, feature-flagged):
+- WebLLM runs in-browser and uses WebGPU when available.
+- Device recommendation policy selects 1B for strong desktop and 360M for mobile/weak profiles.
+- If WebLLM fails, app retries with 360M and can fallback to other configured providers.
 
 Reference:
 - Detailed rollout and tradeoffs: `docs/embedding-acceleration-plan.md`

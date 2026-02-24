@@ -2,6 +2,17 @@
 
 This document reviews the GitStarRecall codebase against the threats and mitigations in [threat-modeling-stride.md](./threat-modeling-stride.md). Each STRIDE category is mapped to current implementation status and concrete recommendations.
 
+## 2026-02-24 Update (WebLLM Browser Provider)
+
+- Added feature-flagged Browser WebLLM provider (`VITE_WEBLLM_ENABLED=1`) with explicit consent-before-download gate.
+- Added typed error mapping for unsupported browser, download-required, init failure, and stream failure paths.
+- Added per-auth persistence for WebLLM consent and preferred/recommended model state.
+- Added model recommendation policy (mobile/no-WebGPU -> 360M; strong desktop -> 1B).
+- Added deterministic fallback chain when WebLLM is unavailable (`ollama -> lmstudio -> openai-compatible`).
+- Added CSP `connect-src` allowances for WebLLM artifact hosts, while preserving explicit allowlisting.
+- Calibrated WebLLM capability recommendation to handle missing browser memory hints safely (common on Safari/macOS), reducing false weak-device downgrades.
+- Added recommendation diagnostics visibility (`reason`, `webgpu`, `cores`, `mem`, `perf`) for transparent local runtime decisions without exposing secrets.
+
 ## 2026-02-23 Update (Embedding Pipeline v2 + Ollama Opt-in)
 
 - Added localhost-only validation for Ollama embedding endpoints (`localhost`, `127.0.0.1`, `[::1]`), enforced in `src/embeddings/ollamaClient.ts`.
@@ -25,7 +36,7 @@ This document reviews the GitStarRecall codebase against the threats and mitigat
 | Clear separation landing vs login | **Done** | `LandingPage` at `/`, `UsagePage` at `/app`, `AuthCallbackPage` at `/auth/callback`; auth state in React/sessionStorage. |
 | Warning banner when PAT is used; recommend OAuth | **Done** | Auth method is shown in the sessions collapsible (`authMethod`: "oauth" / "pat") and there is **explicit warning** when user is logged in with PAT (e.g. “You’re using a PAT. Prefer OAuth for better security.”).
 | Strict CSP | **Done** | See Tampering / CSP below. |
-| Explicit opt-in for local endpoints; show endpoint origin | **Done** | `allowLocalProvider` is off by default; user must enable “Local (Ollama)” in SessionChat model settings. Base URL is user-configured and visible in the same popover. |
+| Explicit opt-in for local endpoints; show endpoint origin | **Done** | `allowLocalProvider` is off by default; user must enable local providers in SessionChat model settings. Browser WebLLM additionally requires consent modal before first model download. |
 
 ---
 
@@ -100,7 +111,7 @@ No material gaps identified for DoS mitigations.
 |------------|--------|-----------------|
 | Minimal GitHub scopes / fine-grained PAT | **Context** | OAuth uses `["read:user", "repo"]` in `getOAuthConfig()`. “repo” is broad (full repo access). For “starred repos + READMEs” the threat model recommends minimal scopes or fine-grained PAT. |
 | Local endpoints clearly labeled; explicit opt-in | **Done** | Local provider is labeled “Local (Ollama)” in SessionChat; base URL is user-editable in the same panel; use requires `allowLocalProvider`. |
-| Browser embedding path default; local Ollama explicit | **Done** | Default flow is in-browser embedding (worker); no automatic local runtime bridge; optional Ollama embedding is user-configured and opt-in. |
+| Browser embedding path default; local Ollama explicit | **Done** | Default embedding flow is in-browser worker embedding; optional Ollama embedding is explicit and localhost-restricted. Browser WebLLM LLM path is feature-flagged and consent-gated. |
 
 **Recommendation:** Document that OAuth scope `repo` is used for starred repos and README access, and that users using PAT should prefer a fine-grained PAT with minimal permissions (e.g. read-only for repos they need). Consider, if GitHub API allows, narrowing OAuth scopes in the future.
 

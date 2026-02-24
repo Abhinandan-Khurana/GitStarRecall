@@ -1,5 +1,41 @@
 # Release Notes
 
+## 2026-02-24 (WebLLM Recommendation Calibration for macOS/Desktop)
+
+- Fixed WebLLM model recommendation logic that could incorrectly classify strong Mac desktops as weak when memory hints were unavailable.
+- Replaced strict hard-gate recommendation with score-based desktop strength evaluation using:
+  - hardware concurrency
+  - memory hint (neutral when unavailable)
+  - perf probe (neutral when unavailable)
+- Preserved hard fallback semantics for `mobile` and `no-webgpu` paths.
+- Added anti-flap behavior near threshold to avoid unstable strong/weak recommendation flipping.
+- Added recommendation diagnostics in chat UI (`reason`, `webgpu`, `cores`, `mem`, `perf`) for explainability.
+- Added expanded tests in `src/llm/webllm/capability.test.ts` covering macOS-like and boundary scenarios.
+
+## 2026-02-24 (WebLLM Browser LLM Integration)
+
+- Added feature-flagged Browser WebLLM provider (`VITE_WEBLLM_ENABLED=1`) in the LLM provider stack.
+- Added explicit consent-first model download flow:
+  - generation blocks until user confirms download
+  - no implicit model download before consent
+  - runtime progress/status is shown in UI
+- Added adaptive model recommendation and defaults:
+  - strong desktop -> `Llama-3.2-1B-Instruct-q4f16_1-MLC`
+  - mobile/weak/no-WebGPU -> `SmolLM2-360M-Instruct-q4f16_1-MLC`
+- Added six selectable WebLLM models in catalog:
+  - Llama 3.2 1B, SmolLM2 360M, Qwen2.5 1.5B, Gemma 2 2B, Hermes 3 Llama 3 3B, Llama 3.1 3B.
+- Added Hermes compatibility substitution (`Hermes-3-Llama-3-3B...` -> `Llama-3.1-3B...`) when needed.
+- Added typed WebLLM runtime errors and user-facing mapping for unsupported/download/init/stream failures.
+- Added deterministic provider fallback resolver and tests for fallback order:
+  - `webllm -> ollama -> lmstudio -> openai-compatible`.
+- Added WebLLM cache cleanup in local data delete flow.
+- Added tests:
+  - `src/llm/webllm/modelCatalog.test.ts`
+  - `src/llm/webllm/capability.test.ts`
+  - `src/llm/fallback.test.ts`
+  - `src/lib/settings.test.ts`
+- Added CSP `connect-src` host allowances required for WebLLM model artifact download paths.
+
 ## 2026-02-23 (README Batch Pipeline v2 + Incremental Sync)
 
 - Added feature-flagged staged sync pipeline (`VITE_README_BATCH_PIPELINE_V2`) for large star libraries.
