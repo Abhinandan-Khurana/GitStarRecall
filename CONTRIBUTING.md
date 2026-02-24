@@ -1,7 +1,7 @@
 # Contributing to GitStarRecall
 
-Thanks for contributing.
-This project is local-first, security-focused, and problem-solving centric.
+Thanks for contributing.  
+This project is local-first, security-focused, and performance-oriented.
 
 If a proposed change improves UX but weakens security or privacy defaults, it should not be merged as-is.
 
@@ -19,29 +19,28 @@ If a proposed change improves UX but weakens security or privacy defaults, it sh
 
 ## Before You Start
 
-1. Read the architecture and security docs:
+Read these first:
+- `docs/Usage.md`
 - `docs/tech-stack-architecture-security-prd.md`
 - `docs/threat-modeling-stride.md`
+- `docs/security-review-stride.md`
 - `docs/embedding-acceleration-plan.md`
 
-2. Check if there is an implementation plan task already covering your work:
-- `docs/step-by-step-implementation-plan.md`
-
-3. If your change affects authentication, storage, or data flow, include a short threat-impact note in the PR description.
+If your change affects authentication, storage, or data flow, include a short threat-impact note in the PR description.
 
 ---
 
 ## Local Setup
 
 ```bash
-npm install
+pnpm install
 cp .env.example .env
-npm run dev
+pnpm dev
 ```
 
 Required runtime assumptions:
 - Node.js 20+
-- npm 10+
+- pnpm 9+
 - Browser with modern Worker and Indexed storage support
 
 ---
@@ -62,20 +61,27 @@ Suggested commit style:
 
 ---
 
+## UI Component Rule
+
+- Do not install Radix packages directly for new UI components.
+- Use shadcn CLI to add UI components so styling and component patterns stay consistent.
+
+---
+
 ## Code Quality Gate (Required)
 
 Run this before opening a PR:
 
 ```bash
-npm run lint
-npm run test
-npm run build
+pnpm lint
+pnpm test
+pnpm build
 ```
 
 Or run the combined check:
 
 ```bash
-npm run ci
+pnpm ci
 ```
 
 PRs that fail lint/test/build should not be merged.
@@ -104,8 +110,8 @@ For embedding/indexing changes:
 - Preserve progress telemetry and error diagnostics.
 
 When changing worker/batching/checkpoint logic:
-- add/adjust unit tests,
-- include benchmark notes in PR description (even if quick local numbers).
+- add or adjust unit tests.
+- include benchmark notes in PR description (quick local numbers are acceptable).
 
 ---
 
@@ -129,13 +135,15 @@ You must update docs when any of these change:
 - security controls,
 - env variables,
 - user-visible behavior,
-- implementation plan states.
+- operational usage instructions.
 
 Likely docs to touch:
+- `docs/Usage.md`
 - `docs/tech-stack-architecture-security-prd.md`
-- `docs/step-by-step-implementation-plan.md`
 - `docs/embedding-acceleration-plan.md`
-- `docs/deployment-vercel.md`
+- `docs/threat-modeling-stride.md`
+- `docs/security-review-stride.md`
+- `docs/release-notes.md`
 
 ---
 
@@ -160,9 +168,9 @@ Copy this into your PR description:
 - [ ] Regressed (explain)
 
 ## Tests
-- [ ] npm run lint
-- [ ] npm run test
-- [ ] npm run build
+- [ ] pnpm lint
+- [ ] pnpm test
+- [ ] pnpm build
 
 ## Docs Updated
 - [ ] Yes
@@ -197,7 +205,3 @@ Include:
 
 Author:
 - [Abhinandan-Khurana](https://github.com/Abhinandan-Khurana)
-
-This repository has also been iterated with help from multiple LLM collaborators for drafting, review, threat modeling, and debugging support.
-
-no AI agents were harmed during the process lol
