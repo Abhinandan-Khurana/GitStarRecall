@@ -2083,7 +2083,6 @@ export default function UsagePage() {
           }),
         );
       }
-      await publishProgress(true);
     } catch (err) {
       if (err instanceof Error && err.message === OLLAMA_RESTART_BROWSER_ERROR) {
         restartWithBrowser = true;
