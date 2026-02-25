@@ -34,7 +34,7 @@ Design reference:
 
 ### 1.3 Embeddings (Local-First)
 - Primary: @xenova/transformers
-- Model: `bge-base-en-v1.5` (384 dims) for speed/accuracy balance
+- Model: `bge-base-en-v1.5` (768 dims) for speed/accuracy balance
 - Runtime backend policy:
   - Preferred: browser `webgpu` (when available and healthy)
   - Fallback: browser `wasm` CPU
@@ -206,7 +206,7 @@ const db = new sqlite3.oo1.DB(":memory:");
 // sqlite-vec is already compiled in here.
 ```
 
-Example schema (vectors stored in SQLite using sqlite-vec `vec0`, 384-dim vectors):
+Example schema (vectors stored in SQLite using sqlite-vec `vec0`, 768-dim vectors):
 
 ```sql
 CREATE TABLE repo_chunks (
@@ -218,7 +218,7 @@ CREATE TABLE repo_chunks (
 -- sqlite-vec virtual table with metadata columns
 CREATE VIRTUAL TABLE vec_chunks USING vec0(
   chunk_id TEXT PRIMARY KEY,
-  embedding float[384] distance_metric=cosine,
+  embedding float[768] distance_metric=cosine,
   repo_id TEXT,
   language TEXT
 );
