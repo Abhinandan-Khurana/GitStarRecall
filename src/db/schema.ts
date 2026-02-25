@@ -46,6 +46,15 @@ CREATE TABLE IF NOT EXISTS index_meta (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS repo_embeddings (
+  repo_id INTEGER PRIMARY KEY,
+  model TEXT NOT NULL,
+  dimension INTEGER NOT NULL,
+  vector_blob BLOB NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS chat_sessions (
   id TEXT NOT NULL PRIMARY KEY,
   query TEXT NOT NULL,
@@ -66,4 +75,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_chunks_repo_id ON chunks(repo_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_created_at ON chunks(created_at);
 CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_embeddings_model_dim ON embeddings(model, dimension);
+CREATE INDEX IF NOT EXISTS idx_repo_embeddings_model_dim ON repo_embeddings(model, dimension);
+CREATE INDEX IF NOT EXISTS idx_repo_embeddings_updated_at ON repo_embeddings(updated_at);
 `;

@@ -398,9 +398,14 @@ const OLLAMA_EMBEDDING_PREF_KEY_PREFIX = "gitstarrecall.embedding.ollama.pref";
 const CHAT_SCOPE_PREFIX = "chat";
 const EMBEDDING_BACKEND_META_KEY = "embedding_active_backend";
 const EMBEDDING_MODEL_META_KEY = "embedding_active_model";
+const EMBEDDING_DIMENSION_META_KEY = "embedding_active_dimension";
 const BROWSER_EMBEDDING_MODEL = "Xenova/bge-base-en-v1.5";
 const OLLAMA_BATCH_SIZE_CAP = 24;
 const OLLAMA_RESTART_BROWSER_ERROR = "__OLLAMA_RESTART_BROWSER__";
+
+function getSearchPipelineV2Enabled(): boolean {
+  return String(import.meta.env.VITE_SEARCH_PIPELINE_V2 ?? "0") === "1";
+}
 
 function hashTokenScope(raw: string): string {
   let hash = 0;
@@ -1632,6 +1637,7 @@ export default function UsagePage() {
 
       const existingBackend = database.getIndexMetaValue(EMBEDDING_BACKEND_META_KEY);
       const existingModel = database.getIndexMetaValue(EMBEDDING_MODEL_META_KEY);
+      const existingDimension = Number(database.getIndexMetaValue(EMBEDDING_DIMENSION_META_KEY));
       if (
         database.getEmbeddingCount() > 0 &&
         (existingBackend !== activeBackendKind || existingModel !== activeEmbeddingModel)
@@ -1646,16 +1652,13 @@ export default function UsagePage() {
           `Embedding model changed (${existingModel ?? "unknown"} -> ${activeEmbeddingModel}); rebuilding index.`,
         );
       }
-      await database.upsertIndexMeta({
-        key: EMBEDDING_BACKEND_META_KEY,
-        value: activeBackendKind,
-        updatedAt: Date.now(),
-      });
-      await database.upsertIndexMeta({
-        key: EMBEDDING_MODEL_META_KEY,
-        value: activeEmbeddingModel,
-        updatedAt: Date.now(),
-      });
+      if (Number.isFinite(existingDimension) && existingDimension > 0 && existingBackend === activeBackendKind && existingModel === activeEmbeddingModel) {
+        await database.setActiveEmbeddingIdentity({
+          backend: activeBackendKind,
+          model: activeEmbeddingModel,
+          dimension: Math.trunc(existingDimension),
+        });
+      }
 
       const repoCount = database.getRepoCount();
       const largeLibraryMode = largeLibraryModeEnabled && repoCount > largeLibraryThreshold;
@@ -1663,6 +1666,7 @@ export default function UsagePage() {
         repoIds: repoIdsFilter,
         limit: maxChunks,
       });
+      const chunkRepoById = new Map<string, number>(pendingChunks.map((chunk) => [chunk.id, chunk.repoId]));
       if (largeLibraryMode && pendingChunks.length > 0) {
         const repos = database.listRepos();
         const rankByRepo = new Map<number, number>();
@@ -1722,6 +1726,7 @@ export default function UsagePage() {
       let totalDbCheckpointMs = 0;
       let lastBatchEmbedLatencyMs = 0;
       let lastDbCheckpointMs = 0;
+      let activeEmbeddingDimension: number | null = null;
       const localEmbeddingCache = new Map<string, { model: string; vector: Float32Array }>();
       const embeddingBuffer: EmbeddingRecord[] = [];
       const startMs = Date.now();
@@ -1777,6 +1782,17 @@ export default function UsagePage() {
         const checkpointStart = performance.now();
         const flushed = embeddingBuffer.splice(0, embeddingBuffer.length);
         await database.upsertEmbeddings(flushed);
+        const repoIds = flushed
+          .map((embedding) => chunkRepoById.get(embedding.chunkId))
+          .filter((repoId): repoId is number => Number.isFinite(repoId))
+          .map((repoId) => Math.trunc(repoId));
+        if (repoIds.length > 0 && activeEmbeddingDimension != null) {
+          await database.rebuildRepoCentroids({
+            repoIds,
+            model: activeEmbeddingModel,
+            dimension: activeEmbeddingDimension,
+          });
+        }
         lastDbCheckpointMs = performance.now() - checkpointStart;
         totalDbCheckpointMs += lastDbCheckpointMs;
       };
@@ -1878,6 +1894,9 @@ export default function UsagePage() {
           const cachedEntry = localEmbeddingCache.get(chunk.text);
           if (cachedEntry && cachedEntry.model === batchModel) {
             duplicateHits += 1;
+            if (activeEmbeddingDimension == null) {
+              activeEmbeddingDimension = cachedEntry.vector.length;
+            }
             embeddingBuffer.push({
               id: crypto.randomUUID(),
               chunkId: chunk.id,
@@ -1952,6 +1971,9 @@ export default function UsagePage() {
             if (localEmbeddingCache.size < 4_000) {
               localEmbeddingCache.set(item.text, { model: vectorModel, vector });
             }
+            if (activeEmbeddingDimension == null) {
+              activeEmbeddingDimension = vector.length;
+            }
             embeddingBuffer.push({
               id: crypto.randomUUID(),
               chunkId: item.chunkId,
@@ -2022,6 +2044,13 @@ export default function UsagePage() {
       const finalElapsedSeconds = Math.max((Date.now() - startMs) / 1000, 1);
       const finalQueueDepth = Math.max(embeddingTarget - processedCount, 0);
       await database.flushPendingEmbeddingCheckpoint();
+      if (activeEmbeddingDimension != null) {
+        await database.setActiveEmbeddingIdentity({
+          backend: activeBackendKind,
+          model: activeEmbeddingModel,
+          dimension: activeEmbeddingDimension,
+        });
+      }
       if (!incrementalMode) {
         await database.upsertIndexMeta({
           key: "embedding_job_cursor",
@@ -2029,6 +2058,7 @@ export default function UsagePage() {
           updatedAt: Date.now(),
         });
       }
+      setDbStorageMode(database.storageMode);
       const finalCheckpointStatus = database.getEmbeddingCheckpointStatus();
       const finalPoolStatus = activeEmbeddingPool.getStatus();
       if (backendIdentity.kind === "browser") {
@@ -2083,7 +2113,6 @@ export default function UsagePage() {
           }),
         );
       }
-      await publishProgress(true);
     } catch (err) {
       if (err instanceof Error && err.message === OLLAMA_RESTART_BROWSER_ERROR) {
         restartWithBrowser = true;
@@ -2110,6 +2139,11 @@ export default function UsagePage() {
         await database.upsertIndexMeta({
           key: EMBEDDING_MODEL_META_KEY,
           value: BROWSER_EMBEDDING_MODEL,
+          updatedAt: Date.now(),
+        });
+        await database.upsertIndexMeta({
+          key: EMBEDDING_DIMENSION_META_KEY,
+          value: "",
           updatedAt: Date.now(),
         });
         await database.upsertIndexMeta({
@@ -2163,11 +2197,13 @@ export default function UsagePage() {
       setError(null);
 
       const database = await getLocalDatabase();
+      const embeddingCount = database.getEmbeddingCount();
+      const activeEmbeddingBackend = database.getIndexMetaValue(EMBEDDING_BACKEND_META_KEY);
+      const activeEmbeddingModel = database.getIndexMetaValue(EMBEDDING_MODEL_META_KEY);
+      const activeDimensionRaw = Number(database.getIndexMetaValue(EMBEDDING_DIMENSION_META_KEY));
 
       // 1. Generate embedding for query
       let vector: Float32Array;
-      const activeEmbeddingBackend = database.getIndexMetaValue(EMBEDDING_BACKEND_META_KEY);
-      const activeEmbeddingModel = database.getIndexMetaValue(EMBEDDING_MODEL_META_KEY);
       if (activeEmbeddingBackend === "ollama" && activeEmbeddingModel) {
         setSearchProgress("Generating query embedding with Ollama…");
         try {
@@ -2205,9 +2241,37 @@ export default function UsagePage() {
         embedder.terminate();
       }
 
+      if (embeddingCount > 0) {
+        const identityModel = activeEmbeddingModel ?? BROWSER_EMBEDDING_MODEL;
+        const identityDimension =
+          Number.isFinite(activeDimensionRaw) && activeDimensionRaw > 0
+            ? Math.trunc(activeDimensionRaw)
+            : vector.length;
+        database.assertSearchCompatible(
+          {
+            model: identityModel,
+            dimension: identityDimension,
+          },
+          vector.length,
+        );
+      }
+
       // 2. Search DB
       setSearchProgress("Running semantic search…");
-      const results = await database.findSimilarChunks(vector, 20); // Top 20
+      const useSearchV2 = getSearchPipelineV2Enabled();
+      const activeModelForSearch = activeEmbeddingModel ?? BROWSER_EMBEDDING_MODEL;
+      const results = useSearchV2
+        ? await database.searchV2({
+            queryVector: vector,
+            model: activeModelForSearch,
+            dimension: vector.length,
+            topK: 20,
+            candidateRepoLimit: 120,
+            rerankLimit: 64,
+            perRepoCap: 3,
+          })
+        : await database.findSimilarChunks(vector, 20);
+      setDbStorageMode(database.storageMode);
       const now = Date.now();
 
       const preferredSession =

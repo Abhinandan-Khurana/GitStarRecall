@@ -6,8 +6,10 @@ import type {
   ChatMessageRecord,
   ChatSessionRecord,
   ChunkRecord,
+  EmbeddingIdentity,
   EmbeddingRecord,
   IndexMetaRecord,
+  RepoEmbeddingRecord,
   RepoRecord,
   RepoSyncState,
   SearchResult,
@@ -18,6 +20,9 @@ const DB_NAME = "gitstarrecall.sqlite";
 const LOCAL_STORAGE_KEY = "gitstarrecall.sqlite.base64";
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_EMBEDDINGS = 256;
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_MS = 3000;
+const EMBEDDING_BACKEND_META_KEY = "embedding_active_backend";
+const EMBEDDING_MODEL_META_KEY = "embedding_active_model";
+const EMBEDDING_DIMENSION_META_KEY = "embedding_active_dimension";
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
 let dbPromise: Promise<LocalDatabase> | null = null;
@@ -520,6 +525,38 @@ export function runSchema(database: Database): void {
       );
     `);
   }
+
+  const repoEmbeddingsColumnsResult = database.exec("PRAGMA table_info(repo_embeddings);");
+  const repoEmbeddingsInfo =
+    repoEmbeddingsColumnsResult.length > 0
+      ? repoEmbeddingsColumnsResult[0].values.map((row) => ({
+          name: String(row[1]),
+          type: String(row[2]).toUpperCase(),
+        }))
+      : [];
+  const repoEmbeddingsTypeByName = new Map(repoEmbeddingsInfo.map((column) => [column.name, column.type]));
+  const repoEmbeddingsCompatible =
+    repoEmbeddingsTypeByName.get("repo_id") === "INTEGER" &&
+    repoEmbeddingsTypeByName.get("model") === "TEXT" &&
+    repoEmbeddingsTypeByName.get("dimension") === "INTEGER" &&
+    repoEmbeddingsTypeByName.get("vector_blob") === "BLOB" &&
+    repoEmbeddingsTypeByName.get("updated_at") === "INTEGER";
+  if (!repoEmbeddingsCompatible) {
+    database.run("DROP TABLE IF EXISTS repo_embeddings;");
+    database.run(`
+      CREATE TABLE IF NOT EXISTS repo_embeddings (
+        repo_id INTEGER PRIMARY KEY,
+        model TEXT NOT NULL,
+        dimension INTEGER NOT NULL,
+        vector_blob BLOB NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+      );
+    `);
+  }
+  database.run("CREATE INDEX IF NOT EXISTS idx_embeddings_model_dim ON embeddings(model, dimension);");
+  database.run("CREATE INDEX IF NOT EXISTS idx_repo_embeddings_model_dim ON repo_embeddings(model, dimension);");
+  database.run("CREATE INDEX IF NOT EXISTS idx_repo_embeddings_updated_at ON repo_embeddings(updated_at);");
 }
 
 function normalizeTimestamp(value: unknown, fallback: number): number {
@@ -540,6 +577,11 @@ function toSqlStringLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
+function toSqlBlobLiteral(bytes: Uint8Array): string {
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  return `X'${hex}'`;
+}
+
 function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   if (a.length !== b.length) {
     return 0;
@@ -558,12 +600,56 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+function blobToFloat32(blob: Uint8Array): Float32Array {
+  return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / Float32Array.BYTES_PER_ELEMENT);
+}
+
+function l2Normalize(vector: Float32Array): Float32Array {
+  let sum = 0;
+  for (let i = 0; i < vector.length; i += 1) {
+    sum += vector[i] * vector[i];
+  }
+  const norm = Math.sqrt(sum);
+  if (!Number.isFinite(norm) || norm <= 0) {
+    return vector.slice();
+  }
+  const normalized = new Float32Array(vector.length);
+  for (let i = 0; i < vector.length; i += 1) {
+    normalized[i] = vector[i] / norm;
+  }
+  return normalized;
+}
+
+type SearchV2Args = {
+  queryVector: Float32Array;
+  model: string;
+  dimension: number;
+  topK?: number;
+  candidateRepoLimit?: number;
+  rerankLimit?: number;
+  perRepoCap?: number;
+};
+
+type SearchCandidateRepo = {
+  repoId: number;
+  score: number;
+};
+
+type SimilarityScore = {
+  chunkId: string;
+  repoId: number;
+  score: number;
+};
+
 export class LocalDatabase {
   private sql: SqlJsStatic;
   private db: Database;
   private _storageMode: StorageMode;
-  private vectorIndexCache: Array<{ chunkId: string; vector: Float32Array }> | null = null;
+  private vectorIndexCache: Array<{ chunkId: string; repoId: number; vector: Float32Array }> | null = null;
   private vectorIndexCacheCount = -1;
+  private vectorIndexCacheModel: string | null = null;
+  private vectorIndexCacheDimension: number | null = null;
+  private persistWarning: "none" | "quota-exceeded" = "none";
   private embeddingCheckpointPolicy: EmbeddingCheckpointPolicy;
   private pendingEmbeddingsSinceCheckpoint = 0;
   private pendingEmbeddingsStartedAt = 0;
@@ -594,60 +680,76 @@ export class LocalDatabase {
     return this._storageMode;
   }
 
-  private ensureVectorIndexCache(): Array<{ chunkId: string; vector: Float32Array }> {
+  getPersistWarning(): "none" | "quota-exceeded" {
+    return this.persistWarning;
+  }
+
+  private ensureVectorIndexCache(args?: {
+    model?: string | null;
+    dimension?: number | null;
+    repoIds?: number[];
+  }): Array<{ chunkId: string; repoId: number; vector: Float32Array }> {
+    const model = args?.model ? String(args.model).trim() : "";
+    const dimension =
+      Number.isFinite(args?.dimension) && Number(args?.dimension) > 0 ? Math.trunc(Number(args?.dimension)) : null;
+    const repoIds = (args?.repoIds ?? []).filter((value) => Number.isFinite(value)).map((value) => Math.trunc(value));
     const currentCount = this.getEmbeddingCount();
-    if (this.vectorIndexCache && this.vectorIndexCacheCount === currentCount) {
+    if (
+      this.vectorIndexCache &&
+      this.vectorIndexCacheCount === currentCount &&
+      this.vectorIndexCacheModel === (model || null) &&
+      this.vectorIndexCacheDimension === (dimension ?? null) &&
+      repoIds.length === 0
+    ) {
       return this.vectorIndexCache;
     }
 
+    const where: string[] = [];
+    if (model) {
+      where.push(`e.model = ${toSqlStringLiteral(model)}`);
+    }
+    if (dimension != null) {
+      where.push(`e.dimension = ${dimension}`);
+    }
+    if (repoIds.length > 0) {
+      where.push(`c.repo_id IN (${repoIds.join(",")})`);
+    }
+    const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
     const result = this.db.exec(`
-      SELECT e.chunk_id, e.vector_blob
+      SELECT e.chunk_id, c.repo_id, e.vector_blob
       FROM embeddings e
-      INNER JOIN chunks c ON c.id = e.chunk_id;
+      INNER JOIN chunks c ON c.id = e.chunk_id
+      ${whereClause}
     `);
     if (result.length === 0) {
       this.vectorIndexCache = [];
       this.vectorIndexCacheCount = 0;
-      return this.vectorIndexCache;
+      this.vectorIndexCacheModel = model || null;
+      this.vectorIndexCacheDimension = dimension;
+      return [];
     }
 
     const [table] = result;
-    this.vectorIndexCache = table.values.map((row) => {
+    const vectors = table.values.map((row) => {
       const chunkId = String(row[0]);
-      const blob = row[1] as Uint8Array;
+      const repoId = Number(row[1]);
+      const blob = row[2] as Uint8Array;
       const vector = new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
-      return { chunkId, vector };
+      return { chunkId, repoId, vector };
     });
-    this.vectorIndexCacheCount = this.vectorIndexCache.length;
-    return this.vectorIndexCache;
+    if (repoIds.length === 0) {
+      this.vectorIndexCache = vectors;
+      this.vectorIndexCacheCount = currentCount;
+      this.vectorIndexCacheModel = model || null;
+      this.vectorIndexCacheDimension = dimension;
+    }
+    return vectors;
   }
 
-  async findSimilarChunks(queryVector: Float32Array, limit: number = 10): Promise<SearchResult[]> {
-    // 1. Use in-memory cache of decoded embedding vectors for repeated queries.
-    const vectors = this.ensureVectorIndexCache();
-    if (vectors.length === 0) {
-      return [];
-    }
-    const scores: { chunkId: string; score: number }[] = [];
-
-    // 2. Compute similarity
-    for (const entry of vectors) {
-      const { chunkId, vector } = entry;
-      const score = cosineSimilarity(queryVector, vector);
-      scores.push({ chunkId, score });
-    }
-
-    // 3. Sort and slice
-    scores.sort((a, b) => b.score - a.score);
-    const topChunks = scores.slice(0, limit);
-
+  private hydrateSearchResults(topChunks: SimilarityScore[]): SearchResult[] {
     if (topChunks.length === 0) {
       return [];
     }
-
-    // 4. Hydrate with text and repo info.
-    // Use SQL literals instead of bind params because some browser/sql.js environments
-    // in this app have shown unstable bind behavior (NULL coercion).
     const chunkIdLiterals = topChunks.map((item) => toSqlStringLiteral(item.chunkId)).join(",");
     const detailsResult = this.db.exec(`
       SELECT
@@ -703,8 +805,266 @@ export class LocalDatabase {
       .filter((item): item is SearchResult => item !== null);
   }
 
+  private collectChunkScores(args: {
+    queryVector: Float32Array;
+    model?: string;
+    dimension?: number;
+    repoIds?: number[];
+  }): SimilarityScore[] {
+    const vectors = this.ensureVectorIndexCache({
+      model: args.model,
+      dimension: args.dimension,
+      repoIds: args.repoIds,
+    });
+    if (vectors.length === 0) {
+      return [];
+    }
+    const scores: SimilarityScore[] = [];
+    for (const entry of vectors) {
+      const score = cosineSimilarity(args.queryVector, entry.vector);
+      scores.push({ chunkId: entry.chunkId, repoId: entry.repoId, score });
+    }
+    return scores;
+  }
+
+  async findSimilarChunks(queryVector: Float32Array, limit: number = 10): Promise<SearchResult[]> {
+    const scores = this.collectChunkScores({ queryVector });
+    if (scores.length === 0) {
+      return [];
+    }
+    scores.sort((a, b) => b.score - a.score);
+    return this.hydrateSearchResults(scores.slice(0, Math.max(1, Math.trunc(limit))));
+  }
+
+  upsertRepoEmbedding(record: RepoEmbeddingRecord): void {
+    const repoId = Math.trunc(Number(record.repoId));
+    const model = String(record.model ?? "").trim();
+    const dimension = Math.trunc(Number(record.dimension));
+    const updatedAt = Math.trunc(Number(record.updatedAt));
+    const vectorBlob = record.vectorBlob instanceof Uint8Array ? record.vectorBlob : new Uint8Array(record.vectorBlob);
+    if (!Number.isFinite(repoId) || repoId <= 0) {
+      throw new Error("repo_embeddings repo_id is invalid");
+    }
+    if (!model) {
+      throw new Error("repo_embeddings model is required");
+    }
+    if (!Number.isFinite(dimension) || dimension <= 0) {
+      throw new Error("repo_embeddings dimension is invalid");
+    }
+    if (vectorBlob.byteLength !== dimension * Float32Array.BYTES_PER_ELEMENT) {
+      throw new Error("repo_embeddings vector length does not match dimension");
+    }
+    if (!Number.isFinite(updatedAt) || updatedAt <= 0) {
+      throw new Error("repo_embeddings updated_at is invalid");
+    }
+    const modelLiteral = toSqlStringLiteral(model);
+    const blobLiteral = toSqlBlobLiteral(vectorBlob);
+    this.db.run(
+      `
+      INSERT INTO repo_embeddings (repo_id, model, dimension, vector_blob, updated_at)
+      VALUES (
+        ${repoId},
+        ${modelLiteral},
+        ${dimension},
+        ${blobLiteral},
+        ${updatedAt}
+      )
+      ON CONFLICT(repo_id) DO UPDATE SET
+        model = ${modelLiteral},
+        dimension = ${dimension},
+        vector_blob = ${blobLiteral},
+        updated_at = ${updatedAt};
+    `,
+    );
+  }
+
+  async rebuildRepoCentroids(args: {
+    repoIds: number[];
+    model: string;
+    dimension: number;
+  }): Promise<void> {
+    const repoIds = args.repoIds
+      .filter((value) => Number.isFinite(value))
+      .map((value) => Math.trunc(value))
+      .filter((value, index, list) => value > 0 && list.indexOf(value) === index);
+    if (repoIds.length === 0) {
+      return;
+    }
+    const model = String(args.model ?? "").trim();
+    const dimension = Number.isFinite(args.dimension) ? Math.trunc(args.dimension) : 0;
+    if (!model || dimension <= 0) {
+      return;
+    }
+
+    const repoLiteral = repoIds.join(",");
+    const result = this.db.exec(`
+      SELECT c.repo_id, e.vector_blob
+      FROM embeddings e
+      INNER JOIN chunks c ON c.id = e.chunk_id
+      WHERE e.model = ${toSqlStringLiteral(model)}
+        AND e.dimension = ${dimension}
+        AND c.repo_id IN (${repoLiteral});
+    `);
+
+    const vectorsByRepo = new Map<number, Float32Array[]>();
+    if (result.length > 0) {
+      for (const row of result[0].values) {
+        const repoId = Number(row[0]);
+        const blob = row[1] as Uint8Array;
+        const vector = blobToFloat32(blob);
+        if (!vectorsByRepo.has(repoId)) {
+          vectorsByRepo.set(repoId, []);
+        }
+        vectorsByRepo.get(repoId)?.push(vector);
+      }
+    }
+
+    this.db.run("BEGIN");
+    try {
+      for (const repoId of repoIds) {
+        const vectors = vectorsByRepo.get(repoId) ?? [];
+        if (vectors.length === 0) {
+          this.db.run("DELETE FROM repo_embeddings WHERE repo_id = ?;", [repoId]);
+          continue;
+        }
+        const sum = new Float32Array(dimension);
+        for (const vector of vectors) {
+          if (vector.length !== dimension) {
+            continue;
+          }
+          for (let i = 0; i < dimension; i += 1) {
+            sum[i] += vector[i] ?? 0;
+          }
+        }
+        const inv = 1 / vectors.length;
+        for (let i = 0; i < dimension; i += 1) {
+          sum[i] *= inv;
+        }
+        const centroid = l2Normalize(sum);
+        this.upsertRepoEmbedding({
+          repoId,
+          model,
+          dimension,
+          vectorBlob: new Uint8Array(centroid.buffer.slice(0)),
+          updatedAt: Date.now(),
+        });
+      }
+      this.db.run("COMMIT");
+    } catch (error) {
+      this.db.run("ROLLBACK");
+      throw error;
+    }
+  }
+
+  findTopReposByCentroid(args: {
+    queryVector: Float32Array;
+    model: string;
+    dimension: number;
+    limit: number;
+  }): SearchCandidateRepo[] {
+    const model = String(args.model ?? "").trim();
+    const dimension = Number.isFinite(args.dimension) ? Math.trunc(args.dimension) : 0;
+    const limit = Number.isFinite(args.limit) ? Math.max(1, Math.trunc(args.limit)) : 100;
+    if (!model || dimension <= 0) {
+      return [];
+    }
+    const result = this.db.exec(`
+      SELECT repo_id, vector_blob
+      FROM repo_embeddings
+      WHERE model = ${toSqlStringLiteral(model)}
+        AND dimension = ${dimension};
+    `);
+    if (result.length === 0) {
+      return [];
+    }
+    const candidates: SearchCandidateRepo[] = [];
+    for (const row of result[0].values) {
+      const repoId = Number(row[0]);
+      const blob = row[1] as Uint8Array;
+      const vector = blobToFloat32(blob);
+      const score = cosineSimilarity(args.queryVector, vector);
+      candidates.push({ repoId, score });
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates.slice(0, limit);
+  }
+
+  async findSimilarChunksInRepos(args: {
+    queryVector: Float32Array;
+    model: string;
+    dimension: number;
+    repoIds: number[];
+    limit: number;
+  }): Promise<SearchResult[]> {
+    const repoIds = args.repoIds
+      .filter((value) => Number.isFinite(value))
+      .map((value) => Math.trunc(value))
+      .filter((value, index, list) => value > 0 && list.indexOf(value) === index);
+    if (repoIds.length === 0) {
+      return [];
+    }
+    const scores = this.collectChunkScores({
+      queryVector: args.queryVector,
+      model: args.model,
+      dimension: args.dimension,
+      repoIds,
+    });
+    if (scores.length === 0) {
+      return [];
+    }
+    scores.sort((a, b) => b.score - a.score);
+    return this.hydrateSearchResults(scores.slice(0, Math.max(1, Math.trunc(args.limit))));
+  }
+
+  async searchV2(args: SearchV2Args): Promise<SearchResult[]> {
+    const topK = Number.isFinite(args.topK) ? Math.max(1, Math.trunc(args.topK ?? 20)) : 20;
+    const candidateRepoLimit = Number.isFinite(args.candidateRepoLimit)
+      ? Math.max(10, Math.trunc(args.candidateRepoLimit ?? 120))
+      : 120;
+    const rerankLimit = Number.isFinite(args.rerankLimit)
+      ? Math.max(topK, Math.trunc(args.rerankLimit ?? 64))
+      : 64;
+    const perRepoCap = Number.isFinite(args.perRepoCap) ? Math.max(1, Math.trunc(args.perRepoCap ?? 3)) : 3;
+
+    const candidateRepos = this.findTopReposByCentroid({
+      queryVector: args.queryVector,
+      model: args.model,
+      dimension: args.dimension,
+      limit: candidateRepoLimit,
+    });
+    const candidateRepoIds = candidateRepos.map((item) => item.repoId);
+    const reranked = await this.findSimilarChunksInRepos({
+      queryVector: args.queryVector,
+      model: args.model,
+      dimension: args.dimension,
+      repoIds: candidateRepoIds,
+      limit: rerankLimit,
+    });
+    if (reranked.length === 0) {
+      return [];
+    }
+    const repoCounts = new Map<number, number>();
+    const diversified: SearchResult[] = [];
+    for (const result of reranked) {
+      const count = repoCounts.get(result.repoId) ?? 0;
+      if (count >= perRepoCap) {
+        continue;
+      }
+      diversified.push(result);
+      repoCounts.set(result.repoId, count + 1);
+      if (diversified.length >= topK) {
+        break;
+      }
+    }
+    if (diversified.length > 0) {
+      return diversified;
+    }
+    return reranked.slice(0, topK);
+  }
+
   private async persist(): Promise<void> {
     const bytes = this.db.export();
+    this.persistWarning = "none";
 
     if (this._storageMode === "opfs") {
       const written = await writeBytesToOpfs(bytes);
@@ -720,8 +1080,7 @@ export class LocalDatabase {
       try {
         writeBytesToLocalStorage(bytes);
       } catch {
-        // localStorage quota can be exceeded for large DB snapshots; degrade to in-memory
-        // mode instead of failing the active operation.
+        this.persistWarning = "quota-exceeded";
         this._storageMode = "memory";
       }
     }
@@ -984,10 +1343,175 @@ export class LocalDatabase {
     return Number(result[0].values[0][0]);
   }
 
+  getDistinctEmbeddingModels(limit: number = 10): string[] {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 10;
+    const result = this.db.exec(`
+      SELECT DISTINCT model
+      FROM embeddings
+      WHERE model IS NOT NULL AND model != ''
+      ORDER BY model ASC
+      LIMIT ${safeLimit};
+    `);
+
+    if (result.length === 0) {
+      return [];
+    }
+
+    const [table] = result;
+    return table.values
+      .map((row) => (row[0] == null ? "" : String(row[0]).trim()))
+      .filter((value) => value.length > 0);
+  }
+
+  getDistinctEmbeddingDimensions(limit: number = 10): number[] {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 10;
+    const result = this.db.exec(`
+      SELECT DISTINCT dimension
+      FROM embeddings
+      WHERE dimension > 0
+      ORDER BY dimension ASC
+      LIMIT ${safeLimit};
+    `);
+
+    if (result.length === 0) {
+      return [];
+    }
+
+    const [table] = result;
+    return table.values
+      .map((row) => Number(row[0]))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .map((value) => Math.trunc(value));
+  }
+
+  getEmbeddingDimensionHistogram(model?: string): Array<{ dimension: number; count: number }> {
+    const normalizedModel = String(model ?? "").trim();
+    const whereModel = normalizedModel ? `WHERE model = ${toSqlStringLiteral(normalizedModel)}` : "";
+    const result = this.db.exec(`
+      SELECT dimension, COUNT(*) AS count
+      FROM embeddings
+      ${whereModel}
+      GROUP BY dimension
+      ORDER BY dimension ASC;
+    `);
+
+    if (result.length === 0) {
+      return [];
+    }
+
+    const [table] = result;
+    return table.values
+      .map((row) => ({
+        dimension: Math.trunc(Number(row[0])),
+        count: Math.trunc(Number(row[1])),
+      }))
+      .filter((item) => Number.isFinite(item.dimension) && item.dimension > 0 && Number.isFinite(item.count) && item.count > 0);
+  }
+
+  getEmbeddingCountByIdentity(identity: Pick<EmbeddingIdentity, "model" | "dimension">): number {
+    const model = String(identity.model ?? "").trim();
+    const dimension = Number(identity.dimension);
+    if (!model || !Number.isFinite(dimension) || dimension <= 0) {
+      return 0;
+    }
+    const result = this.db.exec(`
+      SELECT COUNT(*)
+      FROM embeddings
+      WHERE model = ${toSqlStringLiteral(model)}
+        AND dimension = ${Math.trunc(dimension)};
+    `);
+    if (result.length === 0 || result[0].values.length === 0) {
+      return 0;
+    }
+    return Number(result[0].values[0][0]);
+  }
+
+  getActiveEmbeddingIdentity(): EmbeddingIdentity | null {
+    const backend = this.getIndexMetaValue(EMBEDDING_BACKEND_META_KEY);
+    const model = this.getIndexMetaValue(EMBEDDING_MODEL_META_KEY);
+    const dimensionRaw = this.getIndexMetaValue(EMBEDDING_DIMENSION_META_KEY);
+    const dimension = Number(dimensionRaw);
+    if ((backend !== "browser" && backend !== "ollama") || !model) {
+      return null;
+    }
+    if (!Number.isFinite(dimension) || dimension <= 0) {
+      return null;
+    }
+    return {
+      backend,
+      model,
+      dimension: Math.trunc(dimension),
+    };
+  }
+
+  async setActiveEmbeddingIdentity(identity: EmbeddingIdentity): Promise<void> {
+    const now = Date.now();
+    await this.upsertIndexMeta({
+      key: EMBEDDING_BACKEND_META_KEY,
+      value: identity.backend,
+      updatedAt: now,
+    });
+    await this.upsertIndexMeta({
+      key: EMBEDDING_MODEL_META_KEY,
+      value: identity.model,
+      updatedAt: now,
+    });
+    await this.upsertIndexMeta({
+      key: EMBEDDING_DIMENSION_META_KEY,
+      value: String(identity.dimension),
+      updatedAt: now,
+    });
+  }
+
+  assertSearchCompatible(identity: Pick<EmbeddingIdentity, "model" | "dimension">, queryDimension: number): void {
+    const embeddingCount = this.getEmbeddingCount();
+    if (embeddingCount === 0) {
+      return;
+    }
+
+    const model = String(identity.model ?? "").trim();
+    const normalizedQueryDimension = Number.isFinite(queryDimension) ? Math.trunc(queryDimension) : 0;
+    if (!model) {
+      throw new Error("Search unavailable: active embedding model is missing. Rebuild embeddings.");
+    }
+    if (normalizedQueryDimension <= 0) {
+      throw new Error("Search unavailable: query embedding has invalid dimension.");
+    }
+    const models = this.getDistinctEmbeddingModels(6);
+    const incompatibleModels = models.filter((item) => item !== model);
+    if (incompatibleModels.length > 0) {
+      throw new Error(
+        `Search unavailable: indexed embeddings include incompatible models (${incompatibleModels.join(", ")}). Rebuild embeddings.`,
+      );
+    }
+    const histogram = this.getEmbeddingDimensionHistogram(model);
+    if (histogram.length === 0) {
+      throw new Error("Search unavailable: indexed embedding dimensions are missing.");
+    }
+    if (histogram.length > 1) {
+      throw new Error("Search unavailable: indexed embeddings have mixed dimensions. Rebuild embeddings.");
+    }
+    const indexedDimension = histogram[0]?.dimension ?? 0;
+    const activeDimension = Number.isFinite(identity.dimension) ? Math.trunc(identity.dimension) : indexedDimension;
+    if (indexedDimension !== activeDimension) {
+      throw new Error(
+        `Search unavailable: active embedding dimension (${activeDimension}) does not match indexed dimension (${indexedDimension}). Rebuild embeddings.`,
+      );
+    }
+    if (indexedDimension !== normalizedQueryDimension) {
+      throw new Error(
+        `Search unavailable: query embedding dimension (${normalizedQueryDimension}) does not match indexed dimension (${indexedDimension}). Rebuild embeddings.`,
+      );
+    }
+  }
+
   async clearEmbeddings(): Promise<void> {
     this.db.run("DELETE FROM embeddings;");
+    this.db.run("DELETE FROM repo_embeddings;");
     this.vectorIndexCache = null;
     this.vectorIndexCacheCount = -1;
+    this.vectorIndexCacheModel = null;
+    this.vectorIndexCacheDimension = null;
     this.pendingEmbeddingsSinceCheckpoint = 0;
     this.pendingEmbeddingsStartedAt = 0;
     this.lastEmbeddingCheckpointAt = null;
@@ -996,6 +1520,7 @@ export class LocalDatabase {
 
   private recreateEmbeddingsTable(): void {
     this.db.run("DROP TABLE IF EXISTS embeddings;");
+    this.db.run("DELETE FROM repo_embeddings;");
     this.db.run(`
       CREATE TABLE IF NOT EXISTS embeddings (
         id TEXT PRIMARY KEY,
@@ -1398,6 +1923,8 @@ export class LocalDatabase {
 
     this.vectorIndexCache = null;
     this.vectorIndexCacheCount = -1;
+    this.vectorIndexCacheModel = null;
+    this.vectorIndexCacheDimension = null;
     await this.persist();
   }
 
@@ -1410,6 +1937,8 @@ export class LocalDatabase {
     this.db.run(`DELETE FROM repos WHERE id IN (${placeholders});`, repoIds);
     this.vectorIndexCache = null;
     this.vectorIndexCacheCount = -1;
+    this.vectorIndexCacheModel = null;
+    this.vectorIndexCacheDimension = null;
     await this.persist();
   }
 
@@ -1420,8 +1949,11 @@ export class LocalDatabase {
 
     const placeholders = repoIds.map(() => "?").join(",");
     this.db.run(`DELETE FROM chunks WHERE repo_id IN (${placeholders});`, repoIds);
+    this.db.run(`DELETE FROM repo_embeddings WHERE repo_id IN (${placeholders});`, repoIds);
     this.vectorIndexCache = null;
     this.vectorIndexCacheCount = -1;
+    this.vectorIndexCacheModel = null;
+    this.vectorIndexCacheDimension = null;
     await this.persist();
   }
 
@@ -1442,9 +1974,23 @@ export class LocalDatabase {
         throw new Error(`Invalid embedding created_at for chunk ${embedding.chunkId}`);
       }
 
+      const normalizedDimension = Math.trunc(dimension);
+      const expectedVectorBytes = normalizedDimension * Float32Array.BYTES_PER_ELEMENT;
+      if (vectorBlob.byteLength !== expectedVectorBytes) {
+        throw new Error(
+          `Invalid embedding vector blob length for chunk ${embedding.chunkId}: expected ${expectedVectorBytes}, got ${vectorBlob.byteLength}`,
+        );
+      }
+      const vector = new Float32Array(vectorBlob.buffer, vectorBlob.byteOffset, vectorBlob.byteLength / 4);
+      for (let i = 0; i < vector.length; i += 1) {
+        if (!Number.isFinite(vector[i])) {
+          throw new Error(`Invalid embedding vector value for chunk ${embedding.chunkId} at index ${i}`);
+        }
+      }
+
       return {
         ...embedding,
-        dimension: Math.trunc(dimension),
+        dimension: normalizedDimension,
         createdAt: Math.trunc(createdAt),
         vectorBlob,
       };
@@ -1478,6 +2024,8 @@ export class LocalDatabase {
 
     this.vectorIndexCache = null;
     this.vectorIndexCacheCount = -1;
+    this.vectorIndexCacheModel = null;
+    this.vectorIndexCacheDimension = null;
     this.noteEmbeddingWrites(normalized.length);
     if (this.shouldCheckpointEmbeddings(Date.now())) {
       await this.flushPendingEmbeddingCheckpoint();
@@ -1739,6 +2287,8 @@ export class LocalDatabase {
     runSchema(this.db);
     this.vectorIndexCache = null;
     this.vectorIndexCacheCount = -1;
+    this.vectorIndexCacheModel = null;
+    this.vectorIndexCacheDimension = null;
     this.pendingEmbeddingsSinceCheckpoint = 0;
     this.pendingEmbeddingsStartedAt = 0;
     this.lastEmbeddingCheckpointAt = null;

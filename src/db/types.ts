@@ -47,6 +47,20 @@ export type EmbeddingRecord = {
   createdAt: number;
 };
 
+export type EmbeddingIdentity = {
+  backend: "browser" | "ollama";
+  model: string;
+  dimension: number;
+};
+
+export type RepoEmbeddingRecord = {
+  repoId: number;
+  model: string;
+  dimension: number;
+  vectorBlob: Uint8Array;
+  updatedAt: number;
+};
+
 export type IndexMetaRecord = {
   key: string;
   value: string;
