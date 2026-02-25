@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release:
+    name: Auto Version Bump & Release
+    runs-on: ubuntu-latest
+    # Skip if the push itself is the automated version-bump commit
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Determine version bump type
+        id: bump
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Try to find the merged PR for this commit
+            const { data: pulls } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed',
+              sort: 'updated',
+              direction: 'desc',
+              per_page: 20,
+            });
+
+            const mergedPR = pulls.find(
+              pr => pr.merged_at && pr.merge_commit_sha === context.sha
+            );
+
+            let bumpType = 'patch';
+
+            if (mergedPR) {
+              const labelNames = mergedPR.labels.map(l => l.name);
+              if (labelNames.includes('major')) {
+                bumpType = 'major';
+              } else if (labelNames.includes('minor')) {
+                bumpType = 'minor';
+              } else if (labelNames.includes('patch')) {
+                bumpType = 'patch';
+              }
+              console.log(`Found merged PR #${mergedPR.number} with labels: ${labelNames.join(', ')}`);
+            } else {
+              // Fall back to commit message conventional commit analysis
+              const message = context.payload.head_commit.message;
+              if (
+                message.includes('BREAKING CHANGE') ||
+                /^(\w+)(\(.+\))?!:/.test(message)
+              ) {
+                bumpType = 'major';
+              } else if (/^feat(\(.+\))?:/.test(message)) {
+                bumpType = 'minor';
+              }
+              console.log(`No merged PR found — inferred bump type from commit message: ${bumpType}`);
+            }
+
+            core.setOutput('bump_type', bumpType);
+            console.log(`Version bump type: ${bumpType}`);
+
+      - name: Calculate new version
+        id: version
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          BUMP_TYPE="${{ steps.bump.outputs.bump_type }}"
+
+          IFS='.' read -ra PARTS <<< "$CURRENT"
+          MAJOR=${PARTS[0]}
+          MINOR=${PARTS[1]}
+          PATCH=${PARTS[2]}
+
+          if [ "$BUMP_TYPE" = "major" ]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [ "$BUMP_TYPE" = "minor" ]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Current: $CURRENT → New: $NEW_VERSION ($BUMP_TYPE)"
+
+      - name: Update package.json version
+        run: npm version ${{ steps.version.outputs.new }} --no-git-tag-version
+
+      - name: Commit and push version bump
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add package.json package-lock.json pnpm-lock.yaml || true
+          git commit -m "chore: release v${{ steps.version.outputs.new }} [skip ci]"
+          git push
+
+      - name: Create and push Git tag
+        run: |
+          git tag "v${{ steps.version.outputs.new }}"
+          git push origin "v${{ steps.version.outputs.new }}"
+
+      - name: Create GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const newVersion = '${{ steps.version.outputs.new }}';
+            const bumpType = '${{ steps.bump.outputs.bump_type }}';
+
+            const { data: release } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${newVersion}`,
+              name: `v${newVersion}`,
+              draft: false,
+              prerelease: false,
+              generate_release_notes: true,
+            });
+
+            console.log(`✅ Created release: ${release.html_url}`);
+            console.log(`Version: v${newVersion} (${bumpType} bump)`);
