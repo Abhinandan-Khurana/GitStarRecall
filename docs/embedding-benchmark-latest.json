@@ -1,0 +1,14 @@
+[
+  {
+    "vectors": 10000,
+    "dimension": 384,
+    "queryMs": 11.16,
+    "peakHeapMb": 8.38
+  },
+  {
+    "vectors": 10000,
+    "dimension": 768,
+    "queryMs": 18.583,
+    "peakHeapMb": 11.86
+  }
+]
