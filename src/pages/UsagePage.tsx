@@ -398,7 +398,7 @@ const OLLAMA_EMBEDDING_PREF_KEY_PREFIX = "gitstarrecall.embedding.ollama.pref";
 const CHAT_SCOPE_PREFIX = "chat";
 const EMBEDDING_BACKEND_META_KEY = "embedding_active_backend";
 const EMBEDDING_MODEL_META_KEY = "embedding_active_model";
-const BROWSER_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
+const BROWSER_EMBEDDING_MODEL = "Xenova/bge-base-en-v1.5";
 const OLLAMA_BATCH_SIZE_CAP = 24;
 const OLLAMA_RESTART_BROWSER_ERROR = "__OLLAMA_RESTART_BROWSER__";
 

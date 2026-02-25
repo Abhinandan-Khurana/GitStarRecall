@@ -86,7 +86,7 @@ Add an `EmbeddingOrchestrator` in the main thread with:
 ### 2.3 Non-Goals (for this phase)
 
 - No server-side embedding service dependency.
-- No change to retrieval quality model (`all-MiniLM-L6-v2` remains default).
+- No change to retrieval quality model (`bge-base-en-v1.5` remains default).
 - No mandatory desktop app migration.
 
 ---

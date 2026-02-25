@@ -32,7 +32,7 @@ Focus on:
 - Landing page -> usage page flow after OAuth
 - Session list UI with ability to continue existing chat sessions
 - Public landing page with demo video and dev/security-friendly details
-- Vite + React, SQLite WASM + `sqlite-vec-wasm`, `all-MiniLM-L6-v2` embeddings
+- Vite + React, SQLite WASM + `sqlite-vec-wasm`, `bge-base-en-v1.5` embeddings
 
 Use it as the "rules of the build" and cross-check any proposed change against it.
 

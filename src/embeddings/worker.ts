@@ -15,7 +15,7 @@ env.useBrowserCache = true;
 
 class EmbeddingPipeline {
   static task: PipelineType = "feature-extraction";
-  static model = "Xenova/all-MiniLM-L6-v2";
+  static model = "Xenova/bge-base-en-v1.5";
   static preferredBackend: EmbeddingBackendPreference | null = null;
   static selectedBackend: EmbeddingBackendPreference | null = null;
   static fallbackReason: string | null = null;

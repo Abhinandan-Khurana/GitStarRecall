@@ -34,7 +34,7 @@ Design reference:
 
 ### 1.3 Embeddings (Local-First)
 - Primary: @xenova/transformers
-- Model: `all-MiniLM-L6-v2` (384 dims) for speed/accuracy balance
+- Model: `bge-base-en-v1.5` (384 dims) for speed/accuracy balance
 - Runtime backend policy:
   - Preferred: browser `webgpu` (when available and healthy)
   - Fallback: browser `wasm` CPU
@@ -657,7 +657,7 @@ console.assert(rows[0][0] === "a" && rows[1][0] === "b");
 ## 7) Open Decisions
 Resolved decisions:
 - Frontend: Vite + React
-- Embeddings model: `all-MiniLM-L6-v2`
+- Embeddings model: `bge-base-en-v1.5`
 - Local vector strategy: SQLite WASM + `sqlite-vec-wasm`
 
 Active decisions:
