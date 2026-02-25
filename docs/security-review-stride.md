@@ -26,6 +26,14 @@ This document reviews the GitStarRecall codebase against the threats and mitigat
 - README batch pipeline now uses adaptive concurrency + cooldown for rate-limit resilience (reduces abusive retry bursts).
 - Conditional README revalidation headers (`If-None-Match`, `If-Modified-Since`) use repo-local validator metadata only; no auth token/session data is written to these fields.
 
+## 2026-02-25 Update (Search v2 + Embedding Identity Guards)
+
+- Added explicit embedding dimension identity tracking in `index_meta` (`embedding_active_dimension`) alongside backend/model keys.
+- Added DB-level compatibility checks to block searches when indexed vectors are mixed-model, mixed-dimension, or query-dimension incompatible.
+- Added `repo_embeddings` centroid table for repo-level prefiltering; data remains local in browser SQLite and never sent to remote services.
+- Added embedding write validation (dimension-byte-length and finite-value checks) to reduce tampering/corruption risk from malformed vector payloads.
+- Added feature-flagged search v2 rollout (`VITE_SEARCH_PIPELINE_V2`) with local-only retrieval flow.
+
 ---
 
 ## 1) S – Spoofing

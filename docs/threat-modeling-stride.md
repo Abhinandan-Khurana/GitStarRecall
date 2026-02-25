@@ -57,6 +57,8 @@ Mitigations:
 - Pin model source hosts and versions where possible.
 - Restrict CSP `connect-src` to required model artifact hosts only.
 - Add end-to-end embedding count reconciliation (`chunks_pending + embeddings_created`).
+- Enforce embedding identity compatibility checks (model + dimension) before search execution.
+- Reject malformed vectors on insert (`dimension * 4` byte-size mismatch and non-finite values).
 
 ### R - Repudiation
 Threats:
@@ -105,6 +107,7 @@ Mitigations:
 - Deterministic fallback from `webgpu` to `wasm`.
 - Preload pending chunk queue once per run to avoid repeated hot-loop DB scans.
 - Buffer embedding writes to reduce checkpoint overhead and main-thread contention.
+- Use repo-centroid prefilter to avoid full-corpus rerank on every query when search v2 is enabled.
 
 ### E - Elevation of Privilege
 Threats:
@@ -133,6 +136,7 @@ Mapped requirements:
 - Checksums for sync integrity.
 - Worker-pool and batch-size guardrails.
 - Backend fallback policy (`webgpu` -> `wasm`) with telemetry.
+- Search compatibility guards and v2 prefilter/rerank pipeline behind feature flag (`VITE_SEARCH_PIPELINE_V2`).
 
 ---
 

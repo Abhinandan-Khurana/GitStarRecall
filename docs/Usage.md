@@ -64,6 +64,7 @@ These must match your GitHub OAuth app settings exactly.
 - `VITE_WEBLLM_ENABLED=1` enables Browser WebLLM provider.
 - `VITE_EMBEDDING_BACKEND_PREFERRED=webgpu|wasm`
 - `VITE_README_BATCH_PIPELINE_V2=1` enables staged README pipeline.
+- `VITE_SEARCH_PIPELINE_V2=1` enables repo-centroid prefilter + chunk rerank search path for large libraries.
 - `VITE_OLLAMA_BASE_URL`, `VITE_OLLAMA_MODEL`, `VITE_OLLAMA_TIMEOUT_MS`
 - `VITE_LLM_SETTINGS_ENCRYPTION_KEY` for encrypted provider API key storage.
 
@@ -160,6 +161,7 @@ Important:
 Recommended:
 
 - Keep `VITE_README_BATCH_PIPELINE_V2=1`
+- Keep `VITE_SEARCH_PIPELINE_V2=1` for large libraries (`500+` stars).
 - Keep worker pool conservative on constrained machines:
   - `VITE_EMBEDDING_POOL_SIZE=1`
   - tune `VITE_EMBEDDING_WORKER_BATCH_SIZE` around `8..16`
@@ -315,6 +317,7 @@ README batching pipeline controls:
 - `VITE_EMBEDDING_LARGE_LIBRARY_MODE` (`1` or `0`)
 - `VITE_EMBEDDING_LARGE_LIBRARY_THRESHOLD` (default `500`)
 - `VITE_README_BATCH_PIPELINE_V2` (`1` enables staged README->chunk->embed pipeline)
+- `VITE_SEARCH_PIPELINE_V2` (`1` enables search v2 prefilter/rerank path)
 - `VITE_README_BATCH_SIZE` (default `40`)
 - `VITE_EMBED_TRIGGER_THRESHOLD` (pending chunk threshold for rolling embed windows)
 - `VITE_EMBED_WINDOW_SIZE` (per rolling embed window)

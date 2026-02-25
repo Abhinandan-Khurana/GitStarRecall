@@ -123,6 +123,7 @@ Notes:
 - Star sync is user-triggered via `Fetch Stars`; search runs on existing local embeddings.
 - Vector data is stored as Float32 blobs in local SQLite tables.
 - Retrieval/search is local; no server-side vector index is required.
+- Search v2 can be enabled via `VITE_SEARCH_PIPELINE_V2=1` (repo-centroid prefilter + chunk rerank + diversity cap).
 - Embedding backend policy is browser `webgpu` preferred with deterministic `wasm` fallback.
 - WebLLM/local/remote generation paths are explicit opt-in with consent controls.
 
@@ -175,6 +176,7 @@ pnpm preview
 - `pnpm test` - run Vitest test suite
 - `pnpm build` - typecheck + production build
 - `pnpm ci` - lint + test + build
+- `pnpm run bench:search` - generate local 384 vs 768 query benchmark snapshot
 
 ---
 

@@ -28,6 +28,22 @@ Delivered in code:
 - Ollama path enforces localhost-only endpoint validation, supports `/api/embed` with `/api/embeddings` compatibility fallback, and restarts indexing on browser embedding if Ollama fails mid-run.
 - Embedding model/backend are tracked in `index_meta` (`embedding_active_backend`, `embedding_active_model`) and old embeddings are reset when the active model changes.
 
+## Implementation Update (2026-02-25)
+
+Delivered in code:
+- Added embedding identity hardening with explicit dimension tracking in `index_meta` via `embedding_active_dimension`.
+- Added strict compatibility guards before search to block mixed-model and mixed-dimension retrieval runs.
+- Added `repo_embeddings` centroid table and indexes for repo-level semantic prefiltering.
+- Added centroid recomputation during embedding flushes to keep candidate prefilter data in sync.
+- Added feature-flagged search v2 pipeline (`VITE_SEARCH_PIPELINE_V2`) with:
+  - repo centroid prefilter
+  - chunk rerank within candidates
+  - per-repo result caps for diversity
+- Added strict embedding vector validation on write:
+  - byte-length must match `dimension * Float32Array.BYTES_PER_ELEMENT`
+  - non-finite vector values are rejected
+- Added benchmark harness `pnpm run bench:search` and checked-in baseline output at `docs/embedding-benchmark-latest.json`.
+
 Current env controls:
 - `VITE_EMBEDDING_BACKEND_PREFERRED`
 - `VITE_EMBEDDING_POOL_SIZE`
@@ -36,6 +52,7 @@ Current env controls:
 - `VITE_EMBEDDING_UI_UPDATE_MS`
 - `VITE_EMBEDDING_LARGE_LIBRARY_MODE`
 - `VITE_EMBEDDING_LARGE_LIBRARY_THRESHOLD`
+- `VITE_SEARCH_PIPELINE_V2`
 - `VITE_OLLAMA_BASE_URL`
 - `VITE_OLLAMA_MODEL`
 - `VITE_OLLAMA_TIMEOUT_MS`

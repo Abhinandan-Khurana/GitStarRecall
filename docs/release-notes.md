@@ -1,5 +1,34 @@
 # Release Notes
 
+## 2026-02-25 (Embedding Search v2, Dimension Safety, and Centroid Index)
+
+- Added strict embedding compatibility enforcement for search:
+  - active model + dimension identity checks
+  - mixed-dimension/mixed-model detection with actionable reindex guidance
+- Added dimension-aware DB APIs:
+  - `getDistinctEmbeddingDimensions`
+  - `getEmbeddingDimensionHistogram`
+  - `assertSearchCompatible`
+- Added repository centroid index table `repo_embeddings` with indexes for `(model, dimension)`.
+- Added centroid recomputation during embedding flushes so repo-level candidates stay aligned with chunk vectors.
+- Added feature-flagged search v2 pipeline (`VITE_SEARCH_PIPELINE_V2=1`):
+  - stage 1: centroid prefilter (top repos)
+  - stage 2: chunk rerank within candidate repos
+  - per-repo cap to reduce single-repo domination in results
+- Hardened embedding record validation:
+  - vector byte-length must match `dimension * 4`
+  - non-finite vector values are rejected before insert
+- Added benchmark harness:
+  - `pnpm run bench:search`
+  - writes `docs/embedding-benchmark-latest.json` with 384 vs 768 query timing snapshots
+- Added storage degradation warning plumbing:
+  - DB tracks quota fallback warning state when localStorage persistence is exceeded
+  - UI continues showing memory-mode warning banner for durability reduction
+- Added tests for:
+  - dimension histogram and compatibility guards
+  - malformed embedding blob rejection
+  - v2 search diversification behavior
+
 ## 2026-02-24 (WebLLM Recommendation Calibration for macOS/Desktop)
 
 - Fixed WebLLM model recommendation logic that could incorrectly classify strong Mac desktops as weak when memory hints were unavailable.
