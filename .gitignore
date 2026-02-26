@@ -183,3 +183,6 @@ research.md
 plan.md
 
 tasks/
+
+.npm-cache
+.vscode
