@@ -651,21 +651,6 @@ export default function UsagePage() {
   }, [providerId]);
 
   const activeResults = useMemo(() => activeSession?.results ?? [], [activeSession]);
-  const _webllmRecommendationDebugLabel = useMemo(() => {
-    if (!webllmRecommendation || !webllmRecommendation.capability) {
-      return null;
-    }
-
-    const capability = webllmRecommendation.capability;
-    const parts = [
-      `reason=${webllmRecommendation.reason}`,
-      `webgpu=${capability.hasWebGPU ? "yes" : "no"}`,
-      `cores=${capability.hardwareConcurrency}`,
-      `mem=${capability.deviceMemoryGB ?? "unknown"}`,
-      `perf=${webllmRecommendation.score ?? capability.perfScore ?? "unknown"}`,
-    ];
-    return parts.join(" · ");
-  }, [webllmRecommendation]);
   const activeSessionMessages = useMemo(() => {
     if (!activeSessionId) {
       return [];

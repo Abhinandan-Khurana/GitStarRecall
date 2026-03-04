@@ -158,6 +158,14 @@ export function SyncStatusBar({
           </Button>
         </div>
       )}
+
+      {historyLoadState === "done" && (historyDataSource || historyLastRestoredAt) && (
+        <p className="text-[11px] text-muted-foreground">
+          History: {historyLoadState}
+          {historyDataSource ? ` \u00b7 source: ${historyDataSource}` : ""}
+          {historyLastRestoredAt ? ` \u00b7 ${new Date(historyLastRestoredAt).toLocaleString()}` : ""}
+        </p>
+      )}
     </div>
   );
 }
