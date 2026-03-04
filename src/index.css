@@ -122,6 +122,22 @@ a {
   100% { background-position: 200% 0; }
 }
 
+@keyframes text-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: -100% 50%; }
+}
+
+@keyframes memory-glow {
+  0%, 100% {
+    text-shadow: 0 0 8px hsl(var(--primary) / 0.4), 0 0 24px hsl(var(--accent) / 0.15);
+    filter: brightness(1);
+  }
+  50% {
+    text-shadow: 0 0 16px hsl(var(--primary) / 0.6), 0 0 40px hsl(var(--accent) / 0.3);
+    filter: brightness(1.12);
+  }
+}
+
 @keyframes pulse-glow {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
@@ -161,6 +177,36 @@ a {
   animation: float 3s ease-in-out infinite;
 }
 
+/* Animated gradient text (for "memory") */
+.text-gradient-animated {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--primary)) 0%,
+    hsl(var(--accent)) 33%,
+    hsl(var(--primary)) 66%,
+    hsl(var(--accent)) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: text-shimmer 4s ease-in-out infinite, memory-glow 3s ease-in-out infinite;
+}
+
+/* Scroll-reveal animation */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.reveal.revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+.reveal-delay-1 { transition-delay: 100ms; }
+.reveal-delay-2 { transition-delay: 200ms; }
+.reveal-delay-3 { transition-delay: 300ms; }
+
 /* Stagger children animation */
 .stagger-children > * {
   opacity: 0;
@@ -183,10 +229,16 @@ a {
   .animate-slide-in-right,
   .animate-scale-in,
   .animate-float,
-  .stagger-children > * {
+  .stagger-children > *,
+  .text-gradient-animated {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
+  }
+  .reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
   }
 }
 

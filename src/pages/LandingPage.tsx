@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../auth/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,11 +20,48 @@ import {
   RefreshCw,
 } from "lucide-react";
 
+/**
+ * Custom hook that adds the "revealed" class when the element scrolls into view.
+ */
+function useReveal<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReduced) {
+      el.classList.add("revealed");
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.classList.add("revealed");
+          observer.unobserve(el);
+        }
+      },
+      { threshold: 0.15, rootMargin: "0px 0px -40px 0px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return ref;
+}
+
 export default function LandingPage() {
   const { beginOAuthLogin } = useAuth();
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const handleOAuthLogin = async () => {
+  const trustRef = useReveal<HTMLDivElement>();
+  const howRef = useReveal<HTMLDivElement>();
+  const featuresRef = useReveal<HTMLDivElement>();
+  const ctaRef = useReveal<HTMLDivElement>();
+
+  const handleOAuthLogin = useCallback(async () => {
     try {
       await beginOAuthLogin();
     } catch (err) {
@@ -32,14 +69,14 @@ export default function LandingPage() {
         err instanceof Error ? err.message : "Unable to start GitHub OAuth"
       );
     }
-  };
+  }, [beginOAuthLogin]);
 
   return (
     <div className="relative">
       {/* Background orbs */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-        <div className="absolute -top-32 left-1/2 h-[500px] w-[800px] -translate-x-1/2 rounded-full bg-primary/5 blur-[120px]" />
-        <div className="absolute right-0 top-1/3 h-[300px] w-[400px] rounded-full bg-accent/3 blur-[100px]" />
+        <div className="animate-float absolute -top-32 left-1/2 h-[500px] w-[800px] -translate-x-1/2 rounded-full bg-primary/5 blur-[120px]" />
+        <div className="absolute right-0 top-1/3 h-[300px] w-[400px] rounded-full bg-accent/3 blur-[100px]" style={{ animation: "float 4s ease-in-out 1s infinite" }} />
       </div>
 
       <article className="relative mx-auto max-w-5xl px-4 pb-20 pt-16 sm:px-6">
@@ -53,7 +90,7 @@ export default function LandingPage() {
 
             <h1 className="font-display text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl md:text-6xl">
               Find starred repos by{" "}
-              <span className="text-gradient">memory</span>,{" "}
+              <span className="text-gradient-animated">memory</span>,{" "}
               not by name
             </h1>
 
@@ -94,7 +131,7 @@ export default function LandingPage() {
         </section>
 
         {/* Trust signals bar */}
-        <section className="mt-16 animate-fade-in" style={{ animationDelay: "400ms", opacity: 0 }}>
+        <section ref={trustRef} className="reveal mt-16">
           <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-8">
             {[
               { icon: Shield, label: "Privacy-first" },
@@ -116,7 +153,7 @@ export default function LandingPage() {
         <Separator className="mx-auto my-16 max-w-xs opacity-30" />
 
         {/* How it works */}
-        <section className="animate-fade-in" style={{ animationDelay: "500ms", opacity: 0 }}>
+        <section ref={howRef} className="reveal">
           <div className="mb-10 text-center">
             <h2 className="font-display text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
               How it works
@@ -168,7 +205,7 @@ export default function LandingPage() {
         <Separator className="mx-auto my-16 max-w-xs opacity-30" />
 
         {/* Feature grid (bento-style) */}
-        <section className="animate-fade-in" style={{ animationDelay: "600ms", opacity: 0 }}>
+        <section ref={featuresRef} className="reveal">
           <div className="mb-10 text-center">
             <h2 className="font-display text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
               Features
@@ -241,7 +278,7 @@ export default function LandingPage() {
         <Separator className="mx-auto my-16 max-w-xs opacity-30" />
 
         {/* Bottom CTA */}
-        <section className="animate-fade-in" style={{ animationDelay: "700ms", opacity: 0 }}>
+        <section ref={ctaRef} className="reveal">
           <Card className="relative overflow-hidden border-border/50 bg-card/60">
             {/* Accent glow */}
             <div className="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-primary/10 blur-[60px]" aria-hidden="true" />
