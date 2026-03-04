@@ -2,6 +2,7 @@ import { type KeyboardEvent, useEffect, useId, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -116,7 +117,7 @@ export function WebLLMDownloadDialog(props: Readonly<Props>) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
       <Card
         ref={dialogRef}
         role="dialog"
@@ -125,7 +126,7 @@ export function WebLLMDownloadDialog(props: Readonly<Props>) {
         aria-describedby={descriptionId}
         tabIndex={-1}
         onKeyDown={handleContainerKeyDown}
-        className="w-full max-w-lg border-border"
+        className="w-full max-w-lg animate-scale-in border-border/50 bg-card shadow-2xl"
       >
         <CardHeader id={headerId} className="pb-2">
           <p className="text-base font-semibold">Download local WebLLM model</p>
@@ -164,17 +165,12 @@ export function WebLLMDownloadDialog(props: Readonly<Props>) {
           </div>
 
           {props.downloading ? (
-            <div className="space-y-1">
+            <div className="space-y-2">
               <p className="text-muted-foreground">
                 {props.progressText ?? "Preparing model..."}
               </p>
-              <div className="h-2 w-full rounded bg-muted">
-                <div
-                  className="h-2 rounded bg-accent"
-                  style={{ width: `${Math.round(progress * 100)}%` }}
-                />
-              </div>
-              <p className="text-muted-foreground">{Math.round(progress * 100)}%</p>
+              <Progress value={Math.round(progress * 100)} />
+              <p className="text-right text-muted-foreground">{Math.round(progress * 100)}%</p>
             </div>
           ) : null}
 

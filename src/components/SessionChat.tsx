@@ -89,7 +89,7 @@ function MessageList({
   return (
     <div
       ref={scrollContainerRef}
-      className="session-chat-messages flex min-h-[200px] max-h-[min(50vh,28rem)] flex-col gap-3 overflow-y-auto overflow-x-hidden rounded-xl border p-3"
+      className="session-chat-messages flex min-h-[200px] max-h-[min(50vh,28rem)] flex-col gap-3 overflow-y-auto overflow-x-hidden rounded-xl border p-4"
     >
       {showEmptyState ? (
         <p className="py-4 text-center text-sm text-muted-foreground">
@@ -100,10 +100,10 @@ function MessageList({
         <div
           key={message.id}
           className={cn(
-            "max-w-[85%] rounded-2xl px-4 py-2.5 text-sm [&_*]:text-inherit",
+            "max-w-[85%] px-4 py-2.5 text-sm transition-all [&_*]:text-inherit",
             message.role === "user"
-              ? "session-chat-bubble-user ml-auto"
-              : "session-chat-bubble-assistant mr-auto border shadow-sm"
+              ? "session-chat-bubble-user ml-auto shadow-md"
+              : "session-chat-bubble-assistant mr-auto shadow-sm"
           )}
         >
           {message.role === "assistant" ? (
@@ -114,7 +114,7 @@ function MessageList({
         </div>
       ))}
       {isGenerating ? (
-        <div className="session-chat-bubble-assistant mr-auto max-w-[85%] rounded-2xl border px-4 py-2.5 text-sm shadow-sm [&_*]:text-inherit">
+        <div className="session-chat-bubble-assistant mr-auto max-w-[85%] px-4 py-2.5 text-sm shadow-sm [&_*]:text-inherit">
           {streamingContent ? (
             <SafeMarkdown
               className="whitespace-pre-wrap text-xs [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:text-inherit [&_code]:text-inherit"
