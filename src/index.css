@@ -1,5 +1,15 @@
 @import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Syne:wght@400;500;600;700&display=swap");
 
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -129,12 +139,10 @@ a {
 
 @keyframes memory-glow {
   0%, 100% {
-    text-shadow: 0 0 8px hsl(var(--primary) / 0.4), 0 0 24px hsl(var(--accent) / 0.15);
-    filter: brightness(1);
+    filter: brightness(1) drop-shadow(0 0 6px hsl(var(--primary) / 0.3));
   }
   50% {
-    text-shadow: 0 0 16px hsl(var(--primary) / 0.6), 0 0 40px hsl(var(--accent) / 0.3);
-    filter: brightness(1.12);
+    filter: brightness(1.15) drop-shadow(0 0 12px hsl(var(--primary) / 0.5));
   }
 }
 
@@ -179,6 +187,9 @@ a {
 
 /* Animated gradient text (for "memory") */
 .text-gradient-animated {
+  display: inline;
+  vertical-align: baseline;
+  line-height: inherit;
   background: linear-gradient(
     90deg,
     hsl(var(--primary)) 0%,
@@ -190,7 +201,10 @@ a {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  color: transparent;
   animation: text-shimmer 4s ease-in-out infinite, memory-glow 3s ease-in-out infinite;
+  padding: 0;
+  margin: 0;
 }
 
 /* Scroll-reveal animation */

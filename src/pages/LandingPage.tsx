@@ -96,8 +96,9 @@ export default function LandingPage() {
 
             <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground">
               Ask for tailored recommendations from your own stars based on your
-              exact use case. Your data stays on-device, and external LLMs are
-              opt-in only.
+              exact use case. Your data stays{" "}
+              <span className="font-medium text-foreground">on-device</span>, and external LLMs are{" "}
+              <span className="font-medium text-foreground">opt-in only</span>.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
@@ -134,17 +135,17 @@ export default function LandingPage() {
         <section ref={trustRef} className="reveal mt-16">
           <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-8">
             {[
-              { icon: Shield, label: "Privacy-first" },
-              { icon: Lock, label: "OAuth PKCE" },
-              { icon: Database, label: "On-device storage" },
-              { icon: Github, label: "Open source" },
-            ].map(({ icon: Icon, label }) => (
+              { icon: Shield, label: "Privacy-first", highlight: true },
+              { icon: Lock, label: "OAuth PKCE", highlight: true },
+              { icon: Database, label: "On-device storage", highlight: false },
+              { icon: Github, label: "Open source", highlight: false },
+            ].map(({ icon: Icon, label, highlight }) => (
               <div
                 key={label}
                 className="flex items-center gap-2 text-sm text-muted-foreground"
               >
-                <Icon className="h-4 w-4 text-primary/70" />
-                <span>{label}</span>
+                <Icon className={`h-4 w-4 ${highlight ? "text-accent" : "text-primary/70"}`} />
+                <span className={highlight ? "font-medium text-accent" : ""}>{label}</span>
               </div>
             ))}
           </div>
@@ -225,6 +226,7 @@ export default function LandingPage() {
                 title: "Security aligned",
                 body: "OAuth PKCE flow, token isolation, and explicit consent before any data leaves your device.",
                 accent: "accent",
+                securityKeywords: ["OAuth PKCE", "token isolation", "explicit consent"],
               },
               {
                 icon: MessageSquare,
@@ -249,8 +251,22 @@ export default function LandingPage() {
                 title: "On-device embeddings",
                 body: "ONNX Runtime generates embeddings entirely in-browser -- no API calls, no tracking.",
                 accent: "accent",
+                securityKeywords: ["no API calls", "no tracking"],
               },
-            ].map(({ icon: Icon, title, body, accent }) => (
+            ].map(({ icon: Icon, title, body, accent, securityKeywords }) => {
+              // Highlight security keywords inline
+              let bodyContent: React.ReactNode = body;
+              if (securityKeywords && securityKeywords.length > 0) {
+                const regex = new RegExp(`(${securityKeywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'g');
+                const parts = body.split(regex);
+                bodyContent = parts.map((part, i) =>
+                  securityKeywords.includes(part)
+                    ? <span key={i} className="font-medium text-accent">{part}</span>
+                    : part
+                );
+              }
+
+              return (
               <Card
                 key={title}
                 className="glow-border group relative overflow-hidden border-border/50 bg-card/50 transition-all duration-300 hover:-translate-y-0.5 hover:bg-card/80 hover:shadow-lg"
@@ -267,11 +283,12 @@ export default function LandingPage() {
                     {title}
                   </h3>
                   <p className="text-sm leading-relaxed text-muted-foreground">
-                    {body}
+                    {bodyContent}
                   </p>
                 </CardContent>
               </Card>
-            ))}
+              );
+            })}
           </div>
         </section>
 
@@ -291,7 +308,8 @@ export default function LandingPage() {
               </h2>
               <p className="max-w-md text-muted-foreground">
                 Connect your GitHub account and start searching your starred
-                repos with natural language -- all locally on your device.
+                repos with natural language -- all{" "}
+                <span className="font-medium text-foreground">locally on your device</span>.
               </p>
               <Button
                 size="lg"
