@@ -1,4 +1,4 @@
-import { Star, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import SafeMarkdown from "./SafeMarkdown";
 
@@ -9,7 +9,6 @@ interface RepoResultCardProps {
   repoDescription: string | null;
   language: string | null;
   topics: string[];
-  stars: number;
   score: number;
   text: string;
 }
@@ -20,7 +19,6 @@ export function RepoResultCard({
   repoDescription,
   language,
   topics,
-  stars,
   score,
   text,
 }: RepoResultCardProps) {
@@ -41,12 +39,6 @@ export function RepoResultCard({
           </a>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {stars > 0 && (
-            <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground">
-              <Star className="h-3 w-3" />
-              {stars >= 1000 ? `${(stars / 1000).toFixed(1)}k` : stars}
-            </span>
-          )}
           <Badge
             variant="secondary"
             className={`text-[10px] font-medium ${

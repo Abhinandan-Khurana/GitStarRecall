@@ -23,7 +23,6 @@ import { float32ToBlob } from "../embeddings/vector";
 import { buildSyncPlan, repoMetadataChanged } from "../sync/plan";
 import { sortChatMessages } from "../chat/order";
 import { captureLocalError, captureLocalWarn } from "../observability/localLog";
-import SafeMarkdown from "../components/SafeMarkdown";
 import { SessionChat } from "../components/SessionChat";
 import { WebLLMDownloadDialog } from "../components/WebLLMDownloadDialog";
 import { SearchBar } from "../components/SearchBar";
@@ -652,7 +651,7 @@ export default function UsagePage() {
   }, [providerId]);
 
   const activeResults = useMemo(() => activeSession?.results ?? [], [activeSession]);
-  const webllmRecommendationDebugLabel = useMemo(() => {
+  const _webllmRecommendationDebugLabel = useMemo(() => {
     if (!webllmRecommendation || !webllmRecommendation.capability) {
       return null;
     }
@@ -2743,7 +2742,6 @@ export default function UsagePage() {
                         repoDescription={result.repoDescription}
                         language={result.language}
                         topics={result.topics}
-                        stars={result.stars}
                         score={result.score}
                         text={result.text}
                       />
