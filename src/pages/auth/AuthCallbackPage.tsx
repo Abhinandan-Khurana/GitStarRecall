@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/useAuth";
+import { Card, CardContent } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Loader2, Github } from "lucide-react";
 
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
@@ -38,15 +41,29 @@ export default function AuthCallbackPage() {
   }, [handleOAuthCallback, navigate]);
 
   return (
-    <section className="space-y-4 rounded-xl border border-white/10 bg-black/20 p-6">
-      <h2 className="font-display text-2xl text-white">GitHub OAuth Callback</h2>
-      {error ? (
-        <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-100">
-          {error}
-        </div>
-      ) : (
-        <p className="text-sm text-mist/70">Finishing login and redirecting to usage page...</p>
-      )}
-    </section>
+    <div className="flex min-h-[50vh] items-center justify-center">
+      <Card className="mx-auto w-full max-w-sm animate-scale-in border-border/50 bg-card/60">
+        <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+            <Github className="h-6 w-6 text-primary" />
+          </div>
+          <h2 className="font-display text-lg font-semibold text-foreground">
+            GitHub OAuth
+          </h2>
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : (
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">
+                Finishing login and redirecting...
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

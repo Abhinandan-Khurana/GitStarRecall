@@ -15,24 +15,24 @@
   --font-body: "DM Sans", ui-sans-serif, system-ui;
 
   /* shadcn/theme (HSL values without hsl() for Tailwind) */
-  --background: 210 25% 6%;
+  --background: 216 28% 5%;
   --foreground: 220 14% 91%;
-  --card: 222 47% 11%;
+  --card: 220 26% 8%;
   --card-foreground: 220 14% 91%;
-  --popover: 222 47% 11%;
+  --popover: 220 26% 8%;
   --popover-foreground: 220 14% 91%;
   --primary: 160 64% 51%;
   --primary-foreground: 210 25% 6%;
-  --secondary: 215 28% 17%;
+  --secondary: 215 25% 13%;
   --secondary-foreground: 220 14% 91%;
-  --muted: 215 28% 17%;
-  --muted-foreground: 220 14% 63%;
+  --muted: 215 25% 13%;
+  --muted-foreground: 220 14% 56%;
   --accent: 187 85% 53%;
   --accent-foreground: 210 25% 6%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 98%;
-  --border: 220 14% 20%;
-  --input: 220 14% 20%;
+  --border: 220 13% 15%;
+  --input: 220 13% 15%;
   --ring: 160 64% 51%;
   --radius: 0.625rem;
   --chart-1: 160 64% 51%;
@@ -53,7 +53,12 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--font-body);
-  background: radial-gradient(circle at top, #0f172a, var(--color-ink) 55%);
+  background: var(--color-ink);
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(15, 23, 42, 0.9) 0%, transparent 70%),
+    radial-gradient(circle at 20% 80%, rgba(52, 211, 153, 0.03) 0%, transparent 40%),
+    radial-gradient(circle at 80% 20%, rgba(34, 211, 238, 0.02) 0%, transparent 40%);
+  background-attachment: fixed;
 }
 
 a {
@@ -61,10 +66,12 @@ a {
   text-decoration: none;
 }
 
+/* ---- Animations ---- */
+
 @keyframes fade-in-up {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(16px);
   }
   to {
     opacity: 1;
@@ -72,14 +79,120 @@ a {
   }
 }
 
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+@keyframes progress-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
 .animate-fade-in-up {
   animation: fade-in-up 0.5s ease-out forwards;
 }
 
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* Stagger children animation */
+.stagger-children > * {
+  opacity: 0;
+  animation: fade-in-up 0.5s ease-out forwards;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 80ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 160ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 320ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 400ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 480ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 560ms; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up,
+  .animate-fade-in,
+  .animate-slide-up,
+  .animate-slide-in-right,
+  .animate-scale-in,
+  .animate-float,
+  .stagger-children > * {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* Session chat typing dot */
 @keyframes session-chat-dot {
-  0%,
-  80%,
-  100% {
+  0%, 80%, 100% {
     opacity: 0.35;
     transform: scale(0.85);
   }
@@ -93,28 +206,84 @@ a {
   animation: session-chat-dot 1.4s ease-in-out infinite both;
 }
 
-/* Focus rings disabled per preference */
+/* ---- Focus ring ---- */
 *:focus-visible {
   outline: none;
   box-shadow: none;
 }
 
-/* Session chat – force theme variables for message bubbles and input */
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+/* ---- Utility classes ---- */
+
+.glass-card {
+  background: hsl(var(--card) / 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid hsl(var(--border) / 0.5);
+}
+
+.glow-border {
+  position: relative;
+}
+.glow-border::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, hsl(var(--primary) / 0.3), hsl(var(--accent) / 0.3), transparent 60%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.glow-border:hover::after {
+  opacity: 1;
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ---- Session chat themed classes ---- */
 .session-chat-root {
   color: hsl(var(--foreground));
 }
 .session-chat-messages {
   border-color: hsl(var(--border));
-  background: hsl(var(--muted) / 0.15);
+  background: hsl(var(--muted) / 0.08);
 }
 .session-chat-bubble-user {
-  background: hsl(var(--primary));
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(160 64% 42%));
   color: hsl(var(--primary-foreground));
+  border-radius: 1rem 1rem 0.25rem 1rem;
 }
 .session-chat-bubble-assistant {
-  background: hsl(var(--card));
+  background: hsl(var(--card) / 0.8);
+  backdrop-filter: blur(8px);
   color: hsl(var(--foreground));
-  border-color: hsl(var(--border));
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: 1rem 1rem 1rem 0.25rem;
 }
 .session-chat-bubble-assistant a {
   color: hsl(var(--accent));
@@ -125,7 +294,13 @@ a {
 .session-chat-prompt-wrap {
   background: hsl(var(--card));
   color: hsl(var(--foreground));
-  border-color: hsl(var(--border));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.75rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.session-chat-prompt-wrap:focus-within {
+  border-color: hsl(var(--primary) / 0.5);
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.1);
 }
 .session-chat-prompt-wrap .session-chat-prompt-input,
 .session-chat-prompt-wrap textarea {
@@ -145,7 +320,6 @@ a {
 .session-chat-addon-icon {
   color: hsl(var(--muted-foreground));
 }
-/* Model settings popover: single background, no focus ring */
 .session-chat-settings-popover {
   background: hsl(var(--card)) !important;
   color: hsl(var(--foreground));
@@ -172,20 +346,20 @@ a {
 
 @layer base {
   .dark {
-    --background: 210 25% 6%;
+    --background: 216 28% 5%;
     --foreground: 220 14% 91%;
-    --card: 222 47% 11%;
+    --card: 220 26% 8%;
     --card-foreground: 220 14% 91%;
     --primary: 160 64% 51%;
     --primary-foreground: 210 25% 6%;
-    --secondary: 215 28% 17%;
-    --muted: 215 28% 17%;
-    --muted-foreground: 220 14% 63%;
+    --secondary: 215 25% 13%;
+    --muted: 215 25% 13%;
+    --muted-foreground: 220 14% 56%;
     --accent: 187 85% 53%;
     --accent-foreground: 210 25% 6%;
     --destructive: 0 62.8% 50%;
-    --border: 220 14% 20%;
-    --input: 220 14% 20%;
+    --border: 220 13% 15%;
+    --input: 220 13% 15%;
     --ring: 160 64% 51%;
   }
 }

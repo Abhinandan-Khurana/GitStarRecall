@@ -3,8 +3,22 @@ import { useAuth } from "../auth/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-
-const HERO_STAGGER_MS = 80;
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import {
+  Star,
+  Shield,
+  Database,
+  Brain,
+  Search,
+  MessageSquare,
+  Zap,
+  Lock,
+  Github,
+  ArrowRight,
+  Cpu,
+  RefreshCw,
+} from "lucide-react";
 
 export default function LandingPage() {
   const { beginOAuthLogin } = useAuth();
@@ -14,102 +28,246 @@ export default function LandingPage() {
     try {
       await beginOAuthLogin();
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : "Unable to start GitHub OAuth");
+      setAuthError(
+        err instanceof Error ? err.message : "Unable to start GitHub OAuth"
+      );
     }
   };
 
   return (
-    <article className="space-y-16">
-      {/* Hero */}
-      <section className="space-y-6">
-        <p
-          className="animate-fade-in-up text-xs uppercase tracking-[0.4em] text-mist/60"
-          style={{ animationDelay: "0ms", opacity: 0 }}
-        >
-          Local-first RAG for GitHub stars
-        </p>
-        <h1
-          className="font-display animate-fade-in-up text-4xl font-semibold leading-tight text-white md:text-5xl"
-          style={{ animationDelay: `${HERO_STAGGER_MS}ms`, opacity: 0 }}
-        >
-          GitStarRecall helps you find starred repos by memory, not by name.
-        </h1>
-        <p
-          className="animate-fade-in-up text-lg text-mist/80"
-          style={{ animationDelay: `${HERO_STAGGER_MS * 2}ms`, opacity: 0 }}
-        >
-          Ask for tailored recommendations from your own stars based on your exact use case.
-          Your data stays local, and external LLMs are opt-in only.
-        </p>
-        <div className="flex flex-wrap gap-4">
-          <Button
-            size="lg"
-            onClick={() => void handleOAuthLogin()}
-            className="animate-fade-in-up rounded-full px-6 hover:scale-[1.02]"
-            style={{ animationDelay: `${HERO_STAGGER_MS * 3}ms`, opacity: 0 }}
-          >
-            Connect GitHub
-          </Button>
-          <Button
-            variant="outline"
-            size="lg"
-            className="animate-fade-in-up rounded-full border-white/20 text-muted-foreground hover:border-white/30 hover:text-foreground"
-            style={{ animationDelay: `${HERO_STAGGER_MS * 4}ms`, opacity: 0 }}
-          >
-            Watch Demo
-          </Button>
-        </div>
-        {authError ? (
-          <Alert variant="destructive">
-            <AlertDescription>{authError}</AlertDescription>
-          </Alert>
-        ) : null}
-      </section>
+    <div className="relative">
+      {/* Background orbs */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+        <div className="absolute -top-32 left-1/2 h-[500px] w-[800px] -translate-x-1/2 rounded-full bg-primary/5 blur-[120px]" />
+        <div className="absolute right-0 top-1/3 h-[300px] w-[400px] rounded-full bg-accent/3 blur-[100px]" />
+      </div>
 
-      {/* Privacy & security */}
-      <section className="grid gap-3 md:grid-cols-2">
-        <Card className="transition-shadow hover:shadow-lg">
-          <CardContent className="p-4">
-            <p className="font-semibold text-primary">Privacy-first storage</p>
-            <p className="mt-1 text-sm text-muted-foreground">SQLite WASM + sqlite-vec keeps everything on-device.</p>
-          </CardContent>
-        </Card>
-        <Card className="transition-shadow hover:shadow-lg">
-          <CardContent className="p-4">
-            <p className="font-semibold text-accent">Security-aligned</p>
-            <p className="mt-1 text-sm text-muted-foreground">OAuth PKCE, token isolation, and explicit LLM consent.</p>
-          </CardContent>
-        </Card>
-      </section>
+      <article className="relative mx-auto max-w-5xl px-4 pb-20 pt-16 sm:px-6">
+        {/* Hero */}
+        <section className="mx-auto max-w-3xl text-center">
+          <div className="stagger-children">
+            <Badge variant="secondary" className="mb-6 gap-1.5 rounded-full px-3 py-1 text-xs font-medium">
+              <Star className="h-3 w-3 text-primary" />
+              Local-first RAG for GitHub Stars
+            </Badge>
 
-      {/* Demo placeholder */}
-      <Card>
-        <CardContent className="p-8 text-center">
-          <p className="text-sm uppercase tracking-wider text-muted-foreground">Demo</p>
-          <p className="mt-2 text-muted-foreground">Coming soon.</p>
-        </CardContent>
-      </Card>
+            <h1 className="font-display text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl md:text-6xl">
+              Find starred repos by{" "}
+              <span className="text-gradient">memory</span>,{" "}
+              not by name
+            </h1>
 
-      {/* How it works / Features */}
-      <section className="space-y-6">
-        <h2 className="font-display text-sm uppercase tracking-[0.3em] text-muted-foreground">
-          How it works
-        </h2>
-        <div className="grid gap-6 md:grid-cols-3">
-          {[
-            { title: "Sync and checksum", body: "Incremental sync keeps 1k+ stars fresh without full re-indexing." },
-            { title: "Sessioned recall", body: "Each query becomes a session, so you can refine and revisit ideas." },
-            { title: "Provider optionality", body: "Ollama, LM Studio, or remote LLMs only when you enable them." },
-          ].map((card) => (
-            <Card key={card.title} className="transition-colors hover:bg-card/80">
-              <CardContent className="p-5">
-                <p className="font-semibold">{card.title}</p>
-                <p className="mt-2 text-sm text-muted-foreground">{card.body}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </section>
-    </article>
+            <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground">
+              Ask for tailored recommendations from your own stars based on your
+              exact use case. Your data stays on-device, and external LLMs are
+              opt-in only.
+            </p>
+
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+              <Button
+                size="lg"
+                onClick={() => void handleOAuthLogin()}
+                className="gap-2 rounded-full px-6 transition-transform hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <Github className="h-4 w-4" />
+                Connect GitHub
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                asChild
+                className="gap-2 rounded-full border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
+              >
+                <a href="https://github.com/Abhinandan-Khurana/GitStarRecall" target="_blank" rel="noopener noreferrer">
+                  View Source
+                  <ArrowRight className="h-4 w-4" />
+                </a>
+              </Button>
+            </div>
+          </div>
+
+          {authError && (
+            <Alert variant="destructive" className="mx-auto mt-6 max-w-md">
+              <AlertDescription>{authError}</AlertDescription>
+            </Alert>
+          )}
+        </section>
+
+        {/* Trust signals bar */}
+        <section className="mt-16 animate-fade-in" style={{ animationDelay: "400ms", opacity: 0 }}>
+          <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-8">
+            {[
+              { icon: Shield, label: "Privacy-first" },
+              { icon: Lock, label: "OAuth PKCE" },
+              { icon: Database, label: "On-device storage" },
+              { icon: Github, label: "Open source" },
+            ].map(({ icon: Icon, label }) => (
+              <div
+                key={label}
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <Icon className="h-4 w-4 text-primary/70" />
+                <span>{label}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <Separator className="mx-auto my-16 max-w-xs opacity-30" />
+
+        {/* How it works */}
+        <section className="animate-fade-in" style={{ animationDelay: "500ms", opacity: 0 }}>
+          <div className="mb-10 text-center">
+            <h2 className="font-display text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              How it works
+            </h2>
+          </div>
+
+          <div className="relative mx-auto grid max-w-3xl gap-8 md:grid-cols-3 md:gap-6">
+            {/* Connecting line (desktop) */}
+            <div className="absolute left-0 right-0 top-10 hidden h-px bg-gradient-to-r from-transparent via-border to-transparent md:block" aria-hidden="true" />
+
+            {[
+              {
+                step: 1,
+                icon: RefreshCw,
+                title: "Sync your stars",
+                body: "Connect GitHub and incrementally sync your starred repos with checksums -- no full re-indexing needed.",
+              },
+              {
+                step: 2,
+                icon: Brain,
+                title: "Build embeddings",
+                body: "Generate semantic embeddings locally using ONNX models, stored in SQLite WASM with sqlite-vec.",
+              },
+              {
+                step: 3,
+                icon: Search,
+                title: "Search by intent",
+                body: "Describe what you need in natural language and get ranked matches from your personal star collection.",
+              },
+            ].map(({ step, icon: Icon, title, body }) => (
+              <div key={step} className="relative flex flex-col items-center text-center">
+                <div className="relative z-10 mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-border/50 bg-card shadow-lg">
+                  <Icon className="h-5 w-5 text-primary" />
+                  <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                    {step}
+                  </span>
+                </div>
+                <h3 className="mb-2 font-display text-base font-semibold text-foreground">
+                  {title}
+                </h3>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  {body}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <Separator className="mx-auto my-16 max-w-xs opacity-30" />
+
+        {/* Feature grid (bento-style) */}
+        <section className="animate-fade-in" style={{ animationDelay: "600ms", opacity: 0 }}>
+          <div className="mb-10 text-center">
+            <h2 className="font-display text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Features
+            </h2>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              {
+                icon: Database,
+                title: "SQLite WASM",
+                body: "All data lives in your browser using SQLite WASM with sqlite-vec for vector similarity search.",
+                accent: "primary",
+              },
+              {
+                icon: Shield,
+                title: "Security aligned",
+                body: "OAuth PKCE flow, token isolation, and explicit consent before any data leaves your device.",
+                accent: "accent",
+              },
+              {
+                icon: MessageSquare,
+                title: "Sessioned recall",
+                body: "Each query becomes a session you can refine, revisit, and continue with full context.",
+                accent: "primary",
+              },
+              {
+                icon: Cpu,
+                title: "Provider optionality",
+                body: "Use Ollama, LM Studio, WebLLM, or remote providers -- only enabled when you choose.",
+                accent: "accent",
+              },
+              {
+                icon: Zap,
+                title: "Incremental sync",
+                body: "Checksum-based sync keeps 1000+ stars fresh without re-downloading everything.",
+                accent: "primary",
+              },
+              {
+                icon: Brain,
+                title: "On-device embeddings",
+                body: "ONNX Runtime generates embeddings entirely in-browser -- no API calls, no tracking.",
+                accent: "accent",
+              },
+            ].map(({ icon: Icon, title, body, accent }) => (
+              <Card
+                key={title}
+                className="glow-border group relative overflow-hidden border-border/50 bg-card/50 transition-all duration-300 hover:-translate-y-0.5 hover:bg-card/80 hover:shadow-lg"
+              >
+                <CardContent className="p-5">
+                  <div
+                    className={`mb-3 flex h-9 w-9 items-center justify-center rounded-lg ${accent === "accent" ? "bg-accent/10" : "bg-primary/10"}`}
+                  >
+                    <Icon
+                      className={`h-4.5 w-4.5 ${accent === "accent" ? "text-accent" : "text-primary"}`}
+                    />
+                  </div>
+                  <h3 className="mb-1.5 font-display text-sm font-semibold text-foreground">
+                    {title}
+                  </h3>
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    {body}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </section>
+
+        <Separator className="mx-auto my-16 max-w-xs opacity-30" />
+
+        {/* Bottom CTA */}
+        <section className="animate-fade-in" style={{ animationDelay: "700ms", opacity: 0 }}>
+          <Card className="relative overflow-hidden border-border/50 bg-card/60">
+            {/* Accent glow */}
+            <div className="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-primary/10 blur-[60px]" aria-hidden="true" />
+            <CardContent className="relative flex flex-col items-center gap-4 p-8 text-center sm:p-12">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                <Star className="h-6 w-6 text-primary" />
+              </div>
+              <h2 className="font-display text-2xl font-bold text-foreground sm:text-3xl">
+                Ready to recall your stars?
+              </h2>
+              <p className="max-w-md text-muted-foreground">
+                Connect your GitHub account and start searching your starred
+                repos with natural language -- all locally on your device.
+              </p>
+              <Button
+                size="lg"
+                onClick={() => void handleOAuthLogin()}
+                className="mt-2 gap-2 rounded-full px-8 transition-transform hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <Github className="h-4 w-4" />
+                Get Started
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
+      </article>
+    </div>
   );
 }
