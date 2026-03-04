@@ -139,10 +139,10 @@ a {
 
 @keyframes memory-glow {
   0%, 100% {
-    filter: brightness(1) drop-shadow(0 0 6px hsl(var(--primary) / 0.3));
+    filter: brightness(1);
   }
   50% {
-    filter: brightness(1.15) drop-shadow(0 0 12px hsl(var(--primary) / 0.5));
+    filter: brightness(1.15);
   }
 }
 
@@ -201,10 +201,9 @@ a {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  color: transparent;
   animation: text-shimmer 4s ease-in-out infinite, memory-glow 3s ease-in-out infinite;
-  padding: 0;
-  margin: 0;
+  padding-block: 0.05em;
+  overflow: visible;
 }
 
 /* Scroll-reveal animation */
