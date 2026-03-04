@@ -2806,32 +2806,7 @@ export default function UsagePage() {
     </article>
   );
 }
-      {dbStorageMode === "memory" ? (
-        <Alert variant="destructive">
-          <AlertDescription>
-            Local persistence quota was exceeded. Running in memory-only mode for this tab; data may be lost on refresh.
-            Clear local data or reduce indexed content to restore persistent storage.
-          </AlertDescription>
-        </Alert>
-      ) : null}
 
-      {isAuthenticated ? (
-        <>
-          {/* Primary: Search */}
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <Label htmlFor="search-stars" className="sr-only">
-                  Search your stars
-                </Label>
-                <Input
-                  id="search-stars"
-                  className="min-w-0 flex-1"
-                  placeholder="e.g. vector database in browser"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && void handleSearch()}
-                />
                 <Button
                   onClick={() => void handleSearch()}
                   disabled={isSearching}
