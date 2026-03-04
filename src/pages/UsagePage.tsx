@@ -23,9 +23,14 @@ import { float32ToBlob } from "../embeddings/vector";
 import { buildSyncPlan, repoMetadataChanged } from "../sync/plan";
 import { sortChatMessages } from "../chat/order";
 import { captureLocalError, captureLocalWarn } from "../observability/localLog";
-import SafeMarkdown from "../components/SafeMarkdown";
 import { SessionChat } from "../components/SessionChat";
 import { WebLLMDownloadDialog } from "../components/WebLLMDownloadDialog";
+import { SearchBar } from "../components/SearchBar";
+import { SyncPanel } from "../components/SyncPanel";
+import { ResultsPanel } from "../components/ResultsPanel";
+import { SessionSidebar } from "../components/SessionSidebar";
+import { LoginCard } from "../components/LoginCard";
+import { AccountPanel } from "../components/AccountPanel";
 import {
   buildHistoryRestoreResult,
   createRestoreRequestTracker,
@@ -53,23 +58,8 @@ import {
   type WebLLMRecommendation,
 } from "../llm/webllm/capability";
 import { WebLLMProviderError } from "../llm/webllm/engine";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 type IndexingStatus = {
@@ -569,7 +559,6 @@ export default function UsagePage() {
   const { accessToken, isAuthenticated, authMethod, loginWithPat, beginOAuthLogin, oauthConfig, logout } =
     useAuth();
   const navigate = useNavigate();
-  const [patToken, setPatToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fetchingStars, setFetchingStars] = useState(false);
   const [fetchPhase, setFetchPhase] = useState<string | null>(null);
@@ -577,7 +566,6 @@ export default function UsagePage() {
   const [embeddingRunMetrics, setEmbeddingRunMetrics] = useState<EmbeddingRunMetrics | null>(null);
   const [starsSummary, setStarsSummary] = useState<string | null>(null);
   const [dbStorageMode, setDbStorageMode] = useState<string | null>(null);
-  const [indexDetailsExpanded, setIndexDetailsExpanded] = useState(true);
   const [sessionsExpanded, setSessionsExpanded] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -1136,11 +1124,9 @@ export default function UsagePage() {
     setLlmError(null);
   };
 
-  const handlePatLogin = (event: { preventDefault(): void }) => {
-    event.preventDefault();
-
+  const handlePatLogin = (token: string) => {
     try {
-      loginWithPat(patToken);
+      loginWithPat(token);
       setError(null);
       navigate("/app", { replace: true });
     } catch (err) {
@@ -2618,7 +2604,7 @@ export default function UsagePage() {
   };
 
   return (
-    <article className="space-y-6">
+    <article className="flex flex-col gap-5">
       <WebLLMDownloadDialog
         open={webllmDialogOpen}
         recommendedModelId={webllmRecommendation?.modelId ?? WEBLLM_FALLBACK_MODEL_ID}
@@ -2636,11 +2622,190 @@ export default function UsagePage() {
         onConfirm={handleConfirmWebllmDownload}
         onCancel={handleCancelWebllmDownload}
       />
+
       {error ? (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
+
+      {dbStorageMode === "memory" ? (
+        <Alert variant="destructive">
+          <AlertDescription>
+            Local persistence quota was exceeded. Running in memory-only mode for this tab; data may be lost on refresh.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {isAuthenticated ? (
+        <>
+          {/* Search */}
+          <SearchBar
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+            onSearch={() => void handleSearch()}
+            isSearching={isSearching}
+            searchProgress={searchProgress}
+          />
+
+          {/* Sync & Indexing */}
+          <SyncPanel
+            fetchingStars={fetchingStars}
+            fetchPhase={fetchPhase}
+            onFetchStars={() => void handleFetchStars()}
+            allowOllamaEmbedding={allowOllamaEmbedding}
+            onAllowOllamaChange={setAllowOllamaEmbedding}
+            ollamaConnectionStatus={ollamaConnectionStatus}
+            ollamaBaseUrl={ollamaBaseUrl}
+            ollamaModel={ollamaModel}
+            onOllamaBaseUrlChange={setOllamaBaseUrl}
+            onOllamaModelChange={setOllamaModel}
+            onTestOllamaConnection={() => void handleTestOllamaConnection()}
+            ollamaConnectionMessage={ollamaConnectionMessage}
+            indexingStatus={indexingStatus}
+            starsSummary={starsSummary}
+            dbStorageMode={dbStorageMode}
+            embeddingRunMetrics={embeddingRunMetrics}
+            historyLoadState={historyLoadState}
+            historyDataSource={historyDataSource}
+            historyLastRestoredAt={historyLastRestoredAt}
+            onRetryHistory={() => void restoreHistory()}
+          />
+
+          {/* Session Results + Filters */}
+          {activeSession ? (
+            <ResultsPanel
+              title={activeSession.title}
+              results={activeSession.results}
+              filteredResults={filteredResults}
+              totalResults={activeSession.results.length}
+              sessionMode={sessionMode}
+              onSessionModeChange={setSessionMode}
+              activeSessionId={activeSessionId}
+              languageFilter={languageFilter}
+              topicFilter={topicFilter}
+              updatedWithinDaysFilter={updatedWithinDaysFilter}
+              onLanguageFilterChange={setLanguageFilter}
+              onTopicFilterChange={setTopicFilter}
+              onUpdatedWithinDaysFilterChange={setUpdatedWithinDaysFilter}
+              availableLanguages={availableLanguages}
+              availableTopics={availableTopics}
+              onRehydrateSession={() => void handleRehydrateSession()}
+            />
+          ) : null}
+
+          {/* Chat section: sidebar + main */}
+          <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
+            <SessionSidebar
+              sessions={sessions.map((s) => ({ id: s.id, title: s.title, resultCount: s.results.length }))}
+              activeSessionId={activeSessionId}
+              onSelectSession={(id) => {
+                void getLocalDatabase().then((db) => {
+                  setSessionMessagesById((prev) => ({
+                    ...prev,
+                    [id]: sortChatMessages(db.listChatMessages(id)),
+                  }));
+                });
+                setActiveSessionId(id);
+                setSessionMode("continue");
+              }}
+              onClearActive={() => {
+                setActiveSessionId(null);
+                setSessionMode("new");
+                setLanguageFilter("all");
+                setTopicFilter("all");
+                setUpdatedWithinDaysFilter("all");
+              }}
+            />
+
+            {/* Main chat area */}
+            <div className="min-w-0 flex-1">
+              {activeSession ? (
+                <div className="flex h-full flex-col rounded-xl border border-border/50 bg-card/40">
+                  <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Chat</p>
+                      <p className="text-xs text-muted-foreground">
+                        Top 8 filtered snippets sent as context
+                      </p>
+                    </div>
+                    {providerId === "webllm" ? (
+                      <Badge variant="secondary" className="text-xs font-normal">
+                        WebLLM: {webllmRuntimeState}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <div className="flex min-h-0 flex-1 flex-col p-4">
+                    <SessionChat
+                      messages={activeSessionMessages}
+                      isGenerating={isGenerating}
+                      streamingContent={llmAnswer}
+                      prompt={llmPrompt}
+                      onPromptChange={setLlmPrompt}
+                      onSend={() => void handleGenerateAnswer()}
+                      onCancel={handleCancelGeneration}
+                      error={llmError}
+                      canSend={filteredResults.length > 0}
+                      noResultsHint={filteredResults.length === 0}
+                      messagesEndRef={messagesEndRef}
+                      providerId={providerId}
+                      providerBaseUrl={providerBaseUrl}
+                      providerModel={providerModel}
+                      providerApiKey={providerApiKey}
+                      onProviderIdChange={(id) => handleProviderChange(id)}
+                      onProviderBaseUrlChange={setProviderBaseUrl}
+                      onProviderModelChange={(value) => {
+                        setProviderModel(value);
+                        if (providerId === "webllm") {
+                          setWebllmSelectedModel(resolveHermesModelSelection(value));
+                          setWebllmModelManuallySet(true);
+                        }
+                      }}
+                      onProviderApiKeyChange={setProviderApiKey}
+                      selectedProvider={selectedProvider}
+                      providerDefinitions={providerDefinitions}
+                      allowRemoteProvider={allowRemoteProvider}
+                      allowLocalProvider={allowLocalProvider}
+                      onAllowRemoteChange={setAllowRemoteProvider}
+                      onAllowLocalChange={setAllowLocalProvider}
+                      webllmModels={webLLMModels}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center rounded-xl border border-border/50 bg-card/40 py-12">
+                  <p className="text-sm text-muted-foreground">
+                    Run a search above to start a session, then chat here.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Account */}
+          <AccountPanel
+            authMethod={authMethod}
+            expanded={sessionsExpanded}
+            onExpandedChange={setSessionsExpanded}
+            onLogout={logout}
+            onClearLocalData={() => void handleClearLocalData()}
+            onOAuthLogin={() => void handleOAuth()}
+          />
+        </>
+      ) : (
+        <LoginCard
+          sessions={sessions}
+          historyLoadState={historyLoadState}
+          error={error}
+          oauthRedirectUri={oauthConfig.redirectUri}
+          onOAuthLogin={() => void handleOAuth()}
+          onPatLogin={handlePatLogin}
+          onRetryHistory={() => void restoreHistory()}
+        />
+      )}
+    </article>
+  );
+}
       {dbStorageMode === "memory" ? (
         <Alert variant="destructive">
           <AlertDescription>

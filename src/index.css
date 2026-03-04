@@ -15,24 +15,24 @@
   --font-body: "DM Sans", ui-sans-serif, system-ui;
 
   /* shadcn/theme (HSL values without hsl() for Tailwind) */
-  --background: 210 25% 6%;
+  --background: 216 30% 5%;
   --foreground: 220 14% 91%;
-  --card: 222 47% 11%;
+  --card: 220 30% 8%;
   --card-foreground: 220 14% 91%;
-  --popover: 222 47% 11%;
+  --popover: 220 30% 8%;
   --popover-foreground: 220 14% 91%;
   --primary: 160 64% 51%;
   --primary-foreground: 210 25% 6%;
-  --secondary: 215 28% 17%;
+  --secondary: 215 20% 14%;
   --secondary-foreground: 220 14% 91%;
-  --muted: 215 28% 17%;
-  --muted-foreground: 220 14% 63%;
+  --muted: 215 20% 14%;
+  --muted-foreground: 220 10% 55%;
   --accent: 187 85% 53%;
   --accent-foreground: 210 25% 6%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 98%;
-  --border: 220 14% 20%;
-  --input: 220 14% 20%;
+  --border: 220 12% 16%;
+  --input: 220 12% 16%;
   --ring: 160 64% 51%;
   --radius: 0.625rem;
   --chart-1: 160 64% 51%;
@@ -53,7 +53,7 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--font-body);
-  background: radial-gradient(circle at top, #0f172a, var(--color-ink) 55%);
+  background: var(--color-ink);
 }
 
 a {
@@ -61,6 +61,29 @@ a {
   text-decoration: none;
 }
 
+/* ─── Accessible focus ring ─── */
+*:focus-visible {
+  outline: 2px solid hsl(var(--ring) / 0.5);
+  outline-offset: 2px;
+}
+
+/* ─── Scrollbar styling ─── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+/* ─── Animation keyframes ─── */
 @keyframes fade-in-up {
   from {
     opacity: 0;
@@ -72,8 +95,41 @@ a {
   }
 }
 
-.animate-fade-in-up {
-  animation: fade-in-up 0.5s ease-out forwards;
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-in-bottom {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
 }
 
 @keyframes session-chat-dot {
@@ -89,23 +145,70 @@ a {
   }
 }
 
+.animate-fade-in-up {
+  animation: fade-in-up 0.5s ease-out forwards;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out forwards;
+}
+
+.animate-slide-in-bottom {
+  animation: slide-in-bottom 0.3s ease-out forwards;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s ease-out forwards;
+}
+
 .session-chat-typing-dot {
   animation: session-chat-dot 1.4s ease-in-out infinite both;
 }
 
-/* Focus rings disabled per preference */
-*:focus-visible {
-  outline: none;
-  box-shadow: none;
+/* ─── Shimmer effect for progress bars ─── */
+.shimmer-bar {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsla(0, 0%, 100%, 0.08) 50%,
+    transparent 100%
+  );
+  animation: shimmer 1.8s ease-in-out infinite;
 }
 
-/* Session chat – force theme variables for message bubbles and input */
+/* ─── Glow effects ─── */
+.glow-mint {
+  box-shadow: 0 0 20px -5px hsl(160 64% 51% / 0.25),
+              0 0 40px -10px hsl(160 64% 51% / 0.15);
+}
+
+.glow-mint-sm {
+  box-shadow: 0 0 10px -3px hsl(160 64% 51% / 0.2),
+              0 0 20px -5px hsl(160 64% 51% / 0.1);
+}
+
+/* ─── Gradient text ─── */
+.text-gradient-primary {
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Session chat – theme variables ─── */
 .session-chat-root {
   color: hsl(var(--foreground));
 }
 .session-chat-messages {
   border-color: hsl(var(--border));
-  background: hsl(var(--muted) / 0.15);
+  background: hsl(var(--muted) / 0.1);
 }
 .session-chat-bubble-user {
   background: hsl(var(--primary));
@@ -120,7 +223,7 @@ a {
   color: hsl(var(--accent));
 }
 .session-chat-bubble-assistant a:hover {
-  opacity: 0.9;
+  opacity: 0.85;
 }
 .session-chat-prompt-wrap {
   background: hsl(var(--card));
@@ -129,8 +232,8 @@ a {
 }
 .session-chat-prompt-wrap .session-chat-prompt-input,
 .session-chat-prompt-wrap textarea {
-  color: hsl(var(--foreground)) !important;
-  background: transparent !important;
+  color: hsl(var(--foreground));
+  background: transparent;
 }
 .session-chat-prompt-wrap textarea::placeholder {
   color: hsl(var(--muted-foreground));
@@ -145,18 +248,10 @@ a {
 .session-chat-addon-icon {
   color: hsl(var(--muted-foreground));
 }
-/* Model settings popover: single background, no focus ring */
 .session-chat-settings-popover {
-  background: hsl(var(--card)) !important;
+  background: hsl(var(--card));
   color: hsl(var(--foreground));
   border: 1px solid hsl(var(--border));
-}
-.session-chat-settings-popover input:focus-visible,
-.session-chat-settings-popover button:focus-visible,
-.session-chat-settings-popover [data-state]:focus-visible,
-.session-chat-settings-popover [role="checkbox"]:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
 }
 .session-chat-settings-input {
   background: transparent;
@@ -172,20 +267,20 @@ a {
 
 @layer base {
   .dark {
-    --background: 210 25% 6%;
+    --background: 216 30% 5%;
     --foreground: 220 14% 91%;
-    --card: 222 47% 11%;
+    --card: 220 30% 8%;
     --card-foreground: 220 14% 91%;
     --primary: 160 64% 51%;
     --primary-foreground: 210 25% 6%;
-    --secondary: 215 28% 17%;
-    --muted: 215 28% 17%;
-    --muted-foreground: 220 14% 63%;
+    --secondary: 215 20% 14%;
+    --muted: 215 20% 14%;
+    --muted-foreground: 220 10% 55%;
     --accent: 187 85% 53%;
     --accent-foreground: 210 25% 6%;
     --destructive: 0 62.8% 50%;
-    --border: 220 14% 20%;
-    --input: 220 14% 20%;
+    --border: 220 12% 16%;
+    --input: 220 12% 16%;
     --ring: 160 64% 51%;
   }
 }
