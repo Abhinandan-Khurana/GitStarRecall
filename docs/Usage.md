@@ -205,8 +205,11 @@ When enabled, advanced controls become available:
 - `topK` (`10..40`)
 - `mmrLambda` (`0.55..0.9`)
 - `maxChunksPerRepo` (`1..5`)
-- lexical trigger thresholds (`top1`, `top5Mean`)
+- `lexicalTop1Threshold` (`0.05..0.5`)
+- `lexicalTop5MeanThreshold` (`0.05..0.5`)
 - `Rebuild Embeddings` action to regenerate vectors using current embedding settings/model selection (with confirmation prompt).
+- `fetchK` guidance warning appears when `fetchK < (topK * 6)` to preserve candidate diversity for MMR.
+- Numeric tuning fields commit on blur/Enter, so intermediate keystrokes are not clamped while typing.
 
 Warning behavior:
 - UI shows a red warning that advanced tuning may improve corpus-specific quality or reduce relevance/speed/efficiency.
@@ -339,6 +342,7 @@ README batching pipeline controls:
 - Endpoint is restricted to localhost patterns only.
 - Payload to Ollama includes only embedding text + model (no GitHub token).
 - If Ollama is unavailable, indexing automatically restarts with browser embeddings.
+- "No embedding models detected" guidance appears only when Ollama mode is enabled.
 
 ### Ollama Setup
 
@@ -350,6 +354,7 @@ README batching pipeline controls:
 5. Click `Test connection` (this also refreshes installed model lists).
 6. Run `Fetch Stars` to index with Ollama.
 7. If Ollama goes down, the app falls back to browser embedding automatically.
+8. If you select `Custom model...`, the custom input stays open even when blank so you can type a model name before saving.
 
 If connection fails from browser:
 
