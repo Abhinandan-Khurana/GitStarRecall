@@ -208,6 +208,8 @@ When enabled, advanced controls become available:
 - `lexicalTop1Threshold` (`0.05..0.5`)
 - `lexicalTop5MeanThreshold` (`0.05..0.5`)
 - `Rebuild Embeddings` action to regenerate vectors using current embedding settings/model selection (with confirmation prompt).
+- `fetchK` guidance warning appears when `fetchK < (topK * 6)` to preserve candidate diversity for MMR.
+- Numeric tuning fields commit on blur/Enter, so intermediate keystrokes are not clamped while typing.
 
 Warning behavior:
 - UI shows a red warning that advanced tuning may improve corpus-specific quality or reduce relevance/speed/efficiency.

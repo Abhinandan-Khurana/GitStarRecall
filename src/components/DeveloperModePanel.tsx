@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   ShieldAlert,
   FlaskConical,
@@ -53,6 +53,33 @@ function TuningField({
   step,
   onChange,
 }: TuningFieldProps) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commitDraft = () => {
+    const trimmed = draft.trim();
+    if (
+      trimmed === "" ||
+      trimmed === "-" ||
+      trimmed === "." ||
+      trimmed === "-."
+    ) {
+      setDraft(String(value));
+      return;
+    }
+
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+
+    onChange(parsed);
+  };
+
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
@@ -71,11 +98,18 @@ function TuningField({
       <Input
         id={id}
         type="number"
-        value={value}
+        value={draft}
         min={min}
         max={max}
         step={step}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commitDraft}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitDraft();
+          }
+        }}
         className="h-7 rounded-lg border-border/50 bg-background/50 text-xs tabular-nums transition-colors focus-visible:border-primary/50"
       />
     </div>
@@ -106,8 +140,9 @@ export function DeveloperModePanel({
   isRebuilding,
 }: DeveloperModePanelProps) {
   const [confirmRebuild, setConfirmRebuild] = useState(false);
+  const advancedTuningRegionId = useId();
   const fetchKWarning =
-    retrievalTuning.fetchK < retrievalTuning.topK * 4;
+    retrievalTuning.fetchK < retrievalTuning.topK * 6;
 
   useEffect(() => {
     if (!isSudoUser) {
@@ -214,6 +249,8 @@ export function DeveloperModePanel({
               <button
                 type="button"
                 className="flex w-full items-center justify-between rounded-lg border border-border/30 bg-background/20 px-3 py-2 text-left transition-colors hover:bg-background/40"
+                aria-expanded={advancedTuningOpen}
+                aria-controls={advancedTuningRegionId}
                 onClick={() =>
                   onAdvancedTuningOpenChange(!advancedTuningOpen)
                 }
@@ -239,7 +276,10 @@ export function DeveloperModePanel({
               </button>
 
               {advancedTuningOpen && (
-                <div className="animate-fade-in space-y-3 rounded-lg border border-border/30 bg-background/10 p-3">
+                <div
+                  id={advancedTuningRegionId}
+                  className="animate-fade-in space-y-3 rounded-lg border border-border/30 bg-background/10 p-3"
+                >
                   <div className="flex items-start gap-1.5">
                     <Info className="mt-0.5 h-3 w-3 shrink-0 text-accent/70" />
                     <p className="text-[10px] leading-relaxed text-muted-foreground">
@@ -326,7 +366,7 @@ export function DeveloperModePanel({
                       <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-500" />
                       <p className="text-[11px] text-amber-500">
                         fetchK is low relative to topK. Increase fetchK to at
-                        least 4x topK to preserve MMR diversity.
+                        least 6x topK to preserve MMR diversity.
                       </p>
                     </div>
                   )}

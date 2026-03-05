@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   Settings2,
   Shield,
@@ -161,6 +161,7 @@ function BrowserCapabilityCard({
   recommendation: BrowserEmbeddingRecommendation | null;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const panelId = useId();
 
   if (!recommendation) {
     return (
@@ -194,6 +195,8 @@ function BrowserCapabilityCard({
       <button
         type="button"
         className="flex w-full items-center justify-between px-3 py-2 text-left"
+        aria-expanded={expanded}
+        aria-controls={panelId}
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-2">
@@ -222,7 +225,10 @@ function BrowserCapabilityCard({
         )}
       </button>
       {expanded && (
-        <div className="animate-fade-in border-t border-border/20 px-3 pb-2.5 pt-2 space-y-1.5">
+        <div
+          id={panelId}
+          className="animate-fade-in border-t border-border/20 px-3 pb-2.5 pt-2 space-y-1.5"
+        >
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <Zap className="h-3 w-3" />
             <span>
@@ -412,15 +418,24 @@ export function OllamaConfigPanel({
             </div>
 
             {showCustomModelInput ? (
-              <Input
-                value={ollamaModel}
-                onChange={(event) => {
-                  setCustomModelMode(true);
-                  onModelChange(event.target.value);
-                }}
-                placeholder="qwen3-embedding:0.6b"
-                className="h-8 rounded-lg border-border/50 bg-background/50 text-xs"
-              />
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="ollama-custom-model"
+                  className="text-[11px] font-medium text-muted-foreground"
+                >
+                  Custom model
+                </Label>
+                <Input
+                  id="ollama-custom-model"
+                  value={ollamaModel}
+                  onChange={(event) => {
+                    setCustomModelMode(true);
+                    onModelChange(event.target.value);
+                  }}
+                  placeholder="qwen3-embedding:0.6b"
+                  className="h-8 rounded-lg border-border/50 bg-background/50 text-xs"
+                />
+              </div>
             ) : null}
 
             {/* Action buttons */}

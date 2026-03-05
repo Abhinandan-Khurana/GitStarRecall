@@ -697,6 +697,7 @@ export default function UsagePage() {
   const [patToken, setPatToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fetchingStars, setFetchingStars] = useState(false);
+  const [isRebuildingEmbeddings, setIsRebuildingEmbeddings] = useState(false);
   const [fetchPhase, setFetchPhase] = useState<string | null>(null);
   const [indexingStatus, setIndexingStatus] = useState<IndexingStatus | null>(null);
   const [embeddingRunMetrics, setEmbeddingRunMetrics] = useState<EmbeddingRunMetrics | null>(null);
@@ -1931,8 +1932,12 @@ export default function UsagePage() {
     }
   };
 
-  const handleRebuildEmbeddings = async () => {
+  const handleRebuildEmbeddings = async (skipConfirm = false) => {
+    if (isRebuildingEmbeddings) {
+      return;
+    }
     if (
+      !skipConfirm &&
       typeof window !== "undefined" &&
       !window.confirm(
         "Rebuild embeddings now?\n\nThis clears all existing embeddings and re-generates them with current settings. This can take time.",
@@ -1942,7 +1947,7 @@ export default function UsagePage() {
     }
 
     try {
-      setFetchingStars(true);
+      setIsRebuildingEmbeddings(true);
       setError(null);
       setFetchPhase("Rebuilding embeddings with current settings…");
       const database = await getLocalDatabase();
@@ -1958,7 +1963,7 @@ export default function UsagePage() {
       captureLocalError("rebuild_embeddings_failed", err);
       setError(err instanceof Error ? err.message : "Failed to rebuild embeddings");
     } finally {
-      setFetchingStars(false);
+      setIsRebuildingEmbeddings(false);
       setFetchPhase(null);
     }
   };
@@ -3206,8 +3211,8 @@ export default function UsagePage() {
               onAdvancedTuningOpenChange={setAdvancedTuningOpen}
               retrievalTuning={retrievalTuning}
               onUpdateRetrievalTuning={updateRetrievalTuning}
-              onRebuildEmbeddings={() => void handleRebuildEmbeddings()}
-              isRebuilding={fetchingStars}
+              onRebuildEmbeddings={() => void handleRebuildEmbeddings(true)}
+              isRebuilding={isRebuildingEmbeddings}
             />
 
             <SyncStatusBar

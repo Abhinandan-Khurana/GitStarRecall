@@ -5,8 +5,20 @@
 - Completed the developer retrieval-tuning panel so all persisted knobs are editable in UI:
   - `lexicalTop1Threshold` (`0.05..0.5`)
   - `lexicalTop5MeanThreshold` (`0.05..0.5`)
+- Improved tuning input UX for numeric controls:
+  - tuning fields now keep draft text while typing and only commit on blur/Enter,
+  - prevents immediate min-clamp overwrite on intermediate keystrokes (for example `fetchK`, `topK`).
+- Aligned UI diversity warning with backend retrieval normalization:
+  - `fetchK` warning now triggers when `fetchK < topK * 6`.
 - Fixed stale rebuild confirmation state in developer mode:
   - turning off `Enable developer advanced mode` now clears the pending `Are you sure?` state for `Rebuild Embeddings`.
+- Removed duplicate rebuild confirmation during panel-triggered rebuild:
+  - `DeveloperModePanel` confirmation is now the single prompt path.
+- Decoupled rebuild loading state from star-sync loading state:
+  - rebuild button/spinner state now tracks embedding rebuild only, not general `Fetch Stars`.
+- Added accessibility semantics for disclosure-style controls:
+  - advanced tuning toggle and browser capability toggle now expose `aria-expanded`/`aria-controls`,
+  - custom model input now has an explicit associated label.
 - Removed duplicate `RetrievalTuning` type declarations by importing the shared type from `DeveloperModePanel` into `UsagePage`, preventing silent type drift.
 - Synced docs for these controls in `docs/Usage.md`.
 
