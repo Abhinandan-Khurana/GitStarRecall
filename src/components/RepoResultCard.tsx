@@ -22,7 +22,8 @@ export function RepoResultCard({
   score,
   text,
 }: RepoResultCardProps) {
-  const matchPercent = Math.round(score * 100);
+  const scoreBand = score >= 0.6 ? "High" : score >= 0.35 ? "Medium" : "Low";
+  const scoreText = score.toFixed(3);
 
   return (
     <div className="group rounded-lg border border-border/40 bg-card/40 p-3 transition-all duration-200 hover:border-border/70 hover:bg-card/70">
@@ -42,14 +43,14 @@ export function RepoResultCard({
           <Badge
             variant="secondary"
             className={`text-[10px] font-medium ${
-              matchPercent >= 70
+              score >= 0.6
                 ? "bg-primary/15 text-primary"
-                : matchPercent >= 40
+                : score >= 0.35
                   ? "bg-accent/15 text-accent"
                   : "bg-muted text-muted-foreground"
             }`}
           >
-            {matchPercent}%
+            {scoreBand} · {scoreText}
           </Badge>
         </div>
       </div>

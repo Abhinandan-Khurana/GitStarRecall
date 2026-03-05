@@ -1,4 +1,5 @@
 import type { ChunkRecord, RepoRecord } from "../db/types";
+import { chunkQualityScore } from "./quality";
 
 const SHORT_DOC_CHUNK_SIZE = 900;
 const MEDIUM_DOC_CHUNK_SIZE = 760;
@@ -7,6 +8,9 @@ const SHORT_DOC_OVERLAP = 140;
 const MEDIUM_DOC_OVERLAP = 110;
 const LONG_DOC_OVERLAP = 90;
 const MAX_README_LENGTH = 100_000;
+const LARGE_README_LENGTH = 30_000;
+const MAX_CHUNKS_FOR_LARGE_README = 120;
+const MIN_CHUNK_QUALITY_SCORE = 0.22;
 
 /**
  * Strip HTML tags, collapse runs of whitespace, and remove common markdown
@@ -122,6 +126,59 @@ function splitIntoChunks(text: string, size: number, overlap: number): string[] 
   return chunks;
 }
 
+function splitReadmeIntoSections(readme: string): string[] {
+  const normalizedLineEndings = readme.replace(/\r\n/g, "\n");
+  const parts = normalizedLineEndings
+    .split(/\n(?=#{1,6}\s)/g)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (parts.length === 0) {
+    return [normalizedLineEndings];
+  }
+  return parts;
+}
+
+function applyChunkBudget(windows: string[], combinedLength: number): string[] {
+  if (windows.length <= MAX_CHUNKS_FOR_LARGE_README || combinedLength < LARGE_README_LENGTH) {
+    return windows;
+  }
+
+  const scored = windows.map((text, index) => ({
+    text,
+    index,
+    score: chunkQualityScore(text),
+  }));
+  const mandatory = scored.filter((item) => item.index < 3);
+  const candidates = scored
+    .filter((item) => item.index >= 3)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const selected = [...mandatory];
+  for (const item of candidates) {
+    if (selected.length >= MAX_CHUNKS_FOR_LARGE_README) {
+      break;
+    }
+    if (item.score >= MIN_CHUNK_QUALITY_SCORE) {
+      selected.push(item);
+    }
+  }
+
+  if (selected.length < MAX_CHUNKS_FOR_LARGE_README) {
+    const fallback = scored
+      .filter((item) => !selected.some((existing) => existing.index === item.index))
+      .sort((a, b) => a.index - b.index);
+    for (const item of fallback) {
+      if (selected.length >= MAX_CHUNKS_FOR_LARGE_README) {
+        break;
+      }
+      selected.push(item);
+    }
+  }
+
+  selected.sort((a, b) => a.index - b.index);
+  return selected.map((item) => item.text);
+}
+
 /**
  * Produce `ChunkRecord[]` for a single repo. Combines metadata header with
  * normalized, truncated README text and splits into overlapping windows.
@@ -131,7 +188,8 @@ export function chunkRepo(repo: RepoRecord): ChunkRecord[] {
 
   let readmeBody = "";
   if (repo.readmeText) {
-    readmeBody = normalizeText(repo.readmeText);
+    const sectioned = splitReadmeIntoSections(repo.readmeText).join("\n\n");
+    readmeBody = normalizeText(sectioned);
     if (readmeBody.length > MAX_README_LENGTH) {
       readmeBody = readmeBody.slice(0, MAX_README_LENGTH);
     }
@@ -140,7 +198,7 @@ export function chunkRepo(repo: RepoRecord): ChunkRecord[] {
   const combined = readmeBody.length > 0 ? `${header}\n\n${readmeBody}` : header;
 
   const { size, overlap } = resolveChunkConfig(combined.length);
-  const windows = splitIntoChunks(combined, size, overlap);
+  const windows = applyChunkBudget(splitIntoChunks(combined, size, overlap), combined.length);
   const now = Date.now();
 
   return windows.map((text, index) => {

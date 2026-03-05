@@ -2,6 +2,9 @@ import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import wasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { DATABASE_SCHEMA_SQL } from "./schema";
 import { backupChatMessage, backupChatSession, clearChatBackup } from "./chatBackup";
+import { reciprocalRankFusion } from "../search/fusion";
+import { lexicalOverlapScore, countRareLikeTokens } from "../search/lexical";
+import { mmrSelect, type DenseCandidate } from "../search/rerank";
 import type {
   ChatMessageRecord,
   ChatSessionRecord,
@@ -542,7 +545,7 @@ function toSqlStringLiteral(value: string): string {
 
 function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   if (a.length !== b.length) {
-    return 0;
+    throw new Error(`Embedding dimension mismatch: ${a.length} vs ${b.length}`);
   }
 
   let dot = 0;
@@ -557,6 +560,43 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
+
+type SearchTuning = {
+  fetchK: number;
+  topK: number;
+  mmrLambda: number;
+  maxChunksPerRepo: number;
+  lexicalTop1Threshold: number;
+  lexicalTop5MeanThreshold: number;
+};
+
+type SearchDiagnostics = {
+  queryDim: number;
+  sampledIndexDims: number[];
+  fetchK: number;
+  topK: number;
+  mmrLambda: number;
+  maxChunksPerRepo: number;
+  denseSuspicious: boolean;
+  lexicalTriggered: boolean;
+  lexicalTriggerReason: string | null;
+  denseTopScores: number[];
+};
+
+type SearchOptions = {
+  tuning?: Partial<SearchTuning>;
+  queryText?: string;
+  onDiagnostics?: (payload: SearchDiagnostics) => void;
+};
+
+const DEFAULT_SEARCH_TUNING: SearchTuning = {
+  fetchK: 150,
+  topK: 20,
+  mmrLambda: 0.72,
+  maxChunksPerRepo: 2,
+  lexicalTop1Threshold: 0.22,
+  lexicalTop5MeanThreshold: 0.18,
+};
 
 export class LocalDatabase {
   private sql: SqlJsStatic;
@@ -622,33 +662,30 @@ export class LocalDatabase {
     return this.vectorIndexCache;
   }
 
-  async findSimilarChunks(queryVector: Float32Array, limit: number = 10): Promise<SearchResult[]> {
-    // 1. Use in-memory cache of decoded embedding vectors for repeated queries.
-    const vectors = this.ensureVectorIndexCache();
-    if (vectors.length === 0) {
-      return [];
+  private normalizeSearchTuning(limit: number, overrides?: Partial<SearchTuning>): SearchTuning {
+    const fallbackTopK = Math.max(1, Math.trunc(limit));
+    const topK = normalizePositiveInt(overrides?.topK, fallbackTopK);
+    return {
+      fetchK: normalizePositiveInt(overrides?.fetchK, Math.max(DEFAULT_SEARCH_TUNING.fetchK, topK * 6)),
+      topK,
+      mmrLambda: Number.isFinite(overrides?.mmrLambda)
+        ? Math.max(0, Math.min(1, Number(overrides?.mmrLambda)))
+        : DEFAULT_SEARCH_TUNING.mmrLambda,
+      maxChunksPerRepo: normalizePositiveInt(overrides?.maxChunksPerRepo, DEFAULT_SEARCH_TUNING.maxChunksPerRepo),
+      lexicalTop1Threshold: Number.isFinite(overrides?.lexicalTop1Threshold)
+        ? Number(overrides?.lexicalTop1Threshold)
+        : DEFAULT_SEARCH_TUNING.lexicalTop1Threshold,
+      lexicalTop5MeanThreshold: Number.isFinite(overrides?.lexicalTop5MeanThreshold)
+        ? Number(overrides?.lexicalTop5MeanThreshold)
+        : DEFAULT_SEARCH_TUNING.lexicalTop5MeanThreshold,
+    };
+  }
+
+  private hydrateChunkDetails(chunkIds: string[]): Map<string, Omit<SearchResult, "chunkId" | "score">> {
+    if (chunkIds.length === 0) {
+      return new Map();
     }
-    const scores: { chunkId: string; score: number }[] = [];
-
-    // 2. Compute similarity
-    for (const entry of vectors) {
-      const { chunkId, vector } = entry;
-      const score = cosineSimilarity(queryVector, vector);
-      scores.push({ chunkId, score });
-    }
-
-    // 3. Sort and slice
-    scores.sort((a, b) => b.score - a.score);
-    const topChunks = scores.slice(0, limit);
-
-    if (topChunks.length === 0) {
-      return [];
-    }
-
-    // 4. Hydrate with text and repo info.
-    // Use SQL literals instead of bind params because some browser/sql.js environments
-    // in this app have shown unstable bind behavior (NULL coercion).
-    const chunkIdLiterals = topChunks.map((item) => toSqlStringLiteral(item.chunkId)).join(",");
+    const chunkIdLiterals = chunkIds.map((item) => toSqlStringLiteral(item)).join(",");
     const detailsResult = this.db.exec(`
       SELECT
         c.id,
@@ -665,42 +702,196 @@ export class LocalDatabase {
       JOIN repos r ON c.repo_id = r.id
       WHERE c.id IN (${chunkIdLiterals})
     `);
-
     if (detailsResult.length === 0) {
-      return [];
+      return new Map();
     }
 
-    const detailsMap = new Map<
-      string,
-      Omit<SearchResult, "chunkId" | "score">
-    >();
-    const [detailsTable] = detailsResult;
-    for (const row of detailsTable.values) {
-      detailsMap.set(String(row[0]), {
+    const map = new Map<string, Omit<SearchResult, "chunkId" | "score">>();
+    const [table] = detailsResult;
+    for (const row of table.values) {
+      map.set(String(row[0]), {
         text: String(row[1]),
         repoId: Number(row[2]),
         repoName: String(row[3]),
         repoFullName: String(row[4]),
-        repoDescription: row[5] ? String(row[5]) : null,
+        repoDescription: row[5] == null ? null : String(row[5]),
         repoUrl: String(row[6]),
         language: row[7] == null ? null : String(row[7]),
         topics: JSON.parse(String(row[8] ?? "[]")) as string[],
         updatedAt: String(row[9]),
       });
     }
+    return map;
+  }
 
-    // 5. Construct final result preserving score order
-    return topChunks
-      .map((tc) => {
-        const details = detailsMap.get(tc.chunkId);
-        if (!details) return null;
+  private computeLexicalCandidates(queryText: string, fetchK: number): Array<{ chunkId: string; score: number }> {
+    const rows = this.db.exec(`
+      SELECT c.id, c.text
+      FROM chunks c
+      ORDER BY c.created_at DESC
+      LIMIT 4000;
+    `);
+    if (rows.length === 0) {
+      return [];
+    }
+    const [table] = rows;
+    const scored: Array<{ chunkId: string; score: number }> = [];
+    for (const row of table.values) {
+      const chunkId = String(row[0]);
+      const text = String(row[1] ?? "");
+      const score = lexicalOverlapScore(queryText, text);
+      if (score > 0) {
+        scored.push({ chunkId, score });
+      }
+    }
+    scored.sort((a, b) => b.score - a.score || a.chunkId.localeCompare(b.chunkId));
+    return scored.slice(0, Math.max(20, Math.trunc(fetchK / 2)));
+  }
+
+  private shouldTriggerLexicalSafetyNet(params: {
+    denseTopScores: number[];
+    uniqueRepoCountTop20: number;
+    queryText: string;
+    tuning: SearchTuning;
+  }): { trigger: boolean; reason: string | null } {
+    const top1 = params.denseTopScores[0] ?? 0;
+    const top5 = params.denseTopScores.slice(0, 5);
+    const top5Mean = top5.length === 0 ? 0 : top5.reduce((sum, value) => sum + value, 0) / top5.length;
+    if (top1 < params.tuning.lexicalTop1Threshold) {
+      return { trigger: true, reason: "low_top1" };
+    }
+    if (top5Mean < params.tuning.lexicalTop5MeanThreshold) {
+      return { trigger: true, reason: "low_top5_mean" };
+    }
+    if (params.uniqueRepoCountTop20 < 6) {
+      return { trigger: true, reason: "low_repo_diversity" };
+    }
+    if (countRareLikeTokens(params.queryText) >= 2) {
+      return { trigger: true, reason: "rare_token_query" };
+    }
+    return { trigger: false, reason: null };
+  }
+
+  async findSimilarChunks(queryVector: Float32Array, limit: number = 10, options?: SearchOptions): Promise<SearchResult[]> {
+    const tuning = this.normalizeSearchTuning(limit, options?.tuning);
+    const vectors = this.ensureVectorIndexCache();
+    if (vectors.length === 0) {
+      return [];
+    }
+
+    const sampledIndexDims: number[] = [];
+    const dimSet = new Set<number>();
+    for (let i = 0; i < vectors.length; i += 1) {
+      const dim = vectors[i]?.vector.length ?? 0;
+      dimSet.add(dim);
+      if (sampledIndexDims.length < 12) {
+        sampledIndexDims.push(dim);
+      }
+    }
+    if (dimSet.size > 1) {
+      throw new Error(`Index has mixed embedding dimensions: ${Array.from(dimSet).join(", ")}. Re-index required.`);
+    }
+    const onlyDim = sampledIndexDims[0] ?? 0;
+    if (onlyDim > 0 && queryVector.length !== onlyDim) {
+      throw new Error(
+        `Embedding dimension mismatch (query=${queryVector.length}, index=${onlyDim}). Use same model and rebuild embeddings.`,
+      );
+    }
+
+    const vectorByChunkId = new Map<string, Float32Array>();
+    const denseScores: Array<{ chunkId: string; score: number }> = [];
+    for (const entry of vectors) {
+      vectorByChunkId.set(entry.chunkId, entry.vector);
+      denseScores.push({
+        chunkId: entry.chunkId,
+        score: cosineSimilarity(queryVector, entry.vector),
+      });
+    }
+
+    denseScores.sort((a, b) => b.score - a.score || a.chunkId.localeCompare(b.chunkId));
+    const denseTop = denseScores.slice(0, tuning.fetchK);
+    const denseTopChunkIds = denseTop.map((item) => item.chunkId);
+    const detailsMap = this.hydrateChunkDetails(denseTopChunkIds);
+
+    const denseTopScores = denseTop.slice(0, 5).map((item) => item.score);
+    const uniqueRepoTop20 = new Set(
+      denseTop
+        .slice(0, 20)
+        .map((item) => detailsMap.get(item.chunkId)?.repoId)
+        .filter((value): value is number => value != null),
+    ).size;
+
+    const queryText = options?.queryText?.trim() ?? "";
+    const lexicalDecision = queryText
+      ? this.shouldTriggerLexicalSafetyNet({
+          denseTopScores,
+          uniqueRepoCountTop20: uniqueRepoTop20,
+          queryText,
+          tuning,
+        })
+      : { trigger: false, reason: null };
+
+    let candidateOrder = denseTop.map((item) => item.chunkId);
+    if (lexicalDecision.trigger && queryText) {
+      const lexical = this.computeLexicalCandidates(queryText, tuning.fetchK);
+      const fused = reciprocalRankFusion([
+        denseTop.map((item) => ({ id: item.chunkId })),
+        lexical.map((item) => ({ id: item.chunkId })),
+      ]);
+      candidateOrder = fused.slice(0, tuning.fetchK).map((item) => item.id);
+    }
+
+    const denseScoreById = new Map(denseTop.map((item) => [item.chunkId, item.score]));
+    const candidates: DenseCandidate[] = [];
+    for (const chunkId of candidateOrder) {
+      const details = detailsMap.get(chunkId);
+      const vector = vectorByChunkId.get(chunkId);
+      if (!details || !vector) {
+        continue;
+      }
+      candidates.push({
+        chunkId,
+        repoId: details.repoId,
+        vector,
+        denseScore: denseScoreById.get(chunkId) ?? 0,
+      });
+    }
+
+    const ranked = mmrSelect({
+      candidates,
+      topK: tuning.topK,
+      lambda: tuning.mmrLambda,
+      maxChunksPerRepo: tuning.maxChunksPerRepo,
+    });
+
+    const diagnostics: SearchDiagnostics = {
+      queryDim: queryVector.length,
+      sampledIndexDims,
+      fetchK: tuning.fetchK,
+      topK: tuning.topK,
+      mmrLambda: tuning.mmrLambda,
+      maxChunksPerRepo: tuning.maxChunksPerRepo,
+      denseSuspicious: lexicalDecision.trigger,
+      lexicalTriggered: lexicalDecision.trigger,
+      lexicalTriggerReason: lexicalDecision.reason,
+      denseTopScores,
+    };
+    options?.onDiagnostics?.(diagnostics);
+
+    return ranked
+      .map((item) => {
+        const details = detailsMap.get(item.chunkId);
+        if (!details) {
+          return null;
+        }
         return {
-          chunkId: tc.chunkId,
-          score: tc.score,
+          chunkId: item.chunkId,
+          score: item.score,
           ...details,
         };
       })
-      .filter((item): item is SearchResult => item !== null);
+      .filter((item): item is SearchResult => item !== null)
+      .slice(0, tuning.topK);
   }
 
   private async persist(): Promise<void> {
@@ -982,6 +1173,24 @@ export class LocalDatabase {
     }
 
     return Number(result[0].values[0][0]);
+  }
+
+  getDominantEmbeddingModel(): string | null {
+    const result = this.db.exec(`
+      SELECT model, COUNT(*) AS count
+      FROM embeddings
+      WHERE TRIM(COALESCE(model, '')) <> ''
+      GROUP BY model
+      ORDER BY count DESC, model ASC
+      LIMIT 1;
+    `);
+
+    if (result.length === 0 || result[0].values.length === 0) {
+      return null;
+    }
+
+    const model = result[0].values[0]?.[0];
+    return model == null ? null : String(model);
   }
 
   async clearEmbeddings(): Promise<void> {
