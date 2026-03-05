@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { deriveSyncProgressState } from "./syncProgress";
 
 interface IndexingStatus {
   phase: string;
@@ -67,10 +68,15 @@ export function SyncStatusBar({
   const hasContent = indexingStatus || starsSummary || dbStorageMode;
   if (!hasContent && historyLoadState === "idle") return null;
 
-  const embeddingProgress =
-    indexingStatus && indexingStatus.embeddingTarget > 0
-      ? (indexingStatus.embeddingsCreated / indexingStatus.embeddingTarget) * 100
-      : 0;
+  const {
+    embeddingTarget,
+    embeddingsCreated,
+    embeddingProgress,
+    readmeProgress,
+    hasReadmeProgress,
+    hasEmbeddingProgress,
+    embeddingInitializing,
+  } = deriveSyncProgressState(indexingStatus, embeddingRunMetrics);
 
   return (
     <div className="animate-fade-in space-y-2">
@@ -89,17 +95,30 @@ export function SyncStatusBar({
             </span>
           </div>
 
-          {indexingStatus.embeddingTarget > 0 && (
-            <div className="space-y-1">
-              <Progress value={embeddingProgress} />
-              <div className="flex justify-between text-[11px] text-muted-foreground">
-                <span>
-                  Embeddings: {indexingStatus.embeddingsCreated} / {indexingStatus.embeddingTarget}
-                </span>
-                <span>
-                  READMEs: {indexingStatus.readmesCompleted} / {indexingStatus.readmesTarget}
-                </span>
-              </div>
+          {(hasReadmeProgress || hasEmbeddingProgress || embeddingInitializing) && (
+            <div className="space-y-2">
+              {hasReadmeProgress && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[11px] text-muted-foreground">
+                    <span>
+                      READMEs: {indexingStatus.readmesCompleted} / {indexingStatus.readmesTarget}
+                    </span>
+                  </div>
+                  <Progress value={readmeProgress} />
+                </div>
+              )}
+              {(hasEmbeddingProgress || embeddingInitializing) && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[11px] text-muted-foreground">
+                    <span>
+                      {hasEmbeddingProgress
+                        ? `Embeddings: ${Math.min(embeddingsCreated, embeddingTarget)} / ${embeddingTarget}`
+                        : "Embeddings: initializing…"}
+                    </span>
+                  </div>
+                  <Progress value={embeddingProgress} indeterminate={embeddingInitializing} />
+                </div>
+              )}
             </div>
           )}
 

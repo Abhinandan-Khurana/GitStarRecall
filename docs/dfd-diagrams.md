@@ -21,11 +21,18 @@ flowchart LR
     Sync[Stars Sync Engine]
     Orchestrator[Embedding Orchestrator]
     Pool[Embedding Worker Pool]
+    CapProbe[Browser Capability Probe]
     Selector["Backend Selector (WebGPU/WASM)"]
     Checkpoint[Checkpoint Writer]
     DB[(SQLite WASM + sqlite-vec)]
     Chat[Chat Session Store]
     Query[Query + RAG]
+    Dense[Dense Retrieval fetchK]
+    Gate[Dense Confidence Gate]
+    Lex[Lexical Safety Net conditional]
+    Fuse[Fusion RRF conditional]
+    Diversify[MMR + Repo Cap]
+    Diag[Diagnostics Logger local]
   end
 
   subgraph TB2["TB2: GitHub API"]
@@ -49,6 +56,8 @@ flowchart LR
   Sync -->|Stars/README| GH
   Sync -->|Repo/README| DB
   Sync -->|Chunks| Orchestrator
+  Orchestrator --> CapProbe
+  CapProbe -->|model candidates| Pool
   Orchestrator --> Selector
   Orchestrator --> Pool
   Pool -->|Embeddings| DB
@@ -56,7 +65,14 @@ flowchart LR
   Checkpoint --> DB
   Selector -->|runtime choice| Pool
   Pool -->|model download| ModelCDN
-  Query -->|KNN + Filters| DB
+  Query --> Dense
+  Dense --> Gate
+  Gate -->|healthy| Diversify
+  Gate -.->|suspicious| Lex
+  Lex -.-> Fuse
+  Fuse --> Diversify
+  Diversify -->|KNN + Filters| DB
+  Diversify --> Diag
   UI --> Query
   Query --> Chat
   Query -.->|Top-K Context opt-in| LLM
@@ -75,13 +91,18 @@ flowchart TD
   Auth2 --> Token[Token in memory or encrypted store]
 
   UI2 --> Sync2[Sync Manager]
+  UI2 --> CapUI["Embedding Capability UI (diagnostics)"]
   Sync2 --> GH2[GitHub API]
   GH2 --> Sync2
   Sync2 --> Checksum[Checksum Compute]
   Checksum --> RepoStore[(SQLite: repos)]
   GH2 --> Readme[README Fetch]
-  Readme --> Chunker["Chunk + Normalize"]
-  Chunker --> Orchestrator2[Embedding Orchestrator]
+  Readme --> Chunker["Chunk + Normalize + Quality Filter"]
+  Chunker --> ProfileFmt["Retrieval Profile Formatter"]
+  ProfileFmt --> CapProbe2["Browser Capability Probe + Model Candidate Order"]
+  CapProbe2 --> Orchestrator2
+  ProfileFmt --> Orchestrator2
+  Orchestrator2[Embedding Orchestrator]
   Orchestrator2 --> Selector2[Backend Selector]
   Orchestrator2 --> Pool2[Worker Pool]
   Pool2 --> VecStore[(SQLite vec0)]
@@ -90,10 +111,21 @@ flowchart TD
   Pool2 --> ModelCDN2["Model CDN/HF"]
 
   UI2 --> Query2[Query Engine]
-  Query2 --> VecStore
+  Query2 --> Guard["Dimension Compatibility Guard"]
+  Guard --> Dense2["Dense Candidate Retrieval fetchK"]
+  Dense2 --> Confidence2["Dense Confidence Check"]
+  Confidence2 -->|healthy| Rerank2["MMR + Per-Repo Cap"]
+  Confidence2 -.->|suspicious| Lex2["Lexical Safety Net"]
+  Lex2 -.-> Fuse2["RRF Fusion"]
+  Fuse2 --> Rerank2
+  Rerank2 --> VecStore
   Query2 --> RepoStore
   Query2 --> SessionStore[(SQLite: chat_sessions)]
   Query2 --> MessageStore[(SQLite: chat_messages)]
+  UI2 --> CustomWarn["Custom Model Warning Path"]
+  UI2 --> SudoToggle["Developer Advanced Mode Toggle + Warning"]
+  SudoToggle --> Query2
+  CustomWarn --> Query2
 
   Query2 -.-> RemoteLLM["Remote LLM (opt-in)"]
   Query2 -.-> LocalLLM2["Local LLM (opt-in)"]

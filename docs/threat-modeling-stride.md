@@ -12,7 +12,9 @@ In scope:
 - Embeddings and vector index
 - Embedding model artifacts downloaded at runtime (browser cache)
 - Embedding runtime selection state (`webgpu` / `wasm`) and performance diagnostics
+- Browser embedding capability recommendation state (mobile/webgpu/cores/memory/perf probe)
 - Optional local Ollama embedding endpoint configuration (`localhost` only)
+- Developer advanced-mode (`sudo`) retrieval tuning state (scoped local persistence)
 - Optional Browser WebLLM model runtime and downloaded model artifacts
 - Chat sessions and messages
 - User queries
@@ -48,6 +50,7 @@ Threats:
 - Injected README content leading to unsafe output.
 - Model artifact tampering via untrusted CDN or MITM.
 - Queue/scheduler state tampering causing dropped chunks.
+- Runtime script load blocked by CSP drift (ORT module load failure).
 
 Mitigations:
 - Sanitize README rendering.
@@ -56,6 +59,7 @@ Mitigations:
 - Use write operations only through controlled code paths.
 - Pin model source hosts and versions where possible.
 - Restrict CSP `connect-src` to required model artifact hosts only.
+- Restrict CSP `script-src` to required runtime module hosts (including jsDelivr for ORT JSEP).
 - Add end-to-end embedding count reconciliation (`chunks_pending + embeddings_created`).
 
 ### R - Repudiation
@@ -113,6 +117,7 @@ Threats:
 - Browser origin accidentally gains unintended access to privileged local runtime endpoints.
 - Browser model runtime unsupported/failing causes repeated initialization attempts.
 - Capability probe misclassification can force unnecessarily weak local model selection on strong desktops.
+- Unsafe advanced retrieval tuning can degrade quality/latency if accidentally enabled.
 
 Mitigations:
 - Use minimal GitHub scopes or fine-grained PAT.
@@ -120,6 +125,7 @@ Mitigations:
 - Keep browser embedding path default; local Ollama runtime integration remains explicit and isolated.
 - Add deterministic fallback chain when WebLLM fails to avoid repeated hard-fail loops.
 - Use tolerant recommendation heuristics for missing browser capability hints (e.g., Safari/macOS memory hints), plus threshold anti-flap behavior.
+- Keep advanced tuning behind explicit developer checkbox + warning banner and bounded setting ranges.
 
 ---
 
@@ -133,6 +139,7 @@ Mapped requirements:
 - Checksums for sync integrity.
 - Worker-pool and batch-size guardrails.
 - Backend fallback policy (`webgpu` -> `wasm`) with telemetry.
+- Capability-based browser embedding model recommendation with mobile-safe fallback.
 
 ---
 
@@ -187,3 +194,29 @@ Mapped requirements:
 - Worker pool pressure tests (queue growth, memory behavior).
 - Checkpoint durability tests (forced reload before/after checkpoint).
 - WebGPU failure injection and fallback correctness tests.
+
+---
+
+## 7) Retrieval v2 Threat Delta (2026-03-05)
+
+New/changed components:
+
+- Dense confidence gate in query-time retrieval.
+- Conditional lexical safety-net branch.
+- Conditional RRF fusion stage.
+- MMR + per-repo cap reranking stage.
+- Advanced retrieval tuning controls (sudo mode).
+- Retrieval diagnostics payload (dimensions, trigger reasons, top-score summary).
+
+Threat notes:
+
+- Misconfigured tuning can increase latency or reduce relevance quality.
+- Incompatible custom embedding model assumptions can degrade retrieval quality.
+- Overly verbose diagnostics could expose sensitive content if not sanitized.
+
+Mitigations:
+
+- Clamp tuning ranges and provide safe defaults.
+- Enforce strict query/index dimension compatibility checks.
+- Show explicit warning for custom model path.
+- Keep diagnostics text-free by default (IDs, counts, dimensions, scores only).

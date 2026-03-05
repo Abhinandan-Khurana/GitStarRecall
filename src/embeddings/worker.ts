@@ -1,50 +1,110 @@
-
-import { pipeline, type FeatureExtractionPipeline, type PipelineType } from "@xenova/transformers";
-import { executionProviders } from "@xenova/transformers/src/backends/onnx.js";
+import { pipeline, type FeatureExtractionPipeline, type PipelineType } from "@huggingface/transformers";
 import {
   type EmbeddingBackendPreference,
   normalizeUnknownError,
   probeWebGpuSupport,
   resolvePreferredBackend,
 } from "./backendSelection";
+import {
+  BROWSER_EMBEDDING_FALLBACK_MODEL,
+  DEFAULT_BROWSER_EMBEDDING_MODEL,
+} from "./retrievalProfile";
+import { resolveEmbeddingPooling } from "./poolingProfile";
 
 // Skip local model checks since we are running in the browser
-import { env } from "@xenova/transformers";
+import { env } from "@huggingface/transformers";
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
 class EmbeddingPipeline {
   static task: PipelineType = "feature-extraction";
-  static model = "Xenova/all-MiniLM-L6-v2";
+  static defaultModelCandidates: Array<{ model: string; dtype: "q8" }> = [
+    { model: DEFAULT_BROWSER_EMBEDDING_MODEL, dtype: "q8" },
+    { model: BROWSER_EMBEDDING_FALLBACK_MODEL, dtype: "q8" },
+  ];
   static preferredBackend: EmbeddingBackendPreference | null = null;
+  static modelCandidatesKey: string | null = null;
   static selectedBackend: EmbeddingBackendPreference | null = null;
+  static selectedModel: string | null = null;
   static fallbackReason: string | null = null;
   static instance: Promise<FeatureExtractionPipeline> | null = null;
 
-  static setExecutionProvider(backend: EmbeddingBackendPreference) {
-    executionProviders.splice(0, executionProviders.length, backend);
+  static buildModelCandidates(overrideModels: string[] | undefined): Array<{ model: string; dtype: "q8" }> {
+    if (!overrideModels || overrideModels.length === 0) {
+      return this.defaultModelCandidates;
+    }
+    const normalized = overrideModels
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+      .map((model) => ({ model, dtype: "q8" as const }));
+    return normalized.length > 0 ? normalized : this.defaultModelCandidates;
   }
 
-  static async initWithBackend(backend: EmbeddingBackendPreference) {
-    this.setExecutionProvider(backend);
-    return (pipeline(this.task, this.model, {
-      quantized: true,
-    }) as unknown) as Promise<FeatureExtractionPipeline>;
+  static getModelCandidatesKey(overrideModels: string[] | undefined): string {
+    const candidates = this.buildModelCandidates(overrideModels);
+    return candidates.map((item) => `${item.model}|${item.dtype}`).join("::");
   }
 
-  static async getInstance(preferredBackend: EmbeddingBackendPreference) {
-    if (this.instance !== null && this.preferredBackend === preferredBackend) {
+  static getUniqueModelCandidates(overrideModels: string[] | undefined): Array<{ model: string; dtype: "q8" }> {
+    const seen = new Set<string>();
+    const unique: Array<{ model: string; dtype: "q8" }> = [];
+    for (const candidate of this.buildModelCandidates(overrideModels)) {
+      const normalizedModel = candidate.model.trim();
+      const key = `${normalizedModel}|${candidate.dtype}`;
+      if (!normalizedModel || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      unique.push({
+        model: normalizedModel,
+        dtype: candidate.dtype,
+      });
+    }
+    return unique;
+  }
+
+  static async initWithBackend(backend: EmbeddingBackendPreference, overrideModels: string[] | undefined) {
+    const candidates = this.getUniqueModelCandidates(overrideModels);
+    const errors: string[] = [];
+    for (const candidate of candidates) {
+      try {
+        const instance = (await ((pipeline(this.task, candidate.model, {
+          device: backend,
+          dtype: candidate.dtype,
+        }) as unknown) as Promise<FeatureExtractionPipeline>));
+        this.selectedModel = candidate.model;
+        return instance;
+      } catch (error) {
+        const mode = candidate.dtype;
+        errors.push(`${candidate.model} (${mode}): ${normalizeUnknownError(error)}`);
+      }
+    }
+    const fallbackDetails = errors[errors.length - 1] ?? "unknown initialization error";
+    throw new Error(
+      `No compatible browser embedding model could be loaded (${backend}). Last failure: ${fallbackDetails}`,
+    );
+  }
+
+  static async getInstance(preferredBackend: EmbeddingBackendPreference, overrideModels: string[] | undefined) {
+    const nextCandidatesKey = this.getModelCandidatesKey(overrideModels);
+    if (
+      this.instance !== null &&
+      this.preferredBackend === preferredBackend &&
+      this.modelCandidatesKey === nextCandidatesKey
+    ) {
       return this.instance;
     }
 
     this.preferredBackend = preferredBackend;
+    this.modelCandidatesKey = nextCandidatesKey;
     this.selectedBackend = null;
+    this.selectedModel = null;
     this.fallbackReason = null;
 
     const loader = (async () => {
       if (preferredBackend === "wasm") {
         this.selectedBackend = "wasm";
-        return this.initWithBackend("wasm");
+        return this.initWithBackend("wasm", overrideModels);
       }
 
       const probe = await probeWebGpuSupport(
@@ -55,16 +115,16 @@ class EmbeddingPipeline {
       if (resolved.backend === "wasm") {
         this.selectedBackend = "wasm";
         this.fallbackReason = resolved.fallbackReason;
-        return this.initWithBackend("wasm");
+        return this.initWithBackend("wasm", overrideModels);
       }
 
       try {
         this.selectedBackend = "webgpu";
-        return await this.initWithBackend("webgpu");
+        return await this.initWithBackend("webgpu", overrideModels);
       } catch (error) {
         this.selectedBackend = "wasm";
         this.fallbackReason = `webgpu init failed: ${normalizeUnknownError(error)}`;
-        return this.initWithBackend("wasm");
+        return this.initWithBackend("wasm", overrideModels);
       }
     })();
 
@@ -74,6 +134,8 @@ class EmbeddingPipeline {
     } catch (error) {
       this.instance = null;
       this.selectedBackend = null;
+      this.selectedModel = null;
+      this.modelCandidatesKey = null;
       if (!this.fallbackReason) {
         this.fallbackReason = normalizeUnknownError(error);
       }
@@ -153,23 +215,26 @@ function normalizeBatchOutput(output: unknown, expectedItems: number): Array<Flo
 }
 
 self.addEventListener("message", async (event) => {
-  const { id, texts, text, preferredBackend } = event.data as {
+  const { id, texts, text, preferredBackend, modelCandidates } = event.data as {
     id: string;
     texts?: string[];
     text?: string;
     preferredBackend?: EmbeddingBackendPreference;
+    modelCandidates?: string[];
   };
   const batchTexts = Array.isArray(texts) ? texts : text != null ? [text] : [];
   const preferred = preferredBackend === "wasm" ? "wasm" : "webgpu";
+  const preferredModels = Array.isArray(modelCandidates) ? modelCandidates : undefined;
 
   try {
-    const pipe = await EmbeddingPipeline.getInstance(preferred);
+    const pipe = await EmbeddingPipeline.getInstance(preferred, preferredModels);
+    const pooling = resolveEmbeddingPooling(EmbeddingPipeline.selectedModel);
 
     const embeddings: Array<Float32Array | null> = Array.from({ length: batchTexts.length }, () => null);
     const errors: Array<string | null> = Array.from({ length: batchTexts.length }, () => null);
 
     try {
-      const batchOutput = await pipe(batchTexts, { pooling: "mean", normalize: true });
+      const batchOutput = await pipe(batchTexts, { pooling, normalize: true });
       const normalized = normalizeBatchOutput(batchOutput, batchTexts.length);
       if (!normalized) {
         throw new Error("invalid batched embedding output shape");
@@ -181,7 +246,7 @@ self.addEventListener("message", async (event) => {
       for (let i = 0; i < batchTexts.length; i += 1) {
         const itemText = batchTexts[i];
         try {
-          const output = await pipe(itemText, { pooling: "mean", normalize: true });
+          const output = await pipe(itemText, { pooling, normalize: true });
           const normalized = normalizeBatchOutput(output, 1);
           embeddings[i] = normalized?.[0] ?? null;
         } catch (itemError) {
@@ -201,6 +266,7 @@ self.addEventListener("message", async (event) => {
       embeddings,
       errors,
       selectedBackend: EmbeddingPipeline.selectedBackend,
+      selectedModel: EmbeddingPipeline.selectedModel,
       fallbackReason: EmbeddingPipeline.fallbackReason,
     });
   } catch (error) {
@@ -209,6 +275,7 @@ self.addEventListener("message", async (event) => {
       id,
       error: normalizeUnknownError(error),
       selectedBackend: EmbeddingPipeline.selectedBackend,
+      selectedModel: EmbeddingPipeline.selectedModel,
       fallbackReason: EmbeddingPipeline.fallbackReason,
     });
   }

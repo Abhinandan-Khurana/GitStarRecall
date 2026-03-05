@@ -1,6 +1,7 @@
 import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import SafeMarkdown from "./SafeMarkdown";
+import { clampResultScoreForDisplay, getResultScoreBand } from "./repoResultScore";
 
 interface RepoResultCardProps {
   chunkId: string;
@@ -22,7 +23,9 @@ export function RepoResultCard({
   score,
   text,
 }: RepoResultCardProps) {
-  const matchPercent = Math.round(score * 100);
+  const displayScore = clampResultScoreForDisplay(score);
+  const scoreBand = getResultScoreBand(displayScore);
+  const scoreText = displayScore.toFixed(3);
 
   return (
     <div className="group rounded-lg border border-border/40 bg-card/40 p-3 transition-all duration-200 hover:border-border/70 hover:bg-card/70">
@@ -42,14 +45,14 @@ export function RepoResultCard({
           <Badge
             variant="secondary"
             className={`text-[10px] font-medium ${
-              matchPercent >= 70
+              displayScore >= 0.6
                 ? "bg-primary/15 text-primary"
-                : matchPercent >= 40
+                : displayScore >= 0.35
                   ? "bg-accent/15 text-accent"
                   : "bg-muted text-muted-foreground"
             }`}
           >
-            {matchPercent}%
+            {scoreBand} · {scoreText}
           </Badge>
         </div>
       </div>

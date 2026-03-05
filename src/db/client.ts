@@ -2,6 +2,10 @@ import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import wasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { DATABASE_SCHEMA_SQL } from "./schema";
 import { backupChatMessage, backupChatSession, clearChatBackup } from "./chatBackup";
+import { reciprocalRankFusion } from "../search/fusion";
+import { lexicalOverlapScore, countRareLikeTokens } from "../search/lexical";
+import { mmrSelect, type DenseCandidate } from "../search/rerank";
+import { cosineSimilaritySafe } from "../search/vectorMath";
 import type {
   ChatMessageRecord,
   ChatSessionRecord,
@@ -26,6 +30,8 @@ type EmbeddingCheckpointPolicy = {
   everyEmbeddings: number;
   everyMs: number;
 };
+
+type SqlRowValue = string | number | Uint8Array | null;
 
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -540,23 +546,83 @@ function toSqlStringLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-  if (a.length !== b.length) {
-    return 0;
-  }
-
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
+
+function stablePositiveHash(input: string): number {
+  let hash = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash * 31 + input.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+type SearchTuning = {
+  fetchK: number;
+  topK: number;
+  mmrLambda: number;
+  maxChunksPerRepo: number;
+  lexicalTop1Threshold: number;
+  lexicalTop5MeanThreshold: number;
+  lexicalHighConfidenceBypassTop1: number;
+};
+
+type LexicalTriggerReason =
+  | "low_top1"
+  | "low_top5_mean"
+  | "low_repo_diversity"
+  | "rare_token_query";
+
+type SearchDiagnostics = {
+  queryDim: number;
+  sampledIndexDims: number[];
+  fetchK: number;
+  topK: number;
+  mmrLambda: number;
+  maxChunksPerRepo: number;
+  denseSuspicious: boolean;
+  lexicalTriggered: boolean;
+  lexicalTriggerReason: LexicalTriggerReason | null;
+  denseTopScores: number[];
+  lexicalScanLimit: number;
+  lexicalPoolRecentCount: number;
+  lexicalPoolBroadCount: number;
+  lexicalPoolOldestCount: number;
+  lexicalPoolDedupedCount: number;
+  corpusRepoCount: number;
+  corpusChunkCount: number;
+  rerankVectorMismatchPairs: number;
+  rerankCapOverrideCount: number;
+};
+
+type SearchOptions = {
+  tuning?: Partial<SearchTuning>;
+  queryText?: string;
+  onDiagnostics?: (payload: SearchDiagnostics) => void;
+};
+
+type SearchResultDetails = {
+  text: string;
+  repoId: number;
+  repoName: string;
+  repoFullName: string;
+  repoDescription: string | null;
+  repoUrl: string;
+  language: string | null;
+  topics: string[];
+  updatedAt: string;
+};
+
+const DEFAULT_SEARCH_TUNING: SearchTuning = {
+  fetchK: 150,
+  topK: 20,
+  mmrLambda: 0.72,
+  maxChunksPerRepo: 2,
+  lexicalTop1Threshold: 0.22,
+  lexicalTop5MeanThreshold: 0.18,
+  lexicalHighConfidenceBypassTop1: 0.8,
+};
 
 export class LocalDatabase {
   private sql: SqlJsStatic;
@@ -622,33 +688,33 @@ export class LocalDatabase {
     return this.vectorIndexCache;
   }
 
-  async findSimilarChunks(queryVector: Float32Array, limit: number = 10): Promise<SearchResult[]> {
-    // 1. Use in-memory cache of decoded embedding vectors for repeated queries.
-    const vectors = this.ensureVectorIndexCache();
-    if (vectors.length === 0) {
-      return [];
+  private normalizeSearchTuning(limit: number, overrides?: Partial<SearchTuning>): SearchTuning {
+    const fallbackTopK = Math.max(1, Math.trunc(limit));
+    const topK = normalizePositiveInt(overrides?.topK, fallbackTopK);
+    return {
+      fetchK: normalizePositiveInt(overrides?.fetchK, Math.max(DEFAULT_SEARCH_TUNING.fetchK, topK * 6)),
+      topK,
+      mmrLambda: Number.isFinite(overrides?.mmrLambda)
+        ? Math.max(0, Math.min(1, Number(overrides?.mmrLambda)))
+        : DEFAULT_SEARCH_TUNING.mmrLambda,
+      maxChunksPerRepo: normalizePositiveInt(overrides?.maxChunksPerRepo, DEFAULT_SEARCH_TUNING.maxChunksPerRepo),
+      lexicalTop1Threshold: Number.isFinite(overrides?.lexicalTop1Threshold)
+        ? Number(overrides?.lexicalTop1Threshold)
+        : DEFAULT_SEARCH_TUNING.lexicalTop1Threshold,
+      lexicalTop5MeanThreshold: Number.isFinite(overrides?.lexicalTop5MeanThreshold)
+        ? Number(overrides?.lexicalTop5MeanThreshold)
+        : DEFAULT_SEARCH_TUNING.lexicalTop5MeanThreshold,
+      lexicalHighConfidenceBypassTop1: Number.isFinite(overrides?.lexicalHighConfidenceBypassTop1)
+        ? Number(overrides?.lexicalHighConfidenceBypassTop1)
+        : DEFAULT_SEARCH_TUNING.lexicalHighConfidenceBypassTop1,
+    };
+  }
+
+  private hydrateChunkDetails(chunkIds: string[]): Map<string, SearchResultDetails> {
+    if (chunkIds.length === 0) {
+      return new Map();
     }
-    const scores: { chunkId: string; score: number }[] = [];
-
-    // 2. Compute similarity
-    for (const entry of vectors) {
-      const { chunkId, vector } = entry;
-      const score = cosineSimilarity(queryVector, vector);
-      scores.push({ chunkId, score });
-    }
-
-    // 3. Sort and slice
-    scores.sort((a, b) => b.score - a.score);
-    const topChunks = scores.slice(0, limit);
-
-    if (topChunks.length === 0) {
-      return [];
-    }
-
-    // 4. Hydrate with text and repo info.
-    // Use SQL literals instead of bind params because some browser/sql.js environments
-    // in this app have shown unstable bind behavior (NULL coercion).
-    const chunkIdLiterals = topChunks.map((item) => toSqlStringLiteral(item.chunkId)).join(",");
+    const chunkIdLiterals = chunkIds.map((item) => toSqlStringLiteral(item)).join(",");
     const detailsResult = this.db.exec(`
       SELECT
         c.id,
@@ -665,42 +731,345 @@ export class LocalDatabase {
       JOIN repos r ON c.repo_id = r.id
       WHERE c.id IN (${chunkIdLiterals})
     `);
-
     if (detailsResult.length === 0) {
-      return [];
+      return new Map();
     }
 
-    const detailsMap = new Map<
-      string,
-      Omit<SearchResult, "chunkId" | "score">
-    >();
-    const [detailsTable] = detailsResult;
-    for (const row of detailsTable.values) {
-      detailsMap.set(String(row[0]), {
+    const map = new Map<string, SearchResultDetails>();
+    const [table] = detailsResult;
+    for (const row of table.values) {
+      map.set(String(row[0]), {
         text: String(row[1]),
         repoId: Number(row[2]),
         repoName: String(row[3]),
         repoFullName: String(row[4]),
-        repoDescription: row[5] ? String(row[5]) : null,
+        repoDescription: row[5] == null ? null : String(row[5]),
         repoUrl: String(row[6]),
         language: row[7] == null ? null : String(row[7]),
         topics: JSON.parse(String(row[8] ?? "[]")) as string[],
         updatedAt: String(row[9]),
       });
     }
+    return map;
+  }
 
-    // 5. Construct final result preserving score order
-    return topChunks
-      .map((tc) => {
-        const details = detailsMap.get(tc.chunkId);
-        if (!details) return null;
+  private computeLexicalCandidates(
+    queryText: string,
+    fetchK: number,
+    totalChunkCount: number,
+  ): {
+    candidates: Array<{ chunkId: string; score: number }>;
+    scanLimit: number;
+    recentCount: number;
+    broadCount: number;
+    oldestCount: number;
+    dedupedCount: number;
+  } {
+    const scanLimit = clamp(Math.trunc(fetchK * 20), 2000, 12000);
+    if (totalChunkCount <= 0) {
+      return {
+        candidates: [],
+        scanLimit,
+        recentCount: 0,
+        broadCount: 0,
+        oldestCount: 0,
+        dedupedCount: 0,
+      };
+    }
+
+    const recentLimit = clamp(Math.trunc(scanLimit * 0.2), 200, scanLimit);
+    const oldestLimit = clamp(Math.trunc(scanLimit * 0.2), 200, scanLimit - recentLimit);
+    const broadLimit = Math.max(0, scanLimit - recentLimit - oldestLimit);
+
+    const recentRows = this.db.exec(`
+      SELECT c.id, c.text
+      FROM chunks c
+      ORDER BY c.created_at DESC
+      LIMIT ${recentLimit};
+    `);
+    const oldestRows = this.db.exec(`
+      SELECT c.id, c.text
+      FROM chunks c
+      ORDER BY c.created_at ASC
+      LIMIT ${oldestLimit};
+    `);
+
+    let broadRows: Array<{ values: SqlRowValue[][] }> = [];
+    if (broadLimit > 0) {
+      // Prefer sampling from the interior slice (excluding explicit oldest/newest windows)
+      // to maximize unique lexical coverage and reduce hash-dependent overlap variance.
+      const interiorStart = Math.min(oldestLimit, totalChunkCount);
+      const interiorEndExclusive = Math.max(interiorStart, totalChunkCount - recentLimit);
+      const interiorSpan = Math.max(0, interiorEndExclusive - interiorStart);
+      if (interiorSpan > 0) {
+        const interiorLimit = Math.min(broadLimit, interiorSpan);
+        const maxInteriorOffset = Math.max(0, interiorSpan - interiorLimit);
+        const interiorOffset = maxInteriorOffset > 0 ? stablePositiveHash(queryText) % (maxInteriorOffset + 1) : 0;
+        const offset = interiorStart + interiorOffset;
+        broadRows = this.db.exec(`
+          SELECT c.id, c.text
+          FROM chunks c
+          ORDER BY c.created_at ASC
+          LIMIT ${interiorLimit}
+          OFFSET ${offset};
+        `);
+      } else {
+        const maxOffset = Math.max(0, totalChunkCount - broadLimit);
+        const offset = maxOffset > 0 ? stablePositiveHash(queryText) % (maxOffset + 1) : 0;
+        broadRows = this.db.exec(`
+          SELECT c.id, c.text
+          FROM chunks c
+          ORDER BY c.created_at ASC
+          LIMIT ${broadLimit}
+          OFFSET ${offset};
+        `);
+      }
+    }
+
+    const dedupedRows = new Map<string, string>();
+    const consumeRows = (rows: Array<{ values: SqlRowValue[][] }>): number => {
+      if (rows.length === 0) {
+        return 0;
+      }
+      let inserted = 0;
+      const [table] = rows;
+      for (const row of table.values) {
+        const chunkId = String(row[0]);
+        if (dedupedRows.has(chunkId)) {
+          continue;
+        }
+        dedupedRows.set(chunkId, String(row[1] ?? ""));
+        inserted += 1;
+      }
+      return inserted;
+    };
+
+    const recentCount = consumeRows(recentRows);
+    const oldestCount = consumeRows(oldestRows);
+    const broadCount = consumeRows(broadRows);
+
+    const scored: Array<{ chunkId: string; score: number }> = [];
+    for (const [chunkId, text] of dedupedRows.entries()) {
+      const score = lexicalOverlapScore(queryText, text);
+      if (score > 0) {
+        scored.push({ chunkId, score });
+      }
+    }
+    scored.sort((a, b) => b.score - a.score || a.chunkId.localeCompare(b.chunkId));
+    return {
+      candidates: scored.slice(0, Math.max(20, Math.trunc(fetchK / 2))),
+      scanLimit,
+      recentCount,
+      broadCount,
+      oldestCount,
+      dedupedCount: dedupedRows.size,
+    };
+  }
+
+  private shouldTriggerLexicalSafetyNet(params: {
+    denseTopScores: number[];
+    topDenseLexicalOverlap: number;
+    uniqueRepoCountTop20: number;
+    totalRepoCount: number;
+    totalChunkCount: number;
+    queryText: string;
+    tuning: SearchTuning;
+  }): { trigger: boolean; reason: LexicalTriggerReason | null } {
+    const top1 = params.denseTopScores[0] ?? 0;
+    const top5 = params.denseTopScores.slice(0, 5);
+    const top5Mean = top5.length === 0 ? 0 : top5.reduce((sum, value) => sum + value, 0) / top5.length;
+    if (top1 < params.tuning.lexicalTop1Threshold) {
+      return { trigger: true, reason: "low_top1" };
+    }
+    if (top5Mean < params.tuning.lexicalTop5MeanThreshold) {
+      return { trigger: true, reason: "low_top5_mean" };
+    }
+    if (params.uniqueRepoCountTop20 < 6) {
+      const corpusLargeEnough = params.totalRepoCount >= 6 && params.totalChunkCount >= 20;
+      const denseConfident = top1 >= params.tuning.lexicalHighConfidenceBypassTop1;
+      if (corpusLargeEnough && !denseConfident) {
+        return { trigger: true, reason: "low_repo_diversity" };
+      }
+    }
+    if (countRareLikeTokens(params.queryText) >= 2) {
+      const denseConfident = top1 >= params.tuning.lexicalHighConfidenceBypassTop1;
+      const denseLexicallyAligned = params.topDenseLexicalOverlap > 0;
+      // Rare-token queries still run lexical recovery when dense top-1 has no literal token overlap,
+      // even if semantic confidence is high.
+      if (!denseConfident || !denseLexicallyAligned) {
+        return { trigger: true, reason: "rare_token_query" };
+      }
+    }
+    return { trigger: false, reason: null };
+  }
+
+  async findSimilarChunks(queryVector: Float32Array, limit: number = 10, options?: SearchOptions): Promise<SearchResult[]> {
+    const tuning = this.normalizeSearchTuning(limit, options?.tuning);
+    const vectors = this.ensureVectorIndexCache();
+    if (vectors.length === 0) {
+      return [];
+    }
+
+    const sampledIndexDims: number[] = [];
+    const dimSet = new Set<number>();
+    for (let i = 0; i < vectors.length; i += 1) {
+      const dim = vectors[i]?.vector.length ?? 0;
+      dimSet.add(dim);
+      if (sampledIndexDims.length < 12) {
+        sampledIndexDims.push(dim);
+      }
+    }
+    if (dimSet.size > 1) {
+      throw new Error(`Index has mixed embedding dimensions: ${Array.from(dimSet).join(", ")}. Re-index required.`);
+    }
+    const onlyDim = sampledIndexDims[0] ?? 0;
+    if (onlyDim > 0 && queryVector.length !== onlyDim) {
+      throw new Error(
+        `Embedding dimension mismatch (query=${queryVector.length}, index=${onlyDim}). Use same model and rebuild embeddings.`,
+      );
+    }
+
+    const vectorByChunkId = new Map<string, Float32Array>();
+    const denseScores: Array<{ chunkId: string; score: number }> = [];
+    for (const entry of vectors) {
+      vectorByChunkId.set(entry.chunkId, entry.vector);
+      const score = cosineSimilaritySafe(queryVector, entry.vector, "throw");
+      denseScores.push({
+        chunkId: entry.chunkId,
+        score,
+      });
+    }
+
+    denseScores.sort((a, b) => b.score - a.score || a.chunkId.localeCompare(b.chunkId));
+    const denseTop = denseScores.slice(0, tuning.fetchK);
+    const denseTopChunkIds = denseTop.map((item) => item.chunkId);
+    const detailsMap = this.hydrateChunkDetails(denseTopChunkIds);
+
+    const denseTopScores = denseTop.slice(0, 5).map((item) => item.score);
+    const uniqueRepoTop20 = new Set(
+      denseTop
+        .slice(0, 20)
+        .map((item) => detailsMap.get(item.chunkId)?.repoId)
+        .filter((value): value is number => value != null),
+    ).size;
+
+    const queryText = options?.queryText?.trim() ?? "";
+    const topDenseText = denseTop.length > 0 ? detailsMap.get(denseTop[0]?.chunkId ?? "")?.text ?? "" : "";
+    const topDenseLexicalOverlap =
+      queryText.length > 0 && topDenseText.length > 0 ? lexicalOverlapScore(queryText, topDenseText) : 0;
+    const totalRepoCount = this.getRepoCount();
+    const totalChunkCount = this.getChunkCount();
+    const lexicalDecision = queryText
+      ? this.shouldTriggerLexicalSafetyNet({
+          denseTopScores,
+          topDenseLexicalOverlap,
+          uniqueRepoCountTop20: uniqueRepoTop20,
+          totalRepoCount,
+          totalChunkCount,
+          queryText,
+          tuning,
+        })
+      : { trigger: false, reason: null };
+
+    const denseScoreById = new Map(denseTop.map((item) => [item.chunkId, item.score]));
+    let relevanceScoreById = denseScoreById;
+    let candidateOrder = denseTop.map((item) => item.chunkId);
+    let lexicalScanLimit = 0;
+    let lexicalPoolRecentCount = 0;
+    let lexicalPoolBroadCount = 0;
+    let lexicalPoolOldestCount = 0;
+    let lexicalPoolDedupedCount = 0;
+    if (lexicalDecision.trigger && queryText) {
+      const lexical = this.computeLexicalCandidates(queryText, tuning.fetchK, totalChunkCount);
+      lexicalScanLimit = lexical.scanLimit;
+      lexicalPoolRecentCount = lexical.recentCount;
+      lexicalPoolBroadCount = lexical.broadCount;
+      lexicalPoolOldestCount = lexical.oldestCount;
+      lexicalPoolDedupedCount = lexical.dedupedCount;
+      const fused = reciprocalRankFusion([
+        denseTop.map((item) => ({ id: item.chunkId })),
+        lexical.candidates.map((item) => ({ id: item.chunkId })),
+      ]);
+      candidateOrder = fused.slice(0, tuning.fetchK).map((item) => item.id);
+      const fusedTopScore = fused[0]?.score ?? 0;
+      relevanceScoreById =
+        fusedTopScore > 0
+          ? new Map(fused.map((item) => [item.id, item.score / fusedTopScore]))
+          : new Map();
+    }
+
+    const candidateDetailsMap = this.hydrateChunkDetails(candidateOrder);
+    const candidates: DenseCandidate[] = [];
+    for (const chunkId of candidateOrder) {
+      const details = candidateDetailsMap.get(chunkId);
+      const vector = vectorByChunkId.get(chunkId);
+      if (!details || !vector) {
+        continue;
+      }
+      candidates.push({
+        chunkId,
+        repoId: details.repoId,
+        vector,
+        denseScore: relevanceScoreById.get(chunkId) ?? denseScoreById.get(chunkId) ?? 0,
+      });
+    }
+
+    let rerankVectorMismatchPairs = 0;
+    const ranked = mmrSelect({
+      candidates,
+      topK: tuning.topK,
+      lambda: tuning.mmrLambda,
+      maxChunksPerRepo: tuning.maxChunksPerRepo,
+      onVectorMismatch: () => {
+        rerankVectorMismatchPairs += 1;
+      },
+    });
+    const rerankCapOverrideCount = ranked.reduce(
+      (sum, item) => sum + (item.capOverride ? 1 : 0),
+      0,
+    );
+
+    const diagnostics: SearchDiagnostics = {
+      queryDim: queryVector.length,
+      sampledIndexDims,
+      fetchK: tuning.fetchK,
+      topK: tuning.topK,
+      mmrLambda: tuning.mmrLambda,
+      maxChunksPerRepo: tuning.maxChunksPerRepo,
+      denseSuspicious:
+        lexicalDecision.reason === "low_top1" ||
+        lexicalDecision.reason === "low_top5_mean" ||
+        lexicalDecision.reason === "low_repo_diversity",
+      lexicalTriggered: lexicalDecision.trigger,
+      lexicalTriggerReason: lexicalDecision.reason,
+      denseTopScores,
+      lexicalScanLimit,
+      lexicalPoolRecentCount,
+      lexicalPoolBroadCount,
+      lexicalPoolOldestCount,
+      lexicalPoolDedupedCount,
+      corpusRepoCount: totalRepoCount,
+      corpusChunkCount: totalChunkCount,
+      rerankVectorMismatchPairs,
+      rerankCapOverrideCount,
+    };
+    options?.onDiagnostics?.(diagnostics);
+
+    return ranked
+      .map((item) => {
+        const details = candidateDetailsMap.get(item.chunkId);
+        if (!details) {
+          return null;
+        }
         return {
-          chunkId: tc.chunkId,
-          score: tc.score,
+          chunkId: item.chunkId,
+          score: item.score,
+          denseScore: item.denseScore,
           ...details,
         };
       })
-      .filter((item): item is SearchResult => item !== null);
+      .filter((item): item is SearchResult => item !== null)
+      .slice(0, tuning.topK);
   }
 
   private async persist(): Promise<void> {
@@ -982,6 +1351,24 @@ export class LocalDatabase {
     }
 
     return Number(result[0].values[0][0]);
+  }
+
+  getDominantEmbeddingModel(): string | null {
+    const result = this.db.exec(`
+      SELECT model, COUNT(*) AS count
+      FROM embeddings
+      WHERE TRIM(COALESCE(model, '')) <> ''
+      GROUP BY model
+      ORDER BY count DESC, model ASC
+      LIMIT 1;
+    `);
+
+    if (result.length === 0 || result[0].values.length === 0) {
+      return null;
+    }
+
+    const model = result[0].values[0]?.[0];
+    return model == null ? null : String(model);
   }
 
   async clearEmbeddings(): Promise<void> {

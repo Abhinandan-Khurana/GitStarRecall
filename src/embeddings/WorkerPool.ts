@@ -1,6 +1,7 @@
 import {
   Embedder,
   type BatchEmbeddingResultItem,
+  type BrowserEmbeddingModelCandidates,
   type EmbeddingBackendPreference,
   type EmbeddingRuntimeInfo,
 } from "./Embedder";
@@ -18,6 +19,7 @@ type EmbeddingWorkerPoolOptions = {
   downshiftErrorThreshold?: number;
   workerBatchSize?: number;
   preferredBackend?: EmbeddingBackendPreference;
+  modelCandidates?: BrowserEmbeddingModelCandidates;
   createEmbedder?: () => EmbedderLike;
 };
 
@@ -30,6 +32,7 @@ type EmbeddingWorkerPoolStatus = {
   errorCount: number;
   preferredBackend: EmbeddingBackendPreference;
   selectedBackend: EmbeddingBackendPreference | null;
+  selectedModel: string | null;
   backendFallbackReason: string | null;
 };
 
@@ -72,6 +75,7 @@ export class EmbeddingWorkerPool {
   private readonly configuredPoolSize: number;
   private readonly workerBatchSize: number;
   private readonly preferredBackend: EmbeddingBackendPreference;
+  private readonly modelCandidates: BrowserEmbeddingModelCandidates;
   private activePoolSize: number;
   private embedders: EmbedderLike[] = [];
   private errorCount = 0;
@@ -90,8 +94,14 @@ export class EmbeddingWorkerPool {
     );
     this.workerBatchSize = clampPositiveInt(options.workerBatchSize, DEFAULT_WORKER_BATCH_SIZE);
     this.preferredBackend = options.preferredBackend ?? "webgpu";
+    this.modelCandidates = options.modelCandidates ?? [];
     this.createEmbedder =
-      options.createEmbedder ?? (() => new Embedder({ preferredBackend: this.preferredBackend }));
+      options.createEmbedder ??
+      (() =>
+        new Embedder({
+          preferredBackend: this.preferredBackend,
+          modelCandidates: this.modelCandidates,
+        }));
   }
 
   private ensureWorkers(): void {
@@ -133,6 +143,8 @@ export class EmbeddingWorkerPool {
       .filter((info): info is EmbeddingRuntimeInfo => info != null);
     const selectedBackend =
       runtimeInfos.find((info) => info.selectedBackend != null)?.selectedBackend ?? null;
+    const selectedModel =
+      runtimeInfos.find((info) => info.selectedModel != null)?.selectedModel ?? null;
     const backendFallbackReason =
       runtimeInfos.find((info) => info.fallbackReason != null)?.fallbackReason ?? null;
 
@@ -145,6 +157,7 @@ export class EmbeddingWorkerPool {
       errorCount: this.errorCount,
       preferredBackend: this.preferredBackend,
       selectedBackend,
+      selectedModel,
       backendFallbackReason,
     };
   }

@@ -21,6 +21,19 @@ import {
 } from "../embeddings/ollamaClient";
 import { fetchOllamaModelCatalog, type OllamaModelCatalog } from "../ollama/modelCatalog";
 import { float32ToBlob } from "../embeddings/vector";
+import {
+  BROWSER_EMBEDDING_FALLBACK_MODEL,
+  DEFAULT_BROWSER_EMBEDDING_MODEL,
+  DEFAULT_OLLAMA_EMBEDDING_MODEL,
+  formatForEmbedding,
+  getRetrievalProfile,
+  isCuratedRetrievalModel,
+} from "../embeddings/retrievalProfile";
+import { inferBackendFromModel } from "../embeddings/modelRouting";
+import {
+  recommendBrowserEmbeddingModel,
+  type BrowserEmbeddingRecommendation,
+} from "../embeddings/browserCapability";
 import { buildSyncPlan, repoMetadataChanged } from "../sync/plan";
 import { sortChatMessages } from "../chat/order";
 import { captureLocalError, captureLocalWarn } from "../observability/localLog";
@@ -122,6 +135,7 @@ type EmbeddingBackendIdentity =
       kind: "browser";
       preferredBackend: EmbeddingBackendPreference;
       selectedBackend: EmbeddingBackendPreference | null;
+      selectedModel: string | null;
       fallbackReason: string | null;
     }
   | {
@@ -147,21 +161,24 @@ function getPreferredEmbeddingBackend(): EmbeddingBackendPreference {
 function formatBackendIdentity(params: {
   preferredBackend: EmbeddingBackendPreference;
   selectedBackend: EmbeddingBackendPreference | null;
+  selectedModel: string | null;
   fallbackReason: string | null;
 }): string {
-  const { preferredBackend, selectedBackend, fallbackReason } = params;
+  const { preferredBackend, selectedBackend, selectedModel, fallbackReason } = params;
   if (selectedBackend == null) {
     return `initializing (preferred: ${preferredBackend})`;
   }
   if (selectedBackend === preferredBackend) {
-    return selectedBackend;
+    return selectedModel ? `${selectedBackend} (${selectedModel})` : selectedBackend;
   }
 
   if (fallbackReason) {
-    return `${selectedBackend} (fallback from ${preferredBackend}: ${fallbackReason})`;
+    const modelSuffix = selectedModel ? `, ${selectedModel}` : "";
+    return `${selectedBackend}${modelSuffix} (fallback from ${preferredBackend}: ${fallbackReason})`;
   }
 
-  return `${selectedBackend} (fallback from ${preferredBackend})`;
+  const modelSuffix = selectedModel ? `, ${selectedModel}` : "";
+  return `${selectedBackend}${modelSuffix} (fallback from ${preferredBackend})`;
 }
 
 function formatEmbeddingBackendIdentity(identity: EmbeddingBackendIdentity): string {
@@ -175,6 +192,7 @@ function formatEmbeddingBackendIdentity(identity: EmbeddingBackendIdentity): str
   return formatBackendIdentity({
     preferredBackend: identity.preferredBackend,
     selectedBackend: identity.selectedBackend,
+    selectedModel: identity.selectedModel,
     fallbackReason: identity.fallbackReason,
   });
 }
@@ -214,6 +232,22 @@ function formatOllamaConnectionError(err: unknown): string {
     ].join(" ");
   }
   return message;
+}
+
+function formatBrowserEmbeddingSessionError(model: string, err: unknown): Error {
+  const detail = err instanceof Error ? err.message : String(err);
+  const normalized = detail.toLowerCase();
+  if (
+    normalized.includes("can't create a session") ||
+    normalized.includes("unsupported model ir version") ||
+    normalized.includes("no available backend")
+  ) {
+    return new Error(
+      `Browser embedding runtime failed for model "${model}". Re-sync stars with browser embeddings ` +
+        `to use the compatibility fallback model, or enable Ollama embeddings.`,
+    );
+  }
+  return new Error(`Browser query embedding failed: ${detail}`);
 }
 
 function computeContextAvailabilityDebug(
@@ -404,10 +438,87 @@ const OLLAMA_EMBEDDING_PREF_KEY_PREFIX = "gitstarrecall.embedding.ollama.pref";
 const CHAT_SCOPE_PREFIX = "chat";
 const EMBEDDING_BACKEND_META_KEY = "embedding_active_backend";
 const EMBEDDING_MODEL_META_KEY = "embedding_active_model";
-const BROWSER_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
-const DEFAULT_OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
+const BROWSER_EMBEDDING_MODEL = DEFAULT_BROWSER_EMBEDDING_MODEL;
+const BROWSER_EMBEDDING_MODEL_CANDIDATES_DEFAULT = [
+  DEFAULT_BROWSER_EMBEDDING_MODEL,
+  BROWSER_EMBEDDING_FALLBACK_MODEL,
+];
 const OLLAMA_BATCH_SIZE_CAP = 24;
 const OLLAMA_RESTART_BROWSER_ERROR = "__OLLAMA_RESTART_BROWSER__";
+
+function sameStringArray(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+type RetrievalTuning = {
+  fetchK: number;
+  topK: number;
+  mmrLambda: number;
+  maxChunksPerRepo: number;
+  lexicalTop1Threshold: number;
+  lexicalTop5MeanThreshold: number;
+};
+
+const RETRIEVAL_TUNING_KEY_PREFIX = "gitstarrecall.retrieval.tuning";
+const DEFAULT_RETRIEVAL_TUNING: RetrievalTuning = {
+  fetchK: 150,
+  topK: 20,
+  mmrLambda: 0.72,
+  maxChunksPerRepo: 2,
+  lexicalTop1Threshold: 0.22,
+  lexicalTop5MeanThreshold: 0.18,
+};
+
+function normalizeRetrievalTuning(input: Partial<RetrievalTuning> | null | undefined): RetrievalTuning {
+  return {
+    fetchK:
+      Number.isFinite(input?.fetchK) && Number(input?.fetchK) > 0
+        ? Math.max(80, Math.min(300, Math.trunc(Number(input?.fetchK))))
+        : DEFAULT_RETRIEVAL_TUNING.fetchK,
+    topK:
+      Number.isFinite(input?.topK) && Number(input?.topK) > 0
+        ? Math.max(10, Math.min(40, Math.trunc(Number(input?.topK))))
+        : DEFAULT_RETRIEVAL_TUNING.topK,
+    mmrLambda:
+      Number.isFinite(input?.mmrLambda)
+        ? Math.max(0.55, Math.min(0.9, Number(input?.mmrLambda)))
+        : DEFAULT_RETRIEVAL_TUNING.mmrLambda,
+    maxChunksPerRepo:
+      Number.isFinite(input?.maxChunksPerRepo) && Number(input?.maxChunksPerRepo) > 0
+        ? Math.max(1, Math.min(5, Math.trunc(Number(input?.maxChunksPerRepo))))
+        : DEFAULT_RETRIEVAL_TUNING.maxChunksPerRepo,
+    lexicalTop1Threshold:
+      Number.isFinite(input?.lexicalTop1Threshold)
+        ? Math.max(0.05, Math.min(0.5, Number(input?.lexicalTop1Threshold)))
+        : DEFAULT_RETRIEVAL_TUNING.lexicalTop1Threshold,
+    lexicalTop5MeanThreshold:
+      Number.isFinite(input?.lexicalTop5MeanThreshold)
+        ? Math.max(0.05, Math.min(0.5, Number(input?.lexicalTop5MeanThreshold)))
+        : DEFAULT_RETRIEVAL_TUNING.lexicalTop5MeanThreshold,
+  };
+}
+
+function getRetrievalTuningStorageKey(scope: string): string {
+  return `${RETRIEVAL_TUNING_KEY_PREFIX}.${scope}`;
+}
+
+function getCustomModelWarning(model: string): string | null {
+  if (isCuratedRetrievalModel(model)) {
+    return null;
+  }
+  return (
+    "Custom embedding model selected. Retrieval quality may be unstable if vector dimensions, " +
+    "normalization behavior, or query/document formatting differ from the tuned pipeline."
+  );
+}
 
 function resolveAutoModel(params: {
   lastUsed: string;
@@ -634,6 +745,11 @@ export default function UsagePage() {
     "idle" | "probing" | "needs-consent" | "downloading" | "ready" | "failed"
   >("idle");
   const [webllmRecommendation, setWebllmRecommendation] = useState<WebLLMRecommendation | null>(null);
+  const [browserEmbeddingRecommendation, setBrowserEmbeddingRecommendation] =
+    useState<BrowserEmbeddingRecommendation | null>(null);
+  const [browserEmbeddingModelCandidates, setBrowserEmbeddingModelCandidates] = useState<string[]>(
+    BROWSER_EMBEDDING_MODEL_CANDIDATES_DEFAULT,
+  );
   const [webllmSelectedModel, setWebllmSelectedModel] = useState(WEBLLM_PRIMARY_MODEL_ID);
   const [webllmModelManuallySet, setWebllmModelManuallySet] = useState(false);
   const [webllmDownloadProgress, setWebllmDownloadProgress] = useState(0);
@@ -649,6 +765,9 @@ export default function UsagePage() {
   const [ollamaCatalogError, setOllamaCatalogError] = useState<string | null>(null);
   const [ollamaConnectionStatus, setOllamaConnectionStatus] = useState<OllamaConnectionStatus>("idle");
   const [ollamaConnectionMessage, setOllamaConnectionMessage] = useState<string | null>(null);
+  const [isSudoUser, setIsSudoUser] = useState(false);
+  const [retrievalTuning, setRetrievalTuning] = useState<RetrievalTuning>(DEFAULT_RETRIEVAL_TUNING);
+  const [advancedTuningOpen, setAdvancedTuningOpen] = useState(false);
   const [llmPrompt, setLlmPrompt] = useState("");
   const [llmAnswer, setLlmAnswer] = useState("");
   const [llmError, setLlmError] = useState<string | null>(null);
@@ -659,6 +778,9 @@ export default function UsagePage() {
   const ollamaCatalogRequestIdRef = useRef(0);
   const ollamaEmbeddingModelManuallySetRef = useRef(false);
   const ollamaChatModelManuallySetRef = useRef(false);
+  const searchEmbedderRef = useRef<Embedder | null>(null);
+  const searchEmbedderModelCandidatesRef = useRef<string[]>(BROWSER_EMBEDDING_MODEL_CANDIDATES_DEFAULT);
+  const browserEmbeddingRecommendationPromiseRef = useRef<Promise<BrowserEmbeddingRecommendation> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const restoreRequestTrackerRef = useRef(createRestoreRequestTracker());
   const webllmPreviousRecommendationRef = useRef<WebLLMRecommendation | null>(null);
@@ -685,6 +807,18 @@ export default function UsagePage() {
     return providerDefinitions.find((provider) => provider.id === "ollama") ?? null;
   }, [providerDefinitions]);
   const ollamaEmbeddingModelOptions = useMemo(() => ollamaCatalog?.embedding ?? [], [ollamaCatalog]);
+  const customEmbeddingModelWarning = useMemo(
+    () => (ollamaModel.trim() ? getCustomModelWarning(ollamaModel) : null),
+    [ollamaModel],
+  );
+  const showAdvancedTuning = isSudoUser;
+
+  const updateRetrievalTuning = useCallback(
+    (patch: Partial<RetrievalTuning>) => {
+      setRetrievalTuning((previous) => normalizeRetrievalTuning({ ...previous, ...patch }));
+    },
+    [],
+  );
   const ollamaChatModelOptions = useMemo(() => ollamaCatalog?.llm ?? [], [ollamaCatalog]);
   const ollamaChatRecommendedModel = useMemo(() => {
     const providerDefault = ollamaProviderDefinition?.defaultModel ?? "llama3.1:8b";
@@ -738,6 +872,64 @@ export default function UsagePage() {
       setWebllmModelManuallySet(true);
     }
   }, [providerId]);
+
+  const ensureBrowserEmbeddingRecommendation = useCallback(async (): Promise<BrowserEmbeddingRecommendation> => {
+    if (browserEmbeddingRecommendation) {
+      return browserEmbeddingRecommendation;
+    }
+    if (browserEmbeddingRecommendationPromiseRef.current) {
+      return browserEmbeddingRecommendationPromiseRef.current;
+    }
+
+    const pending = recommendBrowserEmbeddingModel({
+      previousRecommendation: browserEmbeddingRecommendation,
+    })
+      .then((recommendation) => {
+        setBrowserEmbeddingRecommendation(recommendation);
+        setBrowserEmbeddingModelCandidates((previous) =>
+          sameStringArray(previous, recommendation.modelCandidates)
+            ? previous
+            : recommendation.modelCandidates,
+        );
+        return recommendation;
+      })
+      .finally(() => {
+        browserEmbeddingRecommendationPromiseRef.current = null;
+      });
+    browserEmbeddingRecommendationPromiseRef.current = pending;
+    return pending;
+  }, [browserEmbeddingRecommendation]);
+
+  const getSearchEmbedder = useCallback((modelCandidates?: string[]): Embedder => {
+    const nextCandidates = modelCandidates ?? browserEmbeddingModelCandidates;
+    if (!sameStringArray(searchEmbedderModelCandidatesRef.current, nextCandidates)) {
+      if (searchEmbedderRef.current) {
+        searchEmbedderRef.current.terminate();
+        searchEmbedderRef.current = null;
+      }
+      searchEmbedderModelCandidatesRef.current = [...nextCandidates];
+    }
+
+    if (searchEmbedderRef.current == null) {
+      searchEmbedderRef.current = new Embedder({
+        modelCandidates: nextCandidates,
+      });
+      searchEmbedderModelCandidatesRef.current = [...nextCandidates];
+    }
+    return searchEmbedderRef.current;
+  }, [browserEmbeddingModelCandidates]);
+
+  const resetSearchEmbedder = useCallback(() => {
+    if (searchEmbedderRef.current) {
+      searchEmbedderRef.current.terminate();
+      searchEmbedderRef.current = null;
+    }
+    searchEmbedderModelCandidatesRef.current = BROWSER_EMBEDDING_MODEL_CANDIDATES_DEFAULT;
+  }, []);
+
+  useEffect(() => {
+    void ensureBrowserEmbeddingRecommendation();
+  }, [ensureBrowserEmbeddingRecommendation]);
 
   const activeResults = useMemo(() => activeSession?.results ?? [], [activeSession]);
   const activeSessionMessages = useMemo(() => {
@@ -1247,6 +1439,44 @@ export default function UsagePage() {
 
   useEffect(() => {
     try {
+      const raw = localStorage.getItem(getRetrievalTuningStorageKey(embeddingPreferenceScopeKey));
+      const parsed = raw ? (JSON.parse(raw) as Partial<RetrievalTuning>) : null;
+      setRetrievalTuning(normalizeRetrievalTuning(parsed));
+    } catch {
+      setRetrievalTuning(DEFAULT_RETRIEVAL_TUNING);
+    }
+  }, [embeddingPreferenceScopeKey]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`gitstarrecall.sudo.${embeddingPreferenceScopeKey}`);
+      setIsSudoUser(raw === "1" || raw === "true");
+    } catch {
+      setIsSudoUser(false);
+    }
+  }, [embeddingPreferenceScopeKey]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        getRetrievalTuningStorageKey(embeddingPreferenceScopeKey),
+        JSON.stringify(retrievalTuning),
+      );
+    } catch {
+      // ignore persistence errors for tuning
+    }
+  }, [embeddingPreferenceScopeKey, retrievalTuning]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`gitstarrecall.sudo.${embeddingPreferenceScopeKey}`, isSudoUser ? "1" : "0");
+    } catch {
+      // ignore local preference persistence errors
+    }
+  }, [embeddingPreferenceScopeKey, isSudoUser]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem(
         getOllamaConsentKey(embeddingPreferenceScopeKey),
         allowOllamaEmbedding ? "1" : "0",
@@ -1659,8 +1889,8 @@ export default function UsagePage() {
           readmesMissing: readmeResult.missingCount,
           readmesFailed: readmeResult.failedCount,
           chunkTotal: localChunkCount,
-          embeddingsCreated: localEmbeddingCount,
-          embeddingTarget: hasPendingEmbeddingChunks ? previous.embeddingTarget : 0,
+          embeddingsCreated: hasPendingEmbeddingChunks ? 0 : localEmbeddingCount,
+          embeddingTarget: 0,
           elapsedSeconds: hasPendingEmbeddingChunks
             ? undefined
             : Math.max(1, Math.round((Date.now() - previous.startedAt) / 1000)),
@@ -1709,6 +1939,38 @@ export default function UsagePage() {
     }
   };
 
+  const handleRebuildEmbeddings = async () => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "Rebuild embeddings now?\n\nThis clears all existing embeddings and re-generates them with current settings. This can take time.",
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setFetchingStars(true);
+      setError(null);
+      setFetchPhase("Rebuilding embeddings with current settings…");
+      const database = await getLocalDatabase();
+      await database.clearEmbeddings();
+      await database.upsertIndexMeta({
+        key: "embedding_job_cursor",
+        value: "",
+        updatedAt: Date.now(),
+      });
+      setStarsSummary("Rebuilding embeddings with current settings…");
+      await generateEmbeddings(database);
+    } catch (err) {
+      captureLocalError("rebuild_embeddings_failed", err);
+      setError(err instanceof Error ? err.message : "Failed to rebuild embeddings");
+    } finally {
+      setFetchingStars(false);
+      setFetchPhase(null);
+    }
+  };
+
   const generateEmbeddings = async (
     database: Awaited<ReturnType<typeof getLocalDatabase>>,
     options?: { forceBrowser?: boolean; maxChunks?: number; repoIds?: number[]; incremental?: boolean },
@@ -1717,25 +1979,36 @@ export default function UsagePage() {
     let embeddingPool: EmbeddingWorkerPool | null = null;
     let restartWithBrowser = false;
     try {
+      const incrementalMode = options?.incremental === true;
       setFetchPhase("Initializing embedding model (this may take a moment)…");
       setIndexingStatus((previous) =>
         previous
           ? {
               ...previous,
-              phase: "Initializing embedding model",
+              phase: incrementalMode ? previous.phase : "Initializing embedding model",
+              embeddingsCreated: incrementalMode ? previous.embeddingsCreated : 0,
+              embeddingTarget: incrementalMode ? previous.embeddingTarget : 0,
+              duplicateEmbeddingHits: incrementalMode ? previous.duplicateEmbeddingHits : 0,
             }
           : previous,
       );
 
       const preferredBackend = getPreferredEmbeddingBackend();
+      const browserEmbeddingPlan = await ensureBrowserEmbeddingRecommendation();
+      const browserPreferredModel = browserEmbeddingPlan.modelId;
+      const browserModelCandidates = browserEmbeddingPlan.modelCandidates;
       const poolSize = getEmbeddingPoolSize();
       const workerBatchSize = getEmbeddingWorkerBatchSize();
-      embedder = new Embedder({ preferredBackend });
+      embedder = new Embedder({
+        preferredBackend,
+        modelCandidates: browserModelCandidates,
+      });
       embeddingPool = new EmbeddingWorkerPool({
         poolSize,
         maxPoolSize: 2,
         workerBatchSize,
         preferredBackend,
+        modelCandidates: browserModelCandidates,
       });
       const activeEmbeddingPool = embeddingPool;
       const dbWriteBatchSize = getEmbeddingDbWriteBatchSize();
@@ -1744,7 +2017,6 @@ export default function UsagePage() {
       const largeLibraryModeEnabled = getLargeLibraryModeEnabled();
       const largeLibraryThreshold = getLargeLibraryThreshold();
       const forceBrowser = options?.forceBrowser === true;
-      const incrementalMode = options?.incremental === true;
       const repoIdsFilter = options?.repoIds;
       const maxChunks = options?.maxChunks;
       const ollamaEnabled = allowOllamaEmbedding && !forceBrowser;
@@ -1758,10 +2030,12 @@ export default function UsagePage() {
         kind: "browser",
         preferredBackend: initialPoolStatus.preferredBackend,
         selectedBackend: initialPoolStatus.selectedBackend,
+        selectedModel: initialPoolStatus.selectedModel,
         fallbackReason: initialPoolStatus.backendFallbackReason,
       };
       let activeBackendKind: "browser" | "ollama" = "browser";
-      let activeEmbeddingModel = BROWSER_EMBEDDING_MODEL;
+      let activeEmbeddingModel = browserPreferredModel;
+      let activeRetrievalProfile = getRetrievalProfile(activeEmbeddingModel);
 
       if (ollamaEnabled) {
         try {
@@ -1774,6 +2048,7 @@ export default function UsagePage() {
           ollamaClient = nextOllamaClient;
           activeBackendKind = "ollama";
           activeEmbeddingModel = resolvedOllamaModel;
+          activeRetrievalProfile = getRetrievalProfile(activeEmbeddingModel);
           backendIdentity = {
             kind: "ollama",
             runtime: ollamaRuntime,
@@ -1907,7 +2182,9 @@ export default function UsagePage() {
             ? {
                 ...previous,
                 phase: "Generating embeddings",
+                embeddingsCreated: 0,
                 embeddingTarget,
+                duplicateEmbeddingHits: 0,
               }
             : previous,
         );
@@ -1968,6 +2245,7 @@ export default function UsagePage() {
             kind: "browser",
             preferredBackend: poolStatus.preferredBackend,
             selectedBackend: poolStatus.selectedBackend,
+            selectedModel: poolStatus.selectedModel,
             fallbackReason: poolStatus.backendFallbackReason,
           };
         }
@@ -2041,7 +2319,8 @@ export default function UsagePage() {
 
         const batchEmbedStart = performance.now();
         const uncachedItems: Array<{ chunkId: string; text: string }> = [];
-        const batchModel = ollamaClient ? resolvedOllamaModel : BROWSER_EMBEDDING_MODEL;
+        const browserRuntimeModel = activeEmbeddingPool.getStatus().selectedModel ?? activeEmbeddingModel;
+        const batchModel = ollamaClient ? resolvedOllamaModel : browserRuntimeModel;
 
         for (const chunk of chunks) {
           const cachedEntry = localEmbeddingCache.get(chunk.text);
@@ -2064,7 +2343,9 @@ export default function UsagePage() {
         }
 
         if (uncachedItems.length > 0) {
-          const texts = uncachedItems.map((item) => item.text);
+          const texts = uncachedItems.map((item) =>
+            formatForEmbedding(item.text, activeRetrievalProfile.documentPrefix),
+          );
           let vectors: Array<Float32Array | null> = [];
           let usedBrowserBatch = false;
           if (ollamaClient) {
@@ -2093,6 +2374,16 @@ export default function UsagePage() {
               activeEmbeddingPool.setConcurrency(getEmbeddingPoolSize());
             }
             const batchResults = await activeEmbeddingPool.embedBatch(texts);
+            const runtimeModel = activeEmbeddingPool.getStatus().selectedModel;
+            if (runtimeModel && runtimeModel !== activeEmbeddingModel) {
+              activeEmbeddingModel = runtimeModel;
+              activeRetrievalProfile = getRetrievalProfile(activeEmbeddingModel);
+              await database.upsertIndexMeta({
+                key: EMBEDDING_MODEL_META_KEY,
+                value: activeEmbeddingModel,
+                updatedAt: Date.now(),
+              });
+            }
             vectors = batchResults.map((item) => item.embedding);
           }
           if (vectors.length !== uncachedItems.length) {
@@ -2104,11 +2395,13 @@ export default function UsagePage() {
           for (let i = 0; i < uncachedItems.length; i += 1) {
             const item = uncachedItems[i];
             let vector = vectors[i];
-            let vectorModel = usedBrowserBatch ? BROWSER_EMBEDDING_MODEL : resolvedOllamaModel;
+            let vectorModel = usedBrowserBatch
+              ? activeEmbeddingPool.getStatus().selectedModel ?? activeEmbeddingModel
+              : resolvedOllamaModel;
             if (!vector) {
               try {
-                vector = await embedder.embed(item.text);
-                vectorModel = BROWSER_EMBEDDING_MODEL;
+                vector = await embedder.embed(formatForEmbedding(item.text, activeRetrievalProfile.documentPrefix));
+                vectorModel = embedder.getRuntimeInfo().selectedModel ?? activeEmbeddingModel;
                 captureLocalWarn("embedding_batch_item_recovered", `chunk_id=${item.chunkId}`);
               } catch (singleErr) {
                 throw new Error(
@@ -2205,6 +2498,7 @@ export default function UsagePage() {
           kind: "browser",
           preferredBackend: finalPoolStatus.preferredBackend,
           selectedBackend: finalPoolStatus.selectedBackend,
+          selectedModel: finalPoolStatus.selectedModel,
           fallbackReason: finalPoolStatus.backendFallbackReason,
         };
       }
@@ -2296,6 +2590,7 @@ export default function UsagePage() {
 
   const handleClearLocalData = async () => {
     try {
+      resetSearchEmbedder();
       const database = await getLocalDatabase();
       await database.clearAllData();
       await clearWebLLMRuntimeCaches();
@@ -2316,6 +2611,12 @@ export default function UsagePage() {
     }
   };
 
+  useEffect(() => {
+    return () => {
+      resetSearchEmbedder();
+    };
+  }, [resetSearchEmbedder]);
+
   const executeSearch = async (
     rawQuery: string,
     options?: {
@@ -2334,8 +2635,44 @@ export default function UsagePage() {
 
       // 1. Generate embedding for query
       let vector: Float32Array;
-      const activeEmbeddingBackend = database.getIndexMetaValue(EMBEDDING_BACKEND_META_KEY);
-      const activeEmbeddingModel = database.getIndexMetaValue(EMBEDDING_MODEL_META_KEY);
+      let activeEmbeddingBackend = database.getIndexMetaValue(EMBEDDING_BACKEND_META_KEY);
+      let activeEmbeddingModel = database.getIndexMetaValue(EMBEDDING_MODEL_META_KEY);
+      if (activeEmbeddingModel && activeEmbeddingBackend) {
+        const inferredBackend = inferBackendFromModel(activeEmbeddingModel);
+        if (activeEmbeddingBackend !== inferredBackend) {
+          activeEmbeddingBackend = inferredBackend;
+          await database.upsertIndexMeta({
+            key: EMBEDDING_BACKEND_META_KEY,
+            value: activeEmbeddingBackend,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+      if (!activeEmbeddingModel || !activeEmbeddingBackend) {
+        const inferredModel = database.getDominantEmbeddingModel();
+        if (inferredModel) {
+          activeEmbeddingModel = inferredModel;
+          activeEmbeddingBackend = inferBackendFromModel(inferredModel);
+          await database.upsertIndexMeta({
+            key: EMBEDDING_BACKEND_META_KEY,
+            value: activeEmbeddingBackend,
+            updatedAt: Date.now(),
+          });
+          await database.upsertIndexMeta({
+            key: EMBEDDING_MODEL_META_KEY,
+            value: activeEmbeddingModel,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+      let browserEmbeddingPlan: BrowserEmbeddingRecommendation | null = null;
+      if (!(activeEmbeddingBackend === "ollama" && activeEmbeddingModel)) {
+        browserEmbeddingPlan = await ensureBrowserEmbeddingRecommendation();
+      }
+      const effectiveModel =
+        activeEmbeddingModel ?? browserEmbeddingPlan?.modelId ?? BROWSER_EMBEDDING_MODEL;
+      const queryProfile = getRetrievalProfile(effectiveModel);
+      const formattedQuery = formatForEmbedding(trimmedQuery, queryProfile.queryPrefix);
       if (activeEmbeddingBackend === "ollama" && activeEmbeddingModel) {
         setSearchProgress("Generating query embedding with Ollama…");
         try {
@@ -2344,7 +2681,7 @@ export default function UsagePage() {
             model: activeEmbeddingModel,
             timeoutMs: getOllamaTimeoutMs(),
           });
-          const vectors = await client.embedBatch([trimmedQuery]);
+          const vectors = await client.embedBatch([formattedQuery]);
           if (vectors.length !== 1 || !vectors[0]) {
             throw new Error("query embedding failed: no vector returned from Ollama");
           }
@@ -2368,14 +2705,28 @@ export default function UsagePage() {
         }
       } else {
         setSearchProgress("Generating query embedding…");
-        const embedder = new Embedder();
-        vector = await embedder.embed(trimmedQuery);
-        embedder.terminate();
+        try {
+          vector = await getSearchEmbedder(
+            browserEmbeddingPlan?.modelCandidates ?? browserEmbeddingModelCandidates,
+          ).embed(formattedQuery);
+        } catch (browserEmbeddingError) {
+          resetSearchEmbedder();
+          throw formatBrowserEmbeddingSessionError(effectiveModel, browserEmbeddingError);
+        }
       }
 
       // 2. Search DB
       setSearchProgress("Running semantic search…");
-      const results = await database.findSimilarChunks(vector, 20); // Top 20
+      const results = await database.findSimilarChunks(vector, retrievalTuning.topK, {
+        queryText: trimmedQuery,
+        tuning: retrievalTuning,
+        onDiagnostics: (payload) => {
+          captureLocalWarn("search_diagnostics", JSON.stringify({
+            ...payload,
+            topScores: payload.denseTopScores.map((score) => Number(score.toFixed(6))),
+          }));
+        },
+      });
       const now = Date.now();
 
       const preferredSession =
@@ -2845,6 +3196,8 @@ export default function UsagePage() {
                 embeddingModelOptions={ollamaEmbeddingModelOptions}
                 embeddingModelStatus={ollamaCatalogStatus}
                 embeddingModelError={ollamaCatalogError}
+                customModelWarning={customEmbeddingModelWarning}
+                browserEmbeddingRecommendation={browserEmbeddingRecommendation}
                 onRefreshModels={() => {
                   void refreshOllamaCatalog();
                 }}
@@ -2853,6 +3206,111 @@ export default function UsagePage() {
                 onTestConnection={() => void handleTestOllamaConnection()}
               />
             </div>
+            <Card className="border-border/60 bg-secondary/20">
+              <CardContent className="space-y-2 pt-4">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={isSudoUser}
+                    onChange={(event) => setIsSudoUser(event.target.checked)}
+                    className="rounded border-border"
+                  />
+                  Enable developer advanced mode (sudo)
+                </label>
+                <p className="text-xs text-destructive">
+                  ⚠ Advanced tuning can improve results for your corpus, but it can also reduce relevance, speed, or
+                  efficiency. Use only for controlled experiments.
+                </p>
+                {isSudoUser ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => void handleRebuildEmbeddings()}
+                      disabled={fetchingStars}
+                    >
+                      {fetchingStars ? "Rebuilding..." : "Rebuild Embeddings"}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      Re-runs embedding generation with your current embedding settings.
+                    </p>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+            {showAdvancedTuning ? (
+              <Collapsible open={advancedTuningOpen} onOpenChange={setAdvancedTuningOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs">
+                    Advanced Retrieval Tuning
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <Card className="mt-2 border-border/60 bg-secondary/20">
+                    <CardHeader className="pb-2">
+                      <p className="text-xs text-muted-foreground">
+                        Sudo mode: tune retrieval for your corpus size.
+                      </p>
+                    </CardHeader>
+                    <CardContent className="grid gap-2 sm:grid-cols-2">
+                      <label className="text-xs text-muted-foreground">
+                        fetchK
+                        <input
+                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
+                          type="number"
+                          value={retrievalTuning.fetchK}
+                          min={80}
+                          max={300}
+                          onChange={(event) => updateRetrievalTuning({ fetchK: Number(event.target.value) })}
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground">
+                        topK
+                        <input
+                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
+                          type="number"
+                          value={retrievalTuning.topK}
+                          min={10}
+                          max={40}
+                          onChange={(event) => updateRetrievalTuning({ topK: Number(event.target.value) })}
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground">
+                        MMR lambda
+                        <input
+                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
+                          type="number"
+                          step={0.01}
+                          value={retrievalTuning.mmrLambda}
+                          min={0.55}
+                          max={0.9}
+                          onChange={(event) => updateRetrievalTuning({ mmrLambda: Number(event.target.value) })}
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground">
+                        Max chunks per repo
+                        <input
+                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
+                          type="number"
+                          value={retrievalTuning.maxChunksPerRepo}
+                          min={1}
+                          max={5}
+                          onChange={(event) => updateRetrievalTuning({ maxChunksPerRepo: Number(event.target.value) })}
+                        />
+                      </label>
+                      {retrievalTuning.fetchK < retrievalTuning.topK * 4 && (
+                        <p className="sm:col-span-2 text-xs text-amber-500">
+                          fetchK is low relative to topK. Increase fetchK to at least 4x topK to preserve MMR
+                          diversity.
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </CollapsibleContent>
+              </Collapsible>
+            ) : null}
 
             <SyncStatusBar
               indexingStatus={indexingStatus}

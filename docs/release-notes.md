@@ -1,5 +1,119 @@
 # Release Notes
 
+## 2026-03-05 (Sync Progress UX Fix - README + Ollama Embeddings)
+
+- Fixed sync progress visibility during staged indexing:
+  - README progress now remains visible during active README work even when incremental embedding metrics are present.
+  - Embedding initialization now renders an indeterminate animated progress bar until a concrete embedding target is known.
+  - Embedding progress automatically switches to determinate (`completed/target`) once chunk targets are available.
+- Added progress-state regression coverage in `src/components/SyncStatusBar.test.ts`.
+
+## 2026-03-05 (Remaining Concerns Follow-up - Score Display + Pooling Verification)
+
+- Search result score display now clamps negative rerank values to `0.000` in UI for readability (ranking/order unchanged).
+- Browser embedding pooling strategy is now explicit and centralized:
+  - `embeddinggemma` uses `mean` pooling with source-backed rationale from Hugging Face Text Embeddings Inference guidance.
+  - fallback/default remains `mean` for current browser embedding candidates.
+- Search diagnostics signal is now less ambiguous:
+  - `denseSuspicious` reports dense-confidence concerns (`low_top1`, `low_top5_mean`, `low_repo_diversity`),
+  - `lexicalTriggered` still reports whether lexical safety-net executed (including rare-token triggers).
+- Rare-token lexical trigger now has a confidence/alignment bypass:
+  - lexical safety-net is skipped when dense top-1 is highly confident *and* lexically aligned with the rare-token query,
+  - lexical safety-net still runs for high-confidence but lexically mismatched dense top-1 results.
+- Qwen3 retrieval prompting now follows model-card format:
+  - queries use `Instruct: ...` + `Query: ...`,
+  - passages/documents are embedded as raw text (no `passage:` prefix).
+- Lexical broad sampling now targets the corpus interior slice first (excluding oldest/newest windows) to reduce overlap and improve unique lexical candidate coverage.
+- Curated embedding warning logic now matches retrieval-profile model families (for example `mxbai-embed*`, `nomic-embed*`) to avoid false custom-model warnings on valid variants.
+- `Rebuild Embeddings` now requires explicit user confirmation before clearing and regenerating the embedding index.
+- README section splitting for large-readme chunking is now code-fence-aware, so heading-like lines inside fenced code blocks do not create artificial section boundaries.
+- Chunk budgeting for large READMEs now intentionally under-fills when fewer than 120 windows clear the quality floor (no low-quality padding fallback).
+- Pooling profile resolution now inspects model identity and emits a one-time warning for unknown model families before using mean pooling fallback.
+- Verified dependency concern: `@huggingface/transformers@3.8.1` currently pulls `onnxruntime-node` and `sharp` as required transitive dependencies; tracked as a portability/CI risk pending upstream or package-level mitigation.
+
+## 2026-03-05 (Minor PR Review Remediation - CSP + Model Warning + Ollama Order)
+
+- Tightened CSP `script-src` allowance for transformers runtime script loading:
+  - replaced broad `https://cdn.jsdelivr.net` host allowance with a pinned transformers dist path (`@huggingface/transformers@<resolved-version>/dist/`).
+- Fixed curated custom-model warning regression:
+  - `nomic-embed-text` now treated as curated/supported in embedding warning logic.
+  - curated checks now support tagged model forms (e.g. `:latest`) for supported families.
+- Removed dead `embeddinggemma` entry from Ollama embedding recommendation order.
+- Improved Ollama embedding recommendation matching to support tagged model names (prefix match for curated defaults).
+- Added model-catalog regression test for tagged embedding model names.
+
+## 2026-03-05 (Docs + Retrieval Follow-up Alignment)
+
+- Updated retrieval/chunking notes to match latest behavior:
+  - large-README chunk budget quality scoring now evaluates normalized window text before budget selection,
+  - lexical safety-net fused candidates now carry fused relevance into MMR reranking (lexical-only candidates no longer enter rerank as hard-zero relevance).
+
+## 2026-03-05 (Follow-up PR Review Fixes - Model Routing + Capability + Chunk Budget)
+
+- Fixed browser capability scoring so `perfScore == null` is neutral (`+0`), preventing weak/timeout devices from receiving an unintended heavy-model boost.
+- Fixed embedding backend routing heuristic:
+  - removed slash-based browser detection,
+  - now routes browser embeddings only for explicit browser model prefixes (`onnx-community/`, `xenova/`),
+  - prevents namespaced Ollama models (`myorg/custom-embed:latest`) from being misrouted to browser runtime.
+- Fixed chunk budgeting quality gate:
+  - removed unconditional inclusion of first 3 windows,
+  - all windows now pass through quality selection.
+- Added regression coverage:
+  - `src/embeddings/modelRouting.test.ts`
+  - `src/embeddings/browserCapability.test.ts` (null perf signal)
+  - `src/chunking/chunker.test.ts` (first-window quality bypass)
+
+## 2026-03-05 (PR Review Remediation - Search Correctness and Stability)
+
+- Fixed critical dense cosine bug in `src/db/client.ts` where zero-norm vectors could produce `NaN` and corrupt ranking order.
+- Added shared safe cosine utility and aligned search/rerank vector math behavior.
+- Updated lexical safety-net policy:
+  - tiny-corpus + high-confidence dense results now skip lexical branch (lower onboarding latency),
+  - lexical candidate pool now combines recent + oldest + broad deterministic coverage (removes recency-only bias).
+- Added/expanded retrieval diagnostics:
+  - `denseNaNClampedCount`
+  - lexical pool composition counters
+  - corpus counters
+  - rerank vector mismatch counters
+- Fixed browser embedding capability scoring so unknown `deviceMemory` is neutral (no positive boost).
+- Updated chunk budgeting flow so quality scoring runs on normalized windows before final chunk selection.
+- Deduplicated query tokens in lexical overlap and rare-token counting.
+- Hardened rerank behavior for vector-size mismatch (no full-pass hard fail).
+- Rerank output now preserves both MMR ranking score (`score`) and rerank relevance signal (`denseScore`).
+
+## 2026-03-05 (Browser Embedding Capability UX + Advanced Tuning Visibility)
+
+- Browser embedding recommendation is now capability-driven:
+  - strong desktop + WebGPU -> `onnx-community/embeddinggemma-300m-ONNX`
+  - mobile / weak / no-WebGPU / probe-failed -> `Xenova/all-MiniLM-L6-v2`
+- Browser capability test results are now shown in Embedding settings (reason, cores, RAM hint, perf score when available).
+- Search/embedder worker now reuses capability-ordered model candidates, preventing unnecessary model re-download churn from candidate-order drift.
+- Developer advanced mode (`sudo`) is now a visible UI checkbox (not hidden-only), with:
+  - red warning about quality/speed/efficiency tradeoffs
+  - scoped persistence (`gitstarrecall.sudo.<scope>`)
+  - `Rebuild Embeddings` action to regenerate vectors with updated settings.
+- Updated CSP `script-src` allowlist to include `https://cdn.jsdelivr.net` for runtime ORT JSEP module loading used by browser embeddings.
+- Browser embedding runtime now uses `@huggingface/transformers` package path.
+
+## 2026-03-05 (Semantic Retrieval v2 + Model Policy Refresh)
+
+- Search pipeline upgraded to retrieval v2:
+  - dense candidate fetch (`fetchK`)
+  - dense confidence gate
+  - lexical safety-net branch (conditional only)
+  - RRF fusion (conditional)
+  - MMR rerank + per-repo cap
+- Added strict embedding dimension compatibility checks during search (no silent zero-score fallback).
+- Added retrieval diagnostics payload (`queryDim`, sampled index dims, trigger reason, dense top scores).
+- Browser embedding baseline switched to `embeddinggemma` (later superseded by capability-driven recommendation policy in the same release cycle).
+- Ollama embedding recommendations now prioritize:
+  1. `qwen3-embedding:4b`
+  2. `qwen3-embedding:0.6b`
+  3. `mxbai-embed-large`
+- Custom embedding model path now shows warning because tuned retrieval assumptions may not hold.
+- Added advanced retrieval tuning controls for sudo mode (`fetchK`, `topK`, `mmrLambda`, `maxChunksPerRepo`, lexical thresholds).
+- Updated docs and DFD Mermaid diagrams to reflect retrieval v2 architecture and threat-model deltas.
+
 ## 2026-03-04 (Ollama Model Discovery + UI Selection)
 
 - Removed env-coupled embedding model selection from runtime (`VITE_OLLAMA_MODEL` is no longer used by app flow).

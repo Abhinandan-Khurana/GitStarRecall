@@ -2,6 +2,31 @@
 
 This document defines the performance roadmap for faster embedding generation while keeping GitStarRecall local-first and secure.
 
+## Retrieval v2 Addendum (2026-03-05)
+
+The indexing pipeline remains local-first, but query-time retrieval now uses a stronger ranking flow:
+
+1. Dense candidate retrieval (`fetchK`).
+2. Dense confidence gate.
+3. Lexical safety-net retrieval only when dense confidence is weak.
+4. Conditional RRF fusion.
+5. MMR diversification + per-repo cap before final top-K.
+
+Runtime defaults:
+
+- Browser embedding recommendation is capability-driven:
+  - strong desktop + WebGPU -> `onnx-community/embeddinggemma-300m-ONNX`
+  - mobile / weak / no-WebGPU / probe-failed -> `Xenova/all-MiniLM-L6-v2`
+- Ollama recommended embeddings:
+  - `qwen3-embedding:4b`
+  - `qwen3-embedding:0.6b`
+  - `mxbai-embed-large`
+
+Safety controls:
+
+- Strict query/index dimension compatibility checks.
+- Custom-model warning path for potentially incompatible retrieval assumptions.
+
 Scope requested:
 1. Micro-batch embeddings in one worker.
 2. Persist SQLite less frequently (checkpoint strategy).
@@ -85,7 +110,7 @@ Add an `EmbeddingOrchestrator` in the main thread with:
 ### 2.3 Non-Goals (for this phase)
 
 - No server-side embedding service dependency.
-- No change to retrieval quality model (`all-MiniLM-L6-v2` remains default).
+- Retrieval defaults are managed by retrieval v2 policy (capability-driven browser recommendation + curated Ollama recommendations).
 - No mandatory desktop app migration.
 
 ---
@@ -339,7 +364,7 @@ Task F scope requested in this run:
 
 ### 10.1 Validation Setup (macOS)
 
-- Runtime mode: browser-only local embedding (`@xenova/transformers` in worker).
+- Runtime mode: browser-only local embedding (`@huggingface/transformers` in worker).
 - Backend policy: `VITE_EMBEDDING_BACKEND_PREFERRED=webgpu` (with automatic wasm fallback).
 - Worker scheduling: pooled micro-batch dispatch (`VITE_EMBEDDING_POOL_SIZE=2`, `VITE_EMBEDDING_WORKER_BATCH_SIZE=8`).
 

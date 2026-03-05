@@ -1,4 +1,5 @@
 import type { ChunkRecord, RepoRecord } from "../db/types";
+import { chunkQualityScore } from "./quality";
 
 const SHORT_DOC_CHUNK_SIZE = 900;
 const MEDIUM_DOC_CHUNK_SIZE = 760;
@@ -7,6 +8,9 @@ const SHORT_DOC_OVERLAP = 140;
 const MEDIUM_DOC_OVERLAP = 110;
 const LONG_DOC_OVERLAP = 90;
 const MAX_README_LENGTH = 100_000;
+const LARGE_README_LENGTH = 30_000;
+const MAX_CHUNKS_FOR_LARGE_README = 120;
+const MIN_CHUNK_QUALITY_SCORE = 0.22;
 
 /**
  * Strip HTML tags, collapse runs of whitespace, and remove common markdown
@@ -122,6 +126,91 @@ function splitIntoChunks(text: string, size: number, overlap: number): string[] 
   return chunks;
 }
 
+function isFenceDelimiter(line: string): { marker: "`" | "~"; length: number } | null {
+  const trimmed = line.trimStart();
+  const match = trimmed.match(/^(`{3,}|~{3,})/);
+  if (!match || !match[1]) {
+    return null;
+  }
+  const markerChar = match[1][0];
+  if (markerChar !== "`" && markerChar !== "~") {
+    return null;
+  }
+  return {
+    marker: markerChar,
+    length: match[1].length,
+  };
+}
+
+export function splitReadmeIntoSections(readme: string): string[] {
+  const normalizedLineEndings = readme.replace(/\r\n/g, "\n");
+  if (normalizedLineEndings.trim().length === 0) {
+    return [normalizedLineEndings];
+  }
+
+  const lines = normalizedLineEndings.split("\n");
+  const parts: string[] = [];
+  let current: string[] = [];
+  let activeFence: { marker: "`" | "~"; length: number } | null = null;
+
+  for (const line of lines) {
+    const fence = isFenceDelimiter(line);
+    if (fence) {
+      if (!activeFence) {
+        activeFence = fence;
+      } else if (fence.marker === activeFence.marker && fence.length >= activeFence.length) {
+        activeFence = null;
+      }
+      current.push(line);
+      continue;
+    }
+
+    const isHeadingStart = /^#{1,6}\s/.test(line.trimStart());
+    if (isHeadingStart && !activeFence && current.length > 0) {
+      const section = current.join("\n").trim();
+      if (section.length > 0) {
+        parts.push(section);
+      }
+      current = [line];
+      continue;
+    }
+
+    current.push(line);
+  }
+
+  if (current.length > 0) {
+    const section = current.join("\n").trim();
+    if (section.length > 0) {
+      parts.push(section);
+    }
+  }
+
+  if (parts.length === 0) {
+    return [normalizedLineEndings];
+  }
+  return parts;
+}
+
+function applyChunkBudget(windows: string[], combinedLength: number): string[] {
+  if (windows.length <= MAX_CHUNKS_FOR_LARGE_README || combinedLength < LARGE_README_LENGTH) {
+    return windows;
+  }
+
+  const scored = windows.map((text, index) => ({
+    text,
+    index,
+    score: chunkQualityScore(normalizeText(text) || text),
+  }));
+  const candidates = scored
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  // Intentionally under-fill when few windows clear quality; avoid padding with low-signal chunks.
+  const selected = candidates.filter((item) => item.score >= MIN_CHUNK_QUALITY_SCORE).slice(0, MAX_CHUNKS_FOR_LARGE_README);
+
+  selected.sort((a, b) => a.index - b.index);
+  return selected.map((item) => item.text);
+}
+
 /**
  * Produce `ChunkRecord[]` for a single repo. Combines metadata header with
  * normalized, truncated README text and splits into overlapping windows.
@@ -129,18 +218,27 @@ function splitIntoChunks(text: string, size: number, overlap: number): string[] 
 export function chunkRepo(repo: RepoRecord): ChunkRecord[] {
   const header = buildMetadataHeader(repo);
 
-  let readmeBody = "";
+  let readmeBodyForBudget = "";
   if (repo.readmeText) {
-    readmeBody = normalizeText(repo.readmeText);
-    if (readmeBody.length > MAX_README_LENGTH) {
-      readmeBody = readmeBody.slice(0, MAX_README_LENGTH);
+    const sectioned = splitReadmeIntoSections(repo.readmeText).join("\n\n");
+    readmeBodyForBudget = sectioned;
+    if (readmeBodyForBudget.length > MAX_README_LENGTH) {
+      readmeBodyForBudget = readmeBodyForBudget.slice(0, MAX_README_LENGTH);
     }
   }
 
-  const combined = readmeBody.length > 0 ? `${header}\n\n${readmeBody}` : header;
+  const combinedForBudget = readmeBodyForBudget.length > 0 ? `${header}\n\n${readmeBodyForBudget}` : header;
 
-  const { size, overlap } = resolveChunkConfig(combined.length);
-  const windows = splitIntoChunks(combined, size, overlap);
+  const { size, overlap } = resolveChunkConfig(combinedForBudget.length);
+  const windowsForBudget = splitIntoChunks(combinedForBudget, size, overlap);
+  const selectedWindows = applyChunkBudget(windowsForBudget, combinedForBudget.length);
+  const windows = selectedWindows.map((windowText) => {
+    const normalized = normalizeText(windowText);
+    if (normalized.length > 0) {
+      return normalized;
+    }
+    return windowText.trim();
+  });
   const now = Date.now();
 
   return windows.map((text, index) => {

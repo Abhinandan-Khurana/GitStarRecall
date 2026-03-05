@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Settings2 } from "lucide-react";
 import { CUSTOM_MODEL_OPTION } from "../ollama/constants";
+import type { BrowserEmbeddingRecommendation } from "../embeddings/browserCapability";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +28,8 @@ interface OllamaConfigPanelProps {
   embeddingModelOptions: string[];
   embeddingModelStatus: "idle" | "loading" | "ready" | "error";
   embeddingModelError: string | null;
+  customModelWarning: string | null;
+  browserEmbeddingRecommendation: BrowserEmbeddingRecommendation | null;
   onRefreshModels: () => void;
   ollamaConnectionStatus: string;
   ollamaConnectionMessage: string | null;
@@ -43,6 +46,8 @@ export function OllamaConfigPanel({
   embeddingModelOptions,
   embeddingModelStatus,
   embeddingModelError,
+  customModelWarning,
+  browserEmbeddingRecommendation,
   onRefreshModels,
   ollamaConnectionStatus,
   ollamaConnectionMessage,
@@ -60,6 +65,19 @@ export function OllamaConfigPanel({
       ? ollamaModel
       : CUSTOM_MODEL_OPTION;
   const showCustomModelInput = selectedEmbeddingOption === CUSTOM_MODEL_OPTION;
+  const browserCapability = browserEmbeddingRecommendation?.capability;
+  const browserReasonLabel =
+    browserEmbeddingRecommendation?.reason === "mobile"
+      ? "Mobile device"
+      : browserEmbeddingRecommendation?.reason === "no-webgpu"
+        ? "WebGPU unavailable"
+        : browserEmbeddingRecommendation?.reason === "strong-desktop"
+          ? "Strong desktop"
+          : browserEmbeddingRecommendation?.reason === "weak-desktop"
+            ? "Weak desktop"
+            : browserEmbeddingRecommendation?.reason === "probe-failed"
+              ? "Probe failed"
+              : "Pending";
 
   return (
     <Collapsible>
@@ -123,6 +141,35 @@ export function OllamaConfigPanel({
             Requests go only to localhost. No GitHub token is sent.
           </p>
 
+          <div className="space-y-1 rounded-md border border-border/50 bg-background/30 px-2 py-1.5">
+            <p className="text-[11px] font-medium text-muted-foreground">Browser embedding capability</p>
+            {browserEmbeddingRecommendation ? (
+              <>
+                <p className="text-[11px] text-muted-foreground">
+                  Recommended model: <span className="font-medium text-foreground">{browserEmbeddingRecommendation.modelId}</span>
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Reason: <span className="font-medium text-foreground">{browserReasonLabel}</span>
+                  {browserEmbeddingRecommendation.score != null && browserEmbeddingRecommendation.threshold != null
+                    ? ` (${browserEmbeddingRecommendation.score}/${browserEmbeddingRecommendation.threshold})`
+                    : ""}
+                </p>
+                {browserCapability ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    Mobile: {browserCapability.isMobile ? "yes" : "no"} · WebGPU: {browserCapability.hasWebGPU ? "yes" : "no"} ·
+                    Cores: {browserCapability.hardwareConcurrency}
+                    {browserCapability.deviceMemoryGB != null ? ` · RAM: ${browserCapability.deviceMemoryGB}GB` : ""}
+                    {browserCapability.perfScore != null
+                      ? ` · Perf: ${browserCapability.perfScore.toFixed(0)}`
+                      : ""}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">Running browser capability test…</p>
+            )}
+          </div>
+
           <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
             <div className="space-y-1">
               <Label htmlFor="ollama-base-url" className="text-[11px] text-muted-foreground">
@@ -145,7 +192,7 @@ export function OllamaConfigPanel({
                 onValueChange={(value) => {
                   if (value === CUSTOM_MODEL_OPTION) {
                     setCustomModelMode(true);
-                    onModelChange(ollamaModel.trim() || "nomic-embed-text");
+                    onModelChange(ollamaModel.trim() || "qwen3-embedding:0.6b");
                     return;
                   }
                   setCustomModelMode(false);
@@ -199,19 +246,22 @@ export function OllamaConfigPanel({
                 setCustomModelMode(true);
                 onModelChange(event.target.value);
               }}
-              placeholder="nomic-embed-text"
+              placeholder="qwen3-embedding:0.6b"
               className="h-8 rounded-md border-border/50 bg-background/50 text-xs"
             />
           ) : null}
 
           {embeddingModelOptions.length === 0 && embeddingModelStatus !== "loading" ? (
             <p className="text-[11px] text-muted-foreground">
-              No embedding models detected yet. Pull one locally (for example `nomic-embed-text`) and refresh.
+              No embedding models detected yet. Pull one locally (for example `qwen3-embedding:0.6b`) and refresh.
             </p>
           ) : null}
 
           {embeddingModelError ? (
             <p className="text-[11px] text-destructive">{embeddingModelError}</p>
+          ) : null}
+          {customModelWarning ? (
+            <p className="text-[11px] text-amber-600">{customModelWarning}</p>
           ) : null}
 
           {ollamaConnectionMessage && (

@@ -9,14 +9,15 @@ describe("buildOllamaModelCatalogFromPayload", () => {
           { name: "nomic-embed-text", details: { family: "bert" } },
           { name: "llama3.1:8b", details: { family: "llama" } },
           { name: "mxbai-embed-large" },
+          { name: "qwen3-embedding:0.6b" },
         ],
       },
       "llama3.1:8b",
     );
 
-    expect(catalog.embedding).toEqual(["mxbai-embed-large", "nomic-embed-text"]);
+    expect(catalog.embedding).toEqual(["qwen3-embedding:0.6b", "mxbai-embed-large", "nomic-embed-text"]);
     expect(catalog.llm).toEqual(["llama3.1:8b"]);
-    expect(catalog.recommendedEmbedding).toBe("nomic-embed-text");
+    expect(catalog.recommendedEmbedding).toBe("qwen3-embedding:0.6b");
     expect(catalog.recommendedLlm).toBe("llama3.1:8b");
   });
 
@@ -29,6 +30,21 @@ describe("buildOllamaModelCatalogFromPayload", () => {
     );
     expect(catalog.recommendedEmbedding).toBe("bge-m3");
     expect(catalog.recommendedLlm).toBeNull();
+  });
+
+  test("matches recommended embedding models even when ollama names include tags", () => {
+    const catalog = buildOllamaModelCatalogFromPayload(
+      {
+        models: [
+          { name: "mxbai-embed-large:latest" },
+          { name: "nomic-embed-text:latest" },
+          { name: "llama3.1:8b", details: { family: "llama" } },
+        ],
+      },
+      null,
+    );
+    expect(catalog.embedding[0]).toBe("mxbai-embed-large:latest");
+    expect(catalog.recommendedEmbedding).toBe("mxbai-embed-large:latest");
   });
 
   test("deduplicates and sorts model names", () => {
