@@ -405,4 +405,144 @@ describe("LocalDatabase semantic search", () => {
     });
     expect(results.some((item) => item.chunkId === "legacy-0")).toBe(true);
   });
+
+  it("uses fused relevance in MMR so lexical-only candidates remain competitive", async () => {
+    const rawDb = new SQL.Database();
+    runSchema(rawDb);
+    const localDb = createLocalDatabase(rawDb);
+
+    const now = Date.now();
+    await localDb.upsertRepos([
+      {
+        id: 1,
+        fullName: "acme/dense-1",
+        name: "dense-1",
+        description: null,
+        topics: [],
+        language: "TypeScript",
+        htmlUrl: "https://github.com/acme/dense-1",
+        stars: 1,
+        forks: 0,
+        updatedAt: "2026-01-01T00:00:00Z",
+        readmeUrl: null,
+        readmeText: "dense alpha",
+        checksum: "dense-1",
+        lastSyncedAt: now,
+      },
+      {
+        id: 2,
+        fullName: "acme/dense-2",
+        name: "dense-2",
+        description: null,
+        topics: [],
+        language: "TypeScript",
+        htmlUrl: "https://github.com/acme/dense-2",
+        stars: 1,
+        forks: 0,
+        updatedAt: "2026-01-01T00:00:00Z",
+        readmeUrl: null,
+        readmeText: "dense beta",
+        checksum: "dense-2",
+        lastSyncedAt: now + 1,
+      },
+      {
+        id: 3,
+        fullName: "acme/dense-3",
+        name: "dense-3",
+        description: null,
+        topics: [],
+        language: "TypeScript",
+        htmlUrl: "https://github.com/acme/dense-3",
+        stars: 1,
+        forks: 0,
+        updatedAt: "2026-01-01T00:00:00Z",
+        readmeUrl: null,
+        readmeText: "dense gamma",
+        checksum: "dense-3",
+        lastSyncedAt: now + 2,
+      },
+      {
+        id: 4,
+        fullName: "acme/lexical",
+        name: "lexical",
+        description: null,
+        topics: [],
+        language: "TypeScript",
+        htmlUrl: "https://github.com/acme/lexical",
+        stars: 1,
+        forks: 0,
+        updatedAt: "2026-01-01T00:00:00Z",
+        readmeUrl: null,
+        readmeText: "pkg/foo:v1.2.3 sha256:abcd retrieval target",
+        checksum: "lexical",
+        lastSyncedAt: now + 3,
+      },
+    ]);
+
+    await localDb.upsertChunks([
+      { id: "dense-1", repoId: 1, chunkId: "dense-1", text: "generic dense alpha", source: "readme", createdAt: 1 },
+      { id: "dense-2", repoId: 2, chunkId: "dense-2", text: "generic dense beta", source: "readme", createdAt: 2 },
+      { id: "dense-3", repoId: 3, chunkId: "dense-3", text: "generic dense gamma", source: "readme", createdAt: 3 },
+      {
+        id: "a-lexical",
+        repoId: 4,
+        chunkId: "a-lexical",
+        text: "pkg/foo:v1.2.3 sha256:abcd retrieval target",
+        source: "readme",
+        createdAt: 4,
+      },
+    ]);
+
+    await localDb.upsertEmbeddings([
+      {
+        id: "dense-e1",
+        chunkId: "dense-1",
+        model: "test-model",
+        dimension: 3,
+        vectorBlob: toBlob(new Float32Array([1, 0, 0])),
+        createdAt: 1,
+      },
+      {
+        id: "dense-e2",
+        chunkId: "dense-2",
+        model: "test-model",
+        dimension: 3,
+        vectorBlob: toBlob(new Float32Array([0.2, 0.98, 0])),
+        createdAt: 2,
+      },
+      {
+        id: "dense-e3",
+        chunkId: "dense-3",
+        model: "test-model",
+        dimension: 3,
+        vectorBlob: toBlob(new Float32Array([0.1, 0, 0.995])),
+        createdAt: 3,
+      },
+      {
+        id: "lex-e1",
+        chunkId: "a-lexical",
+        model: "test-model",
+        dimension: 3,
+        vectorBlob: toBlob(new Float32Array([-1, 0, 0])),
+        createdAt: 4,
+      },
+    ]);
+
+    let lexicalTriggered = false;
+    const results = await localDb.findSimilarChunks(new Float32Array([1, 0, 0]), 3, {
+      queryText: "pkg/foo:v1.2.3 sha256:abcd",
+      tuning: {
+        fetchK: 4,
+        topK: 3,
+        mmrLambda: 1,
+        maxChunksPerRepo: 3,
+      },
+      onDiagnostics(payload) {
+        lexicalTriggered = payload.lexicalTriggered;
+      },
+    });
+
+    expect(lexicalTriggered).toBe(true);
+    expect(results.map((item) => item.chunkId)).toContain("a-lexical");
+  });
 });

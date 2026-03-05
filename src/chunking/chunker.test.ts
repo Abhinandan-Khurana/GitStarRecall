@@ -72,6 +72,28 @@ describe("chunker", () => {
     expect(chunks.some((chunk) => chunk.text.includes("legacyneedle"))).toBe(true);
   });
 
+  test("chunk budget scores badge-heavy windows after normalization", () => {
+    const badges = new Array(6)
+      .fill("![ci](https://img.shields.io/badge/ci-pass-brightgreen)")
+      .join(" ");
+    const intro = ["## Intro", "badgesemantictoken keeps this section relevant.", badges, ""].join("\n");
+    const bodySection = [
+      "## Architecture",
+      "This section explains retrieval ranking and semantic chunk relevance for query matching.",
+      "",
+    ].join("\n");
+    const largeReadme = `${intro}\n${new Array(1800).fill(bodySection).join("\n")}`;
+
+    const repo = makeRepo({
+      id: 109,
+      readmeText: largeReadme,
+    });
+
+    const chunks = chunkRepo(repo);
+    expect(chunks.length).toBeLessThanOrEqual(120);
+    expect(chunks.some((chunk) => chunk.text.includes("badgesemantictoken"))).toBe(true);
+  });
+
   test("chunk budget does not force-include low-quality first windows", () => {
     const lowSignal = [
       "| badge | value |",

@@ -146,7 +146,7 @@ function applyChunkBudget(windows: string[], combinedLength: number): string[] {
   const scored = windows.map((text, index) => ({
     text,
     index,
-    score: chunkQualityScore(text),
+    score: chunkQualityScore(normalizeText(text) || text),
   }));
   const candidates = scored
     .sort((a, b) => b.score - a.score || a.index - b.index);

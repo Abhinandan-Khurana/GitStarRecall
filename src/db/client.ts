@@ -935,6 +935,8 @@ export class LocalDatabase {
         })
       : { trigger: false, reason: null };
 
+    const denseScoreById = new Map(denseTop.map((item) => [item.chunkId, item.score]));
+    let relevanceScoreById = denseScoreById;
     let candidateOrder = denseTop.map((item) => item.chunkId);
     let lexicalScanLimit = 0;
     let lexicalPoolRecentCount = 0;
@@ -953,9 +955,13 @@ export class LocalDatabase {
         lexical.candidates.map((item) => ({ id: item.chunkId })),
       ]);
       candidateOrder = fused.slice(0, tuning.fetchK).map((item) => item.id);
+      const fusedTopScore = fused[0]?.score ?? 0;
+      relevanceScoreById =
+        fusedTopScore > 0
+          ? new Map(fused.map((item) => [item.id, item.score / fusedTopScore]))
+          : new Map();
     }
 
-    const denseScoreById = new Map(denseTop.map((item) => [item.chunkId, item.score]));
     const candidateDetailsMap = this.hydrateChunkDetails(candidateOrder);
     const candidates: DenseCandidate[] = [];
     for (const chunkId of candidateOrder) {
@@ -968,7 +974,7 @@ export class LocalDatabase {
         chunkId,
         repoId: details.repoId,
         vector,
-        denseScore: denseScoreById.get(chunkId) ?? 0,
+        denseScore: relevanceScoreById.get(chunkId) ?? denseScoreById.get(chunkId) ?? 0,
       });
     }
 
