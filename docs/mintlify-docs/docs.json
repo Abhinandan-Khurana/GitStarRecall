@@ -1,3 +1,41 @@
-"seo": {
-    "indexing": "all"
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "GitStarRecall Docs",
+  "description": "GitStarRecall documentation and guides",
+  "colors": {
+    "primary": "#22c55e"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Getting Started",
+        "pages": [
+          "introduction"
+        ]
+      },
+      {
+        "group": "Core Guides",
+        "pages": [
+          "setup",
+          "usage",
+          "features"
+        ]
+      },
+      {
+        "group": "Advanced",
+        "pages": [
+          "architecture",
+          "security-model"
+        ]
+      },
+      {
+        "group": "Resources",
+        "pages": [
+          "faq",
+          "troubleshooting"
+        ]
+      }
+    ]
+  }
 }
