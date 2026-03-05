@@ -1,5 +1,15 @@
 # Release Notes
 
+## 2026-03-05 (Usage Settings UI Follow-up Fixes)
+
+- Completed the developer retrieval-tuning panel so all persisted knobs are editable in UI:
+  - `lexicalTop1Threshold` (`0.05..0.5`)
+  - `lexicalTop5MeanThreshold` (`0.05..0.5`)
+- Fixed stale rebuild confirmation state in developer mode:
+  - turning off `Enable developer advanced mode` now clears the pending `Are you sure?` state for `Rebuild Embeddings`.
+- Removed duplicate `RetrievalTuning` type declarations by importing the shared type from `DeveloperModePanel` into `UsagePage`, preventing silent type drift.
+- Synced docs for these controls in `docs/Usage.md`.
+
 ## 2026-03-05 (Sync Progress UX Fix - README + Ollama Embeddings)
 
 - Fixed sync progress visibility during staged indexing:
