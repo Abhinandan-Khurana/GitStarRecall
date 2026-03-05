@@ -1,5 +1,23 @@
 # Release Notes
 
+## 2026-03-05 (PR Review Remediation - Search Correctness and Stability)
+
+- Fixed critical dense cosine bug in `src/db/client.ts` where zero-norm vectors could produce `NaN` and corrupt ranking order.
+- Added shared safe cosine utility and aligned search/rerank vector math behavior.
+- Updated lexical safety-net policy:
+  - tiny-corpus + high-confidence dense results now skip lexical branch (lower onboarding latency),
+  - lexical candidate pool now combines recent + oldest + broad deterministic coverage (removes recency-only bias).
+- Added/expanded retrieval diagnostics:
+  - `denseNaNClampedCount`
+  - lexical pool composition counters
+  - corpus counters
+  - rerank vector mismatch counters
+- Fixed browser embedding capability scoring so unknown `deviceMemory` is neutral (no positive boost).
+- Updated chunk budgeting flow so quality scoring runs on markdown-preserving windows before normalization.
+- Deduplicated query tokens in lexical overlap and rare-token counting.
+- Hardened rerank behavior for vector-size mismatch (no full-pass hard fail).
+- Rerank output now preserves both MMR ranking score (`score`) and raw dense score (`denseScore`).
+
 ## 2026-03-05 (Browser Embedding Capability UX + Advanced Tuning Visibility)
 
 - Browser embedding recommendation is now capability-driven:

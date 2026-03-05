@@ -177,7 +177,9 @@ Recommended:
 - Search pipeline defaults:
   - dense retrieval with `fetchK`,
   - dense confidence gate,
-  - lexical safety-net only when dense confidence is weak,
+  - lexical safety-net only when dense confidence is weak (or rare-token intent is detected),
+  - tiny-corpus high-confidence queries skip the lexical branch to avoid onboarding latency,
+  - lexical pool is mixed (recent + oldest + broad deterministic window), not recency-only,
   - MMR rerank with per-repo cap.
 
 ## 10.1 Retrieval Tuning (Sudo/Advanced)
@@ -256,12 +258,19 @@ Reset actions in UI:
   - lexical safety-net trigger reason,
   - top dense score distribution.
 - If top results are from same repo, lower `maxChunksPerRepo` or increase `fetchK`.
+- Check diagnostics for lexical pool counters (`lexicalPoolRecentCount`, `lexicalPoolBroadCount`, `lexicalPoolOldestCount`) and trigger reason.
 
 ## 12.7 Dimension mismatch error
 
 - Error means query embedding dimension differs from indexed vectors.
 - Use same embedding model for indexing and searching.
 - Rebuild embeddings after model/profile changes.
+
+## 12.9 Score semantics (MMR vs dense)
+
+- Search result `score` reflects the rerank decision score (MMR objective).
+- Dense cosine score is retained internally as `denseScore` for diagnostics/debugging.
+- UI keeps a compact band (`High/Medium/Low`) and a finite decimal score.
 
 ## 12.8 Browser embedding model keeps re-downloading
 
