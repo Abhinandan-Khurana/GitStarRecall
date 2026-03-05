@@ -1,5 +1,38 @@
 # Release Notes
 
+## 2026-03-05 (Browser Embedding Capability UX + Advanced Tuning Visibility)
+
+- Browser embedding recommendation is now capability-driven:
+  - strong desktop + WebGPU -> `onnx-community/embeddinggemma-300m-ONNX`
+  - mobile / weak / no-WebGPU / probe-failed -> `Xenova/all-MiniLM-L6-v2`
+- Browser capability test results are now shown in Embedding settings (reason, cores, RAM hint, perf score when available).
+- Search/embedder worker now reuses capability-ordered model candidates, preventing unnecessary model re-download churn from candidate-order drift.
+- Developer advanced mode (`sudo`) is now a visible UI checkbox (not hidden-only), with:
+  - red warning about quality/speed/efficiency tradeoffs
+  - scoped persistence (`gitstarrecall.sudo.<scope>`)
+  - `Rebuild Embeddings` action to regenerate vectors with updated settings.
+- Updated CSP `script-src` allowlist to include `https://cdn.jsdelivr.net` for runtime ORT JSEP module loading used by browser embeddings.
+- Browser embedding runtime now uses `@huggingface/transformers` package path.
+
+## 2026-03-05 (Semantic Retrieval v2 + Model Policy Refresh)
+
+- Search pipeline upgraded to retrieval v2:
+  - dense candidate fetch (`fetchK`)
+  - dense confidence gate
+  - lexical safety-net branch (conditional only)
+  - RRF fusion (conditional)
+  - MMR rerank + per-repo cap
+- Added strict embedding dimension compatibility checks during search (no silent zero-score fallback).
+- Added retrieval diagnostics payload (`queryDim`, sampled index dims, trigger reason, dense top scores).
+- Browser embedding baseline switched to `embeddinggemma` (later superseded by capability-driven recommendation policy in the same release cycle).
+- Ollama embedding recommendations now prioritize:
+  1. `qwen3-embedding:4b`
+  2. `qwen3-embedding:0.6b`
+  3. `mxbai-embed-large`
+- Custom embedding model path now shows warning because tuned retrieval assumptions may not hold.
+- Added advanced retrieval tuning controls for sudo mode (`fetchK`, `topK`, `mmrLambda`, `maxChunksPerRepo`, lexical thresholds).
+- Updated docs and DFD Mermaid diagrams to reflect retrieval v2 architecture and threat-model deltas.
+
 ## 2026-03-04 (Ollama Model Discovery + UI Selection)
 
 - Removed env-coupled embedding model selection from runtime (`VITE_OLLAMA_MODEL` is no longer used by app flow).

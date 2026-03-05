@@ -141,10 +141,18 @@ Important:
 
 - Requires explicit local consent toggle.
 - Endpoint must be reachable from browser.
-- Ollama defaults:
+  - Ollama defaults:
   - URL: `http://localhost:11434`
-  - Default embedding baseline: `nomic-embed-text` (UI-selectable)
+  - Recommended embedding order:
+    1. `qwen3-embedding:4b` (quality-first)
+    2. `qwen3-embedding:0.6b` (speed-first)
+    3. `mxbai-embed-large` (baseline)
   - Installed model lists are discovered from local `/api/tags` and shown in dropdowns.
+  - Browser embedding recommendation is capability-based:
+    - strong desktop + WebGPU -> `onnx-community/embeddinggemma-300m-ONNX`
+    - mobile / no-WebGPU / weak desktop / probe-failed -> `Xenova/all-MiniLM-L6-v2`
+  - Embedding settings shows browser capability diagnostics (reason, cores, RAM hint, perf score when available).
+  - Custom embedding models are supported but marked experimental with warning.
 
 ## 9.3 Browser WebLLM
 
@@ -166,6 +174,33 @@ Recommended:
   - tune `VITE_EMBEDDING_WORKER_BATCH_SIZE` around `8..16`
 - Avoid unnecessary full re-syncs; use checkpoint resume behavior.
 - Use `Fetch Stars` only when you need latest starred changes.
+- Search pipeline defaults:
+  - dense retrieval with `fetchK`,
+  - dense confidence gate,
+  - lexical safety-net only when dense confidence is weak,
+  - MMR rerank with per-repo cap.
+
+## 10.1 Retrieval Tuning (Sudo/Advanced)
+
+Developer advanced mode is available directly in UI as a checkbox (`Enable developer advanced mode (sudo)`).
+Settings are persisted per auth scope via `localStorage` (`gitstarrecall.sudo.<scope>`).
+When enabled, advanced controls become available:
+
+- `fetchK` (`80..300`)
+- `topK` (`10..40`)
+- `mmrLambda` (`0.55..0.9`)
+- `maxChunksPerRepo` (`1..5`)
+- lexical trigger thresholds (`top1`, `top5Mean`)
+- `Rebuild Embeddings` action to regenerate vectors using current embedding settings/model selection.
+
+Warning behavior:
+- UI shows a red warning that advanced tuning may improve corpus-specific quality or reduce relevance/speed/efficiency.
+
+Recommended starting points:
+
+- <=30k chunks: `fetchK=120`, `topK=20`, `mmrLambda=0.72`, `maxChunksPerRepo=2`
+- 30k..120k chunks: `fetchK=150`, `topK=20`, `mmrLambda=0.72`, `maxChunksPerRepo=2`
+- >120k chunks: consider Ollama local embedding and increase `fetchK` gradually with latency checks
 
 ## 11) Data Storage and Reset
 
@@ -211,6 +246,29 @@ Reset actions in UI:
 
 - Check recommendation diagnostics in UI (`reason`, `webgpu`, `cores`, `mem`, `perf`).
 - Manual model selection is supported in chat settings.
+
+## 12.6 Semantic search relevance is weak
+
+- Confirm indexed model and query model match.
+- If you switched model families, run full re-index.
+- Check search diagnostics logs for:
+  - query/index dimensions,
+  - lexical safety-net trigger reason,
+  - top dense score distribution.
+- If top results are from same repo, lower `maxChunksPerRepo` or increase `fetchK`.
+
+## 12.7 Dimension mismatch error
+
+- Error means query embedding dimension differs from indexed vectors.
+- Use same embedding model for indexing and searching.
+- Rebuild embeddings after model/profile changes.
+
+## 12.8 Browser embedding model keeps re-downloading
+
+- Verify browser cache is enabled (DevTools `Disable cache` should be off).
+- Avoid private/incognito mode if you want persistent model cache.
+- Confirm CSP allows required script/connect hosts (`https://cdn.jsdelivr.net`, `https://huggingface.co`, `https://*.huggingface.co`, `https://xethub.hf.co`).
+- Keep one stable recommended model path when possible; frequent model switching can trigger additional downloads.
 
 ## 13) Developer Command Cheat Sheet
 
@@ -261,7 +319,7 @@ README batching pipeline controls:
 
 0. Start by exposing ollama to global CORS `export OLLAMA_ORIGINS="*"`
 1. Then start Ollama locally: `ollama serve`
-2. Pull embedding model: `ollama pull nomic-embed-text`
+2. Pull one recommended embedding model (for example `ollama pull qwen3-embedding:0.6b`)
 3. In the app, enable `Use Ollama for local embeddings`.
 4. Keep base URL as `http://localhost:11434` (or your localhost override).
 5. Click `Test connection` (this also refreshes installed model lists).

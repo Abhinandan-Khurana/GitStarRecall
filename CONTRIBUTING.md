@@ -108,6 +108,7 @@ For embedding/indexing changes:
 - Avoid regressions in throughput or UI responsiveness.
 - Keep fallback behavior deterministic.
 - Preserve progress telemetry and error diagnostics.
+- For retrieval changes, include dense candidate policy, lexical trigger policy, and MMR/per-repo cap rationale.
 
 When changing worker/batching/checkpoint logic:
 - add or adjust unit tests.
@@ -141,9 +142,11 @@ Likely docs to touch:
 - `docs/Usage.md`
 - `docs/tech-stack-architecture-security-prd.md`
 - `docs/embedding-acceleration-plan.md`
+- `docs/dfd-diagrams.md`
 - `docs/threat-modeling-stride.md`
 - `docs/security-review-stride.md`
 - `docs/release-notes.md`
+- `README.md` architecture Mermaid snapshot
 
 ---
 

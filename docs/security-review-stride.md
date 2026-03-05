@@ -26,6 +26,30 @@ This document reviews the GitStarRecall codebase against the threats and mitigat
 - README batch pipeline now uses adaptive concurrency + cooldown for rate-limit resilience (reduces abusive retry bursts).
 - Conditional README revalidation headers (`If-None-Match`, `If-Modified-Since`) use repo-local validator metadata only; no auth token/session data is written to these fields.
 
+## 2026-03-05 Update (Retrieval v2 + Model Policy)
+
+- Added search-time strict embedding dimension compatibility checks (hard error on mismatch).
+- Added retrieval v2 path:
+  - dense candidate fetch (`fetchK`)
+  - dense confidence gate
+  - lexical safety-net branch (conditional)
+  - conditional RRF fusion
+  - MMR + per-repo cap reranking
+- Added custom embedding model warning path for non-curated models.
+- Added retrieval diagnostics payload with score summaries and trigger reasons.
+- Added sudo-mode retrieval tuning controls with bounded ranges and defaults.
+- Added browser embedding capability-based recommendation:
+  - strong desktop + WebGPU -> `onnx-community/embeddinggemma-300m-ONNX`
+  - mobile / weak / no-WebGPU / probe-failed -> `Xenova/all-MiniLM-L6-v2`
+- Added visible developer advanced-mode checkbox + red warning + scoped persistence key (`gitstarrecall.sudo.<scope>`).
+- Added explicit `script-src` allowance for `https://cdn.jsdelivr.net` for ORT JSEP module loading in browser embedding runtime.
+
+Security posture notes:
+
+- Positive: lexical branch is conditional, reducing unnecessary broadened retrieval.
+- Positive: dimension mismatch now fails fast instead of silently degrading results.
+- Residual: custom model path can still degrade quality if model contracts differ; warning is advisory.
+
 ---
 
 ## 1) S – Spoofing
@@ -45,7 +69,7 @@ This document reviews the GitStarRecall codebase against the threats and mitigat
 | Mitigation | Status | Evidence / Gap |
 |------------|--------|-----------------|
 | Sanitize README rendering | **Done** | `src/components/SafeMarkdown.tsx`: all README and chat markdown is rendered via `ReactMarkdown` with `rehypeSanitize` (no `dangerouslySetInnerHTML`). |
-| CSP + no inline scripts | **Partial** | `vite.config.ts`: CSP is set in server/preview headers. **Gaps:** (1) Production still has `script-src 'self' 'unsafe-eval'` (needed for some tooling; document if intentional). (2) `style-src` includes `'unsafe-inline'` for fonts/styles. (3) No CSP in `index.html` for static hosting without Vite – if the app is deployed without Vite’s server/preview, CSP may not apply. |
+| CSP + no inline scripts | **Partial** | `vite.config.ts`: CSP is set in server/preview headers. `script-src` now explicitly includes `https://cdn.jsdelivr.net` because browser embedding runtime loads ORT JSEP module from jsDelivr. **Gaps:** (1) Production still has `script-src 'self' 'unsafe-eval'` (needed for runtime/tooling; document if intentional). (2) `style-src` includes `'unsafe-inline'` for fonts/styles. (3) No CSP in `index.html` for static hosting without Vite – if the app is deployed without Vite’s server/preview, CSP may not apply. |
 | Checksum format and integrity | **Done** | `src/github/checksum.ts`: `sha256Hex` and `canonicalChecksumInput`; used in `github/client.ts` for repo/README checksums. DB stores `checksum` and uses it for diffing (e.g. `UsagePage` “Diffing repos with checksum state”). |
 | Write operations only through controlled paths | **Done** | DB writes go through `src/db/client.ts` (e.g. `upsertRepos`, `upsertChunks`, etc.); no raw SQL from user input. |
 | Pin model source / versions | **Context** | Embedding model is loaded from Hugging Face / CDN; CSP `connect-src` restricts to known hosts. Version pinning is build/deploy concern. |

@@ -93,6 +93,7 @@ Read more:
 - README fetch pipeline with missing/failure tracking.
 - Adaptive batched README ingestion pipeline (feature-flagged rollout).
 - Local chunking + embedding generation.
+- Browser embedding capability test with model recommendation (mobile-safe fallback).
 - Persistent chat sessions with ordered messages.
 - Session-aware search and follow-up flow on existing local embeddings.
 - Local and remote LLM answer modes.
@@ -109,10 +110,20 @@ flowchart LR
     A --> X[OAuth Exchange API]
     A --> C[Local DB: sql.js + OPFS]
     A --> C2[Chat Backup: IndexedDB/localStorage]
-    A --> D[Embedding Pipeline]
-    D --> E[Browser Workers + Xenova]
-    D --> G[Ollama Embeddings - opt-in]
-    C --> S[Local Semantic Search]
+    A --> D[Embedding Runtime Selector]
+    D --> D1[Browser Capability Test]
+    D1 -->|strong desktop + WebGPU| E[Browser Embeddings: embeddinggemma]
+    D1 -->|mobile / weak / no-WebGPU| E2[Browser Embeddings: Xenova/all-MiniLM-L6-v2]
+    D --> G[Ollama Embeddings: qwen3-embedding:4b / qwen3-embedding:0.6b / mxbai-embed-large (opt-in)]
+    C --> Q[Search Pipeline v2]
+    Q --> Q1[Dense Retrieval fetchK]
+    Q1 --> Q2[Dense Confidence Check]
+    Q2 -->|dense suspicious| Q3[Lexical Safety Net conditional]
+    Q2 -->|dense healthy| Q5[MMR plus Repo Cap]
+    Q3 --> Q4[Fusion RRF conditional]
+    Q4 --> Q5[MMR plus Repo Cap]
+    Q5 --> S[Final Top-K Search Results]
+    Q --> M[Retrieval Diagnostics local]
     A --> F[LLM Provider Adapter]
     F --> W[WebLLM in Browser - opt-in]
     F --> L[Local LLM: Ollama/LM Studio - opt-in]
@@ -123,7 +134,8 @@ Notes:
 - Star sync is user-triggered via `Fetch Stars`; search runs on existing local embeddings.
 - Vector data is stored as Float32 blobs in local SQLite tables.
 - Retrieval/search is local; no server-side vector index is required.
-- Embedding backend policy is browser `webgpu` preferred with deterministic `wasm` fallback.
+- Browser embedding model is capability-driven (`embeddinggemma` on strong desktop, `Xenova/all-MiniLM-L6-v2` on mobile/weak/no-WebGPU); local Ollama embedding is opt-in.
+- Retrieval path uses dense fetch + confidence gate + conditional lexical safety net + MMR with per-repo cap.
 - WebLLM/local/remote generation paths are explicit opt-in with consent controls.
 
 ---

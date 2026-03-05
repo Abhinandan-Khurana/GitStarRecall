@@ -33,8 +33,15 @@ Design reference:
   - Note: sqlite-vec must be statically compiled into the SQLite WASM build (no dynamic extension loading in WASM).
 
 ### 1.3 Embeddings (Local-First)
-- Primary: @xenova/transformers
-- Model: `all-MiniLM-L6-v2` (384 dims) for speed/accuracy balance
+- Primary: `@huggingface/transformers` (browser worker runtime)
+- Browser model policy (capability-driven):
+  - strong desktop + WebGPU -> `onnx-community/embeddinggemma-300m-ONNX`
+  - mobile / weak / no-WebGPU / probe-failed -> `Xenova/all-MiniLM-L6-v2`
+- Browser capability diagnostics are surfaced in embedding settings UI.
+- Local Ollama recommended order:
+  1. `qwen3-embedding:4b`
+  2. `qwen3-embedding:0.6b`
+  3. `mxbai-embed-large`
 - Runtime backend policy:
   - Preferred: browser `webgpu` (when available and healthy)
   - Fallback: browser `wasm` CPU
@@ -43,6 +50,14 @@ Design reference:
   - Small worker pool (`2` workers default, auto-downshift to `1` on pressure)
   - Checkpointed SQLite persistence (interval-based, not every mini write)
 - Fallback: server embeddings (optional, opt-in)
+
+### 1.3.1 Retrieval v2 (Query-Time)
+- Dense candidate retrieval (`fetchK`) with cosine similarity.
+- Dense confidence gate to decide whether lexical safety-net is needed.
+- Lexical retrieval is conditional (safety-net only when dense confidence is weak).
+- Conditional RRF fusion when lexical branch is active.
+- Final MMR rerank with per-repo cap before top-K output.
+- Strict query/index embedding dimension compatibility checks.
 
 ### 1.4 Backend (Optional Hybrid)
 - API layer: Next.js API routes or Fastify
@@ -419,6 +434,7 @@ Reference:
 - Cap worker pool size (default `2`) to prevent local resource exhaustion.
 - Cap micro-batch size and auto-downshift on memory pressure.
 - Keep strict allowlist for model download hosts in CSP `connect-src`.
+- Keep strict allowlist for runtime module hosts in CSP `script-src` (include jsDelivr for ORT JSEP).
 - Record backend fallback reason (`webgpu` -> `wasm`) for auditability and debugging.
 - Never transmit embedding input text externally as part of optimization path.
 
@@ -657,7 +673,8 @@ console.assert(rows[0][0] === "a" && rows[1][0] === "b");
 ## 7) Open Decisions
 Resolved decisions:
 - Frontend: Vite + React
-- Embeddings model: `all-MiniLM-L6-v2`
+- Browser embedding model policy: capability-driven (`embeddinggemma` on strong desktop, MiniLM fallback on mobile/weak/no-WebGPU)
+- Ollama recommended embeddings: `qwen3-embedding:4b`, `qwen3-embedding:0.6b`, `mxbai-embed-large`
 - Local vector strategy: SQLite WASM + `sqlite-vec-wasm`
 
 Active decisions:
