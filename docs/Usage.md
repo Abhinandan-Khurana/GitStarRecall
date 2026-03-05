@@ -353,6 +353,7 @@ README batching pipeline controls:
 5. Click `Test connection` (this also refreshes installed model lists).
 6. Run `Fetch Stars` to index with Ollama.
 7. If Ollama goes down, the app falls back to browser embedding automatically.
+8. If you select `Custom model...`, the custom input stays open even when blank so you can type a model name before saving.
 
 If connection fails from browser:
 

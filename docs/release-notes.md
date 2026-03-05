@@ -19,6 +19,9 @@
 - Added accessibility semantics for disclosure-style controls:
   - advanced tuning toggle and browser capability toggle now expose `aria-expanded`/`aria-controls`,
   - custom model input now has an explicit associated label.
+- Fixed custom-model selection edge case in Ollama embedding settings:
+  - selecting `Custom model...` no longer forces a fallback model when the input is blank,
+  - prevents custom input from collapsing immediately when common defaults are installed locally.
 - Removed duplicate `RetrievalTuning` type declarations by importing the shared type from `DeveloperModePanel` into `UsagePage`, preventing silent type drift.
 - Synced docs for these controls in `docs/Usage.md`.
 

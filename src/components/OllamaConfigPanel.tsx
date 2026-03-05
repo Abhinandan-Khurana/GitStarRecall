@@ -387,9 +387,10 @@ export function OllamaConfigPanel({
                   onValueChange={(value) => {
                     if (value === CUSTOM_MODEL_OPTION) {
                       setCustomModelMode(true);
-                      onModelChange(
-                        ollamaModel.trim() || "qwen3-embedding:0.6b"
-                      );
+                      const preservedModel = ollamaModel.trim();
+                      if (preservedModel) {
+                        onModelChange(preservedModel);
+                      }
                       return;
                     }
                     setCustomModelMode(false);
