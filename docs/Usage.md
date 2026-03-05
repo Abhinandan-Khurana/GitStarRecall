@@ -197,7 +197,7 @@ When enabled, advanced controls become available:
 - `mmrLambda` (`0.55..0.9`)
 - `maxChunksPerRepo` (`1..5`)
 - lexical trigger thresholds (`top1`, `top5Mean`)
-- `Rebuild Embeddings` action to regenerate vectors using current embedding settings/model selection.
+- `Rebuild Embeddings` action to regenerate vectors using current embedding settings/model selection (with confirmation prompt).
 
 Warning behavior:
 - UI shows a red warning that advanced tuning may improve corpus-specific quality or reduce relevance/speed/efficiency.

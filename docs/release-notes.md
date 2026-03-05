@@ -4,8 +4,13 @@
 
 - Search result score display now clamps negative rerank values to `0.000` in UI for readability (ranking/order unchanged).
 - Browser embedding pooling strategy is now explicit and centralized:
-  - `embeddinggemma` uses `mean` pooling with source-backed rationale from the model card’s TEI guidance.
+  - `embeddinggemma` uses `mean` pooling with source-backed rationale from Hugging Face Text Embeddings Inference guidance.
   - fallback/default remains `mean` for current browser embedding candidates.
+- Search diagnostics signal is now less ambiguous:
+  - `denseSuspicious` reports dense-confidence concerns (`low_top1`, `low_top5_mean`, `low_repo_diversity`),
+  - `lexicalTriggered` still reports whether lexical safety-net executed (including rare-token triggers).
+- Curated embedding warning logic now matches retrieval-profile model families (for example `mxbai-embed*`, `nomic-embed*`) to avoid false custom-model warnings on valid variants.
+- `Rebuild Embeddings` now requires explicit user confirmation before clearing and regenerating the embedding index.
 - Verified dependency concern: `@huggingface/transformers@3.8.1` currently pulls `onnxruntime-node` and `sharp` as required transitive dependencies; tracked as a portability/CI risk pending upstream or package-level mitigation.
 
 ## 2026-03-05 (Minor PR Review Remediation - CSP + Model Warning + Ollama Order)
