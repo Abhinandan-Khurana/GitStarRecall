@@ -1,1 +1,0 @@
-Mintlify docs setup
