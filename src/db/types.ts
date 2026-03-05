@@ -75,6 +75,7 @@ export type SearchResult = {
   chunkId: string;
   repoId: number;
   score: number;
+  denseScore: number;
   text: string;
   repoName: string;
   repoFullName: string;

@@ -7,12 +7,12 @@ function tokenize(input: string): string[] {
 }
 
 export function countRareLikeTokens(query: string): number {
-  const tokens = tokenize(query);
+  const tokens = Array.from(new Set(tokenize(query)));
   return tokens.filter((token) => /\d/.test(token) || token.includes(":") || token.includes("/") || token.includes(".")).length;
 }
 
 export function lexicalOverlapScore(query: string, text: string): number {
-  const queryTokens = tokenize(query);
+  const queryTokens = Array.from(new Set(tokenize(query)));
   if (queryTokens.length === 0) {
     return 0;
   }

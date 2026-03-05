@@ -5,6 +5,7 @@ import { backupChatMessage, backupChatSession, clearChatBackup } from "./chatBac
 import { reciprocalRankFusion } from "../search/fusion";
 import { lexicalOverlapScore, countRareLikeTokens } from "../search/lexical";
 import { mmrSelect, type DenseCandidate } from "../search/rerank";
+import { cosineSimilaritySafe } from "../search/vectorMath";
 import type {
   ChatMessageRecord,
   ChatSessionRecord,
@@ -29,6 +30,8 @@ type EmbeddingCheckpointPolicy = {
   everyEmbeddings: number;
   everyMs: number;
 };
+
+type SqlRowValue = string | number | Uint8Array | null;
 
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -543,22 +546,16 @@ function toSqlStringLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-  if (a.length !== b.length) {
-    throw new Error(`Embedding dimension mismatch: ${a.length} vs ${b.length}`);
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function stablePositiveHash(input: string): number {
+  let hash = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash * 31 + input.charCodeAt(i)) | 0;
   }
-
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  return Math.abs(hash);
 }
 
 type SearchTuning = {
@@ -568,6 +565,7 @@ type SearchTuning = {
   maxChunksPerRepo: number;
   lexicalTop1Threshold: number;
   lexicalTop5MeanThreshold: number;
+  lexicalHighConfidenceBypassTop1: number;
 };
 
 type SearchDiagnostics = {
@@ -581,12 +579,33 @@ type SearchDiagnostics = {
   lexicalTriggered: boolean;
   lexicalTriggerReason: string | null;
   denseTopScores: number[];
+  denseNaNClampedCount: number;
+  lexicalScanLimit: number;
+  lexicalPoolRecentCount: number;
+  lexicalPoolBroadCount: number;
+  lexicalPoolOldestCount: number;
+  lexicalPoolDedupedCount: number;
+  corpusRepoCount: number;
+  corpusChunkCount: number;
+  rerankVectorMismatchPairs: number;
 };
 
 type SearchOptions = {
   tuning?: Partial<SearchTuning>;
   queryText?: string;
   onDiagnostics?: (payload: SearchDiagnostics) => void;
+};
+
+type SearchResultDetails = {
+  text: string;
+  repoId: number;
+  repoName: string;
+  repoFullName: string;
+  repoDescription: string | null;
+  repoUrl: string;
+  language: string | null;
+  topics: string[];
+  updatedAt: string;
 };
 
 const DEFAULT_SEARCH_TUNING: SearchTuning = {
@@ -596,6 +615,7 @@ const DEFAULT_SEARCH_TUNING: SearchTuning = {
   maxChunksPerRepo: 2,
   lexicalTop1Threshold: 0.22,
   lexicalTop5MeanThreshold: 0.18,
+  lexicalHighConfidenceBypassTop1: 0.8,
 };
 
 export class LocalDatabase {
@@ -678,10 +698,13 @@ export class LocalDatabase {
       lexicalTop5MeanThreshold: Number.isFinite(overrides?.lexicalTop5MeanThreshold)
         ? Number(overrides?.lexicalTop5MeanThreshold)
         : DEFAULT_SEARCH_TUNING.lexicalTop5MeanThreshold,
+      lexicalHighConfidenceBypassTop1: Number.isFinite(overrides?.lexicalHighConfidenceBypassTop1)
+        ? Number(overrides?.lexicalHighConfidenceBypassTop1)
+        : DEFAULT_SEARCH_TUNING.lexicalHighConfidenceBypassTop1,
     };
   }
 
-  private hydrateChunkDetails(chunkIds: string[]): Map<string, Omit<SearchResult, "chunkId" | "score">> {
+  private hydrateChunkDetails(chunkIds: string[]): Map<string, SearchResultDetails> {
     if (chunkIds.length === 0) {
       return new Map();
     }
@@ -706,7 +729,7 @@ export class LocalDatabase {
       return new Map();
     }
 
-    const map = new Map<string, Omit<SearchResult, "chunkId" | "score">>();
+    const map = new Map<string, SearchResultDetails>();
     const [table] = detailsResult;
     for (const row of table.values) {
       map.set(String(row[0]), {
@@ -724,33 +747,105 @@ export class LocalDatabase {
     return map;
   }
 
-  private computeLexicalCandidates(queryText: string, fetchK: number): Array<{ chunkId: string; score: number }> {
-    const rows = this.db.exec(`
+  private computeLexicalCandidates(
+    queryText: string,
+    fetchK: number,
+    totalChunkCount: number,
+  ): {
+    candidates: Array<{ chunkId: string; score: number }>;
+    scanLimit: number;
+    recentCount: number;
+    broadCount: number;
+    oldestCount: number;
+    dedupedCount: number;
+  } {
+    const scanLimit = clamp(Math.trunc(fetchK * 20), 2000, 12000);
+    if (totalChunkCount <= 0) {
+      return {
+        candidates: [],
+        scanLimit,
+        recentCount: 0,
+        broadCount: 0,
+        oldestCount: 0,
+        dedupedCount: 0,
+      };
+    }
+
+    const recentLimit = clamp(Math.trunc(scanLimit * 0.2), 200, scanLimit);
+    const oldestLimit = clamp(Math.trunc(scanLimit * 0.2), 200, scanLimit - recentLimit);
+    const broadLimit = Math.max(0, scanLimit - recentLimit - oldestLimit);
+
+    const recentRows = this.db.exec(`
       SELECT c.id, c.text
       FROM chunks c
       ORDER BY c.created_at DESC
-      LIMIT 4000;
+      LIMIT ${recentLimit};
     `);
-    if (rows.length === 0) {
-      return [];
+    const oldestRows = this.db.exec(`
+      SELECT c.id, c.text
+      FROM chunks c
+      ORDER BY c.created_at ASC
+      LIMIT ${oldestLimit};
+    `);
+
+    let broadRows: Array<{ values: SqlRowValue[][] }> = [];
+    if (broadLimit > 0) {
+      const maxOffset = Math.max(0, totalChunkCount - broadLimit);
+      const offset = maxOffset > 0 ? stablePositiveHash(queryText) % (maxOffset + 1) : 0;
+      broadRows = this.db.exec(`
+        SELECT c.id, c.text
+        FROM chunks c
+        ORDER BY c.created_at ASC
+        LIMIT ${broadLimit}
+        OFFSET ${offset};
+      `);
     }
-    const [table] = rows;
+
+    const dedupedRows = new Map<string, string>();
+    const consumeRows = (rows: Array<{ values: SqlRowValue[][] }>): number => {
+      if (rows.length === 0) {
+        return 0;
+      }
+      let inserted = 0;
+      const [table] = rows;
+      for (const row of table.values) {
+        const chunkId = String(row[0]);
+        if (dedupedRows.has(chunkId)) {
+          continue;
+        }
+        dedupedRows.set(chunkId, String(row[1] ?? ""));
+        inserted += 1;
+      }
+      return inserted;
+    };
+
+    const recentCount = consumeRows(recentRows);
+    const oldestCount = consumeRows(oldestRows);
+    const broadCount = consumeRows(broadRows);
+
     const scored: Array<{ chunkId: string; score: number }> = [];
-    for (const row of table.values) {
-      const chunkId = String(row[0]);
-      const text = String(row[1] ?? "");
+    for (const [chunkId, text] of dedupedRows.entries()) {
       const score = lexicalOverlapScore(queryText, text);
       if (score > 0) {
         scored.push({ chunkId, score });
       }
     }
     scored.sort((a, b) => b.score - a.score || a.chunkId.localeCompare(b.chunkId));
-    return scored.slice(0, Math.max(20, Math.trunc(fetchK / 2)));
+    return {
+      candidates: scored.slice(0, Math.max(20, Math.trunc(fetchK / 2))),
+      scanLimit,
+      recentCount,
+      broadCount,
+      oldestCount,
+      dedupedCount: dedupedRows.size,
+    };
   }
 
   private shouldTriggerLexicalSafetyNet(params: {
     denseTopScores: number[];
     uniqueRepoCountTop20: number;
+    totalRepoCount: number;
+    totalChunkCount: number;
     queryText: string;
     tuning: SearchTuning;
   }): { trigger: boolean; reason: string | null } {
@@ -764,7 +859,11 @@ export class LocalDatabase {
       return { trigger: true, reason: "low_top5_mean" };
     }
     if (params.uniqueRepoCountTop20 < 6) {
-      return { trigger: true, reason: "low_repo_diversity" };
+      const corpusLargeEnough = params.totalRepoCount >= 6 && params.totalChunkCount >= 20;
+      const denseConfident = top1 >= params.tuning.lexicalHighConfidenceBypassTop1;
+      if (corpusLargeEnough && !denseConfident) {
+        return { trigger: true, reason: "low_repo_diversity" };
+      }
     }
     if (countRareLikeTokens(params.queryText) >= 2) {
       return { trigger: true, reason: "rare_token_query" };
@@ -800,11 +899,16 @@ export class LocalDatabase {
 
     const vectorByChunkId = new Map<string, Float32Array>();
     const denseScores: Array<{ chunkId: string; score: number }> = [];
+    let denseNaNClampedCount = 0;
     for (const entry of vectors) {
       vectorByChunkId.set(entry.chunkId, entry.vector);
+      const score = cosineSimilaritySafe(queryVector, entry.vector, "throw");
+      if (!Number.isFinite(score)) {
+        denseNaNClampedCount += 1;
+      }
       denseScores.push({
         chunkId: entry.chunkId,
-        score: cosineSimilarity(queryVector, entry.vector),
+        score: Number.isFinite(score) ? score : 0,
       });
     }
 
@@ -822,29 +926,44 @@ export class LocalDatabase {
     ).size;
 
     const queryText = options?.queryText?.trim() ?? "";
+    const totalRepoCount = this.getRepoCount();
+    const totalChunkCount = this.getChunkCount();
     const lexicalDecision = queryText
       ? this.shouldTriggerLexicalSafetyNet({
           denseTopScores,
           uniqueRepoCountTop20: uniqueRepoTop20,
+          totalRepoCount,
+          totalChunkCount,
           queryText,
           tuning,
         })
       : { trigger: false, reason: null };
 
     let candidateOrder = denseTop.map((item) => item.chunkId);
+    let lexicalScanLimit = 0;
+    let lexicalPoolRecentCount = 0;
+    let lexicalPoolBroadCount = 0;
+    let lexicalPoolOldestCount = 0;
+    let lexicalPoolDedupedCount = 0;
     if (lexicalDecision.trigger && queryText) {
-      const lexical = this.computeLexicalCandidates(queryText, tuning.fetchK);
+      const lexical = this.computeLexicalCandidates(queryText, tuning.fetchK, totalChunkCount);
+      lexicalScanLimit = lexical.scanLimit;
+      lexicalPoolRecentCount = lexical.recentCount;
+      lexicalPoolBroadCount = lexical.broadCount;
+      lexicalPoolOldestCount = lexical.oldestCount;
+      lexicalPoolDedupedCount = lexical.dedupedCount;
       const fused = reciprocalRankFusion([
         denseTop.map((item) => ({ id: item.chunkId })),
-        lexical.map((item) => ({ id: item.chunkId })),
+        lexical.candidates.map((item) => ({ id: item.chunkId })),
       ]);
       candidateOrder = fused.slice(0, tuning.fetchK).map((item) => item.id);
     }
 
     const denseScoreById = new Map(denseTop.map((item) => [item.chunkId, item.score]));
+    const candidateDetailsMap = this.hydrateChunkDetails(candidateOrder);
     const candidates: DenseCandidate[] = [];
     for (const chunkId of candidateOrder) {
-      const details = detailsMap.get(chunkId);
+      const details = candidateDetailsMap.get(chunkId);
       const vector = vectorByChunkId.get(chunkId);
       if (!details || !vector) {
         continue;
@@ -857,11 +976,15 @@ export class LocalDatabase {
       });
     }
 
+    let rerankVectorMismatchPairs = 0;
     const ranked = mmrSelect({
       candidates,
       topK: tuning.topK,
       lambda: tuning.mmrLambda,
       maxChunksPerRepo: tuning.maxChunksPerRepo,
+      onVectorMismatch: () => {
+        rerankVectorMismatchPairs += 1;
+      },
     });
 
     const diagnostics: SearchDiagnostics = {
@@ -875,18 +998,28 @@ export class LocalDatabase {
       lexicalTriggered: lexicalDecision.trigger,
       lexicalTriggerReason: lexicalDecision.reason,
       denseTopScores,
+      denseNaNClampedCount,
+      lexicalScanLimit,
+      lexicalPoolRecentCount,
+      lexicalPoolBroadCount,
+      lexicalPoolOldestCount,
+      lexicalPoolDedupedCount,
+      corpusRepoCount: totalRepoCount,
+      corpusChunkCount: totalChunkCount,
+      rerankVectorMismatchPairs,
     };
     options?.onDiagnostics?.(diagnostics);
 
     return ranked
       .map((item) => {
-        const details = detailsMap.get(item.chunkId);
+        const details = candidateDetailsMap.get(item.chunkId);
         if (!details) {
           return null;
         }
         return {
           chunkId: item.chunkId,
           score: item.score,
+          denseScore: item.denseScore,
           ...details,
         };
       })

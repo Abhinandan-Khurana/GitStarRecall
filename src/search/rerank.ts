@@ -1,3 +1,5 @@
+import { cosineSimilaritySafe } from "./vectorMath";
+
 export type DenseCandidate = {
   chunkId: string;
   repoId: number;
@@ -9,38 +11,21 @@ export type RankedCandidate = {
   chunkId: string;
   repoId: number;
   score: number;
+  denseScore: number;
 };
-
-function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-  if (a.length !== b.length) {
-    throw new Error(`Vector dimension mismatch in rerank: ${a.length} vs ${b.length}`);
-  }
-
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  if (normA === 0 || normB === 0) {
-    return 0;
-  }
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-}
 
 export function mmrSelect(params: {
   candidates: DenseCandidate[];
   topK: number;
   lambda: number;
   maxChunksPerRepo: number;
+  onVectorMismatch?: () => void;
 }): RankedCandidate[] {
   const topK = Math.max(1, Math.trunc(params.topK));
   const lambda = Math.max(0, Math.min(1, params.lambda));
   const maxChunksPerRepo = Math.max(1, Math.trunc(params.maxChunksPerRepo));
 
-  const selected: Array<{ chunkId: string; repoId: number; vector: Float32Array; score: number }> = [];
+  const selected: Array<{ chunkId: string; repoId: number; vector: Float32Array; score: number; denseScore: number }> = [];
   const remaining = [...params.candidates];
   const repoHits = new Map<number, number>();
 
@@ -61,7 +46,14 @@ export function mmrSelect(params: {
 
       let redundancy = 0;
       for (const chosen of selected) {
-        redundancy = Math.max(redundancy, cosineSimilarity(candidate.vector, chosen.vector));
+        if (candidate.vector.length !== chosen.vector.length) {
+          params.onVectorMismatch?.();
+          continue;
+        }
+        redundancy = Math.max(
+          redundancy,
+          cosineSimilaritySafe(candidate.vector, chosen.vector, "zero"),
+        );
       }
 
       const mmrScore = lambda * candidate.denseScore - (1 - lambda) * redundancy;
@@ -86,10 +78,16 @@ export function mmrSelect(params: {
       chunkId: chosen.chunkId,
       repoId: chosen.repoId,
       vector: chosen.vector,
-      score: chosen.denseScore,
+      score: bestMmr,
+      denseScore: chosen.denseScore,
     });
     repoHits.set(chosen.repoId, (repoHits.get(chosen.repoId) ?? 0) + 1);
   }
 
-  return selected.map((item) => ({ chunkId: item.chunkId, repoId: item.repoId, score: item.score }));
+  return selected.map((item) => ({
+    chunkId: item.chunkId,
+    repoId: item.repoId,
+    score: item.score,
+    denseScore: item.denseScore,
+  }));
 }
