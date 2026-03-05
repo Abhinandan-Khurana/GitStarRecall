@@ -18,6 +18,24 @@ function toBlob(vector: Float32Array): Uint8Array {
   return new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength);
 }
 
+function stablePositiveHashForTest(input: string): number {
+  let hash = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash * 31 + input.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function findLowOffsetQuery(modulus: number, maxOffsetInclusive: number): string {
+  for (let i = 0; i < 50_000; i += 1) {
+    const query = `hash-probe-${i}/v1.0`;
+    if (stablePositiveHashForTest(query) % modulus <= maxOffsetInclusive) {
+      return query;
+    }
+  }
+  throw new Error("Unable to find low-offset query seed for lexical sampling test");
+}
+
 describe("LocalDatabase semantic search", () => {
   it("returns hydrated results for top chunk matches", async () => {
     const rawDb = new SQL.Database();
@@ -678,6 +696,111 @@ describe("LocalDatabase semantic search", () => {
       queryText: "legacy/needle v1.2.3",
     });
     expect(results.some((item) => item.chunkId === "legacy-0")).toBe(true);
+  });
+
+  it("keeps lexical broad sample disjoint from oldest/recent windows when corpus interior is available", async () => {
+    const rawDb = new SQL.Database();
+    runSchema(rawDb);
+    const localDb = createLocalDatabase(rawDb);
+
+    await localDb.upsertRepos([
+      {
+        id: 1,
+        fullName: "acme/coverage",
+        name: "coverage",
+        description: null,
+        topics: [],
+        language: "TypeScript",
+        htmlUrl: "https://github.com/acme/coverage",
+        stars: 1,
+        forks: 0,
+        updatedAt: "2026-01-01T00:00:00Z",
+        readmeUrl: null,
+        readmeText: "coverage",
+        checksum: "coverage",
+        lastSyncedAt: 1,
+      },
+    ]);
+
+    const totalChunks = 5000;
+    const chunks: Array<{
+      id: string;
+      repoId: number;
+      chunkId: string;
+      text: string;
+      source: string;
+      createdAt: number;
+    }> = [];
+    const embeddings: Array<{
+      id: string;
+      chunkId: string;
+      model: string;
+      dimension: number;
+      vectorBlob: Uint8Array;
+      createdAt: number;
+    }> = [];
+
+    for (let i = 0; i < totalChunks; i += 1) {
+      const id = `chunk-${i}`;
+      chunks.push({
+        id,
+        repoId: 1,
+        chunkId: id,
+        text: `coverage chunk ${i}`,
+        source: "readme",
+        createdAt: i + 1,
+      });
+      embeddings.push({
+        id: `emb-${i}`,
+        chunkId: id,
+        model: "test-model",
+        dimension: 3,
+        vectorBlob: toBlob(new Float32Array([-1, 0, 0])),
+        createdAt: i + 1,
+      });
+    }
+
+    await localDb.upsertChunks(chunks);
+    await localDb.upsertEmbeddings(embeddings);
+
+    const fetchK = 150;
+    const scanLimit = 3000;
+    const recentLimit = 600;
+    const oldestLimit = 600;
+    const broadLimit = 1800;
+    const modulus = totalChunks - broadLimit + 1;
+    const lowOffsetQuery = findLowOffsetQuery(modulus, oldestLimit - 1);
+
+    let lexicalTriggered = false;
+    let reason: string | null = null;
+    let lexicalPoolRecentCount = 0;
+    let lexicalPoolOldestCount = 0;
+    let lexicalPoolBroadCount = 0;
+    let lexicalPoolDedupedCount = 0;
+    let lexicalScanLimit = 0;
+    await localDb.findSimilarChunks(new Float32Array([1, 0, 0]), 20, {
+      queryText: lowOffsetQuery,
+      tuning: {
+        fetchK,
+      },
+      onDiagnostics(payload) {
+        lexicalTriggered = payload.lexicalTriggered;
+        reason = payload.lexicalTriggerReason;
+        lexicalPoolRecentCount = payload.lexicalPoolRecentCount;
+        lexicalPoolOldestCount = payload.lexicalPoolOldestCount;
+        lexicalPoolBroadCount = payload.lexicalPoolBroadCount;
+        lexicalPoolDedupedCount = payload.lexicalPoolDedupedCount;
+        lexicalScanLimit = payload.lexicalScanLimit;
+      },
+    });
+
+    expect(lexicalTriggered).toBe(true);
+    expect(reason).toBe("low_top1");
+    expect(lexicalScanLimit).toBe(scanLimit);
+    expect(lexicalPoolRecentCount).toBe(recentLimit);
+    expect(lexicalPoolOldestCount).toBe(oldestLimit);
+    expect(lexicalPoolBroadCount).toBe(broadLimit);
+    expect(lexicalPoolDedupedCount).toBe(recentLimit + oldestLimit + broadLimit);
   });
 
   it("uses fused relevance in MMR so lexical-only candidates remain competitive", async () => {

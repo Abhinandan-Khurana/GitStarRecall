@@ -144,9 +144,14 @@ Important:
   - Ollama defaults:
   - URL: `http://localhost:11434`
   - Recommended embedding order:
-    1. `qwen3-embedding:4b` (quality-first)
-    2. `qwen3-embedding:0.6b` (speed-first)
-    3. `mxbai-embed-large` (baseline)
+    1. `qwen3-embedding:4b` (best retrieval quality, recommended when hardware allows)
+    2. `qwen3-embedding:0.6b` (best quality/speed balance for most local setups)
+    3. `mxbai-embed-large` (strong fallback option)
+    4. `nomic-embed-text` (compatible fallback option)
+  - Recommendation summary:
+    - Prefer `qwen3-embedding` for best results.
+    - Use `embeddinggemma` when running browser embeddings on strong desktop + WebGPU.
+    - Use `mxbai-embed-large` or `nomic-embed-*` when Qwen3 is unavailable locally.
   - Installed model lists are discovered from local `/api/tags` and shown in dropdowns.
   - Browser embedding recommendation is capability-based:
     - strong desktop + WebGPU -> `onnx-community/embeddinggemma-300m-ONNX`
@@ -336,7 +341,7 @@ README batching pipeline controls:
 
 0. Start by exposing ollama to global CORS `export OLLAMA_ORIGINS="*"`
 1. Then start Ollama locally: `ollama serve`
-2. Pull one recommended embedding model (for example `ollama pull qwen3-embedding:0.6b`)
+2. Pull one recommended embedding model (for example `ollama pull qwen3-embedding:0.6b`; alternatives: `mxbai-embed-large`, `nomic-embed-text`)
 3. In the app, enable `Use Ollama for local embeddings`.
 4. Keep base URL as `http://localhost:11434` (or your localhost override).
 5. Click `Test connection` (this also refreshes installed model lists).

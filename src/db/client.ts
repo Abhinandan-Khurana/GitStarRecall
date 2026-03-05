@@ -796,15 +796,34 @@ export class LocalDatabase {
 
     let broadRows: Array<{ values: SqlRowValue[][] }> = [];
     if (broadLimit > 0) {
-      const maxOffset = Math.max(0, totalChunkCount - broadLimit);
-      const offset = maxOffset > 0 ? stablePositiveHash(queryText) % (maxOffset + 1) : 0;
-      broadRows = this.db.exec(`
-        SELECT c.id, c.text
-        FROM chunks c
-        ORDER BY c.created_at ASC
-        LIMIT ${broadLimit}
-        OFFSET ${offset};
-      `);
+      // Prefer sampling from the interior slice (excluding explicit oldest/newest windows)
+      // to maximize unique lexical coverage and reduce hash-dependent overlap variance.
+      const interiorStart = Math.min(oldestLimit, totalChunkCount);
+      const interiorEndExclusive = Math.max(interiorStart, totalChunkCount - recentLimit);
+      const interiorSpan = Math.max(0, interiorEndExclusive - interiorStart);
+      if (interiorSpan > 0) {
+        const interiorLimit = Math.min(broadLimit, interiorSpan);
+        const maxInteriorOffset = Math.max(0, interiorSpan - interiorLimit);
+        const interiorOffset = maxInteriorOffset > 0 ? stablePositiveHash(queryText) % (maxInteriorOffset + 1) : 0;
+        const offset = interiorStart + interiorOffset;
+        broadRows = this.db.exec(`
+          SELECT c.id, c.text
+          FROM chunks c
+          ORDER BY c.created_at ASC
+          LIMIT ${interiorLimit}
+          OFFSET ${offset};
+        `);
+      } else {
+        const maxOffset = Math.max(0, totalChunkCount - broadLimit);
+        const offset = maxOffset > 0 ? stablePositiveHash(queryText) % (maxOffset + 1) : 0;
+        broadRows = this.db.exec(`
+          SELECT c.id, c.text
+          FROM chunks c
+          ORDER BY c.created_at ASC
+          LIMIT ${broadLimit}
+          OFFSET ${offset};
+        `);
+      }
     }
 
     const dedupedRows = new Map<string, string>();

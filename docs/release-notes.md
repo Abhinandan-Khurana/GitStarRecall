@@ -12,10 +12,14 @@
 - Rare-token lexical trigger now has a confidence/alignment bypass:
   - lexical safety-net is skipped when dense top-1 is highly confident *and* lexically aligned with the rare-token query,
   - lexical safety-net still runs for high-confidence but lexically mismatched dense top-1 results.
+- Qwen3 retrieval prompting now follows model-card format:
+  - queries use `Instruct: ...` + `Query: ...`,
+  - passages/documents are embedded as raw text (no `passage:` prefix).
+- Lexical broad sampling now targets the corpus interior slice first (excluding oldest/newest windows) to reduce overlap and improve unique lexical candidate coverage.
 - Curated embedding warning logic now matches retrieval-profile model families (for example `mxbai-embed*`, `nomic-embed*`) to avoid false custom-model warnings on valid variants.
 - `Rebuild Embeddings` now requires explicit user confirmation before clearing and regenerating the embedding index.
 - README section splitting for large-readme chunking is now code-fence-aware, so heading-like lines inside fenced code blocks do not create artificial section boundaries.
-- Chunk-budget fallback now enforces the quality floor instead of appending unchecked low-quality remainder windows.
+- Chunk budgeting for large READMEs now intentionally under-fills when fewer than 120 windows clear the quality floor (no low-quality padding fallback).
 - Pooling profile resolution now inspects model identity and emits a one-time warning for unknown model families before using mean pooling fallback.
 - Verified dependency concern: `@huggingface/transformers@3.8.1` currently pulls `onnxruntime-node` and `sharp` as required transitive dependencies; tracked as a portability/CI risk pending upstream or package-level mitigation.
 
@@ -45,7 +49,7 @@
   - prevents namespaced Ollama models (`myorg/custom-embed:latest`) from being misrouted to browser runtime.
 - Fixed chunk budgeting quality gate:
   - removed unconditional inclusion of first 3 windows,
-  - all windows now pass through quality selection before fallback fill.
+  - all windows now pass through quality selection.
 - Added regression coverage:
   - `src/embeddings/modelRouting.test.ts`
   - `src/embeddings/browserCapability.test.ts` (null perf signal)

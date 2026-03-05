@@ -2,15 +2,22 @@ import { describe, expect, it } from "vitest";
 import { formatForEmbedding, getRetrievalProfile, isCuratedRetrievalModel } from "./retrievalProfile";
 
 describe("retrievalProfile", () => {
-  it("maps qwen3 model to query/passage profile", () => {
+  it("maps qwen3 model to instruction/query profile", () => {
     expect(getRetrievalProfile("qwen3-embedding:4b")).toEqual({
-      queryPrefix: "query: ",
-      documentPrefix: "passage: ",
+      queryPrefix: "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:",
+      documentPrefix: "",
     });
   });
 
   it("maps mxbai to search profile", () => {
     expect(getRetrievalProfile("mxbai-embed-large")).toEqual({
+      queryPrefix: "search_query: ",
+      documentPrefix: "search_document: ",
+    });
+  });
+
+  it("maps nomic to search profile", () => {
+    expect(getRetrievalProfile("nomic-embed-text:latest")).toEqual({
       queryPrefix: "search_query: ",
       documentPrefix: "search_document: ",
     });
