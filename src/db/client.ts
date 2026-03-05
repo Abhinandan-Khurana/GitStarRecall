@@ -849,6 +849,7 @@ export class LocalDatabase {
 
   private shouldTriggerLexicalSafetyNet(params: {
     denseTopScores: number[];
+    topDenseLexicalOverlap: number;
     uniqueRepoCountTop20: number;
     totalRepoCount: number;
     totalChunkCount: number;
@@ -872,7 +873,11 @@ export class LocalDatabase {
       }
     }
     if (countRareLikeTokens(params.queryText) >= 2) {
-      return { trigger: true, reason: "rare_token_query" };
+      const denseConfident = top1 >= params.tuning.lexicalHighConfidenceBypassTop1;
+      const denseLexicallyAligned = params.topDenseLexicalOverlap > 0;
+      if (!denseConfident || !denseLexicallyAligned) {
+        return { trigger: true, reason: "rare_token_query" };
+      }
     }
     return { trigger: false, reason: null };
   }
@@ -928,11 +933,15 @@ export class LocalDatabase {
     ).size;
 
     const queryText = options?.queryText?.trim() ?? "";
+    const topDenseText = denseTop.length > 0 ? detailsMap.get(denseTop[0]?.chunkId ?? "")?.text ?? "" : "";
+    const topDenseLexicalOverlap =
+      queryText.length > 0 && topDenseText.length > 0 ? lexicalOverlapScore(queryText, topDenseText) : 0;
     const totalRepoCount = this.getRepoCount();
     const totalChunkCount = this.getChunkCount();
     const lexicalDecision = queryText
       ? this.shouldTriggerLexicalSafetyNet({
           denseTopScores,
+          topDenseLexicalOverlap,
           uniqueRepoCountTop20: uniqueRepoTop20,
           totalRepoCount,
           totalChunkCount,
