@@ -42,6 +42,7 @@ import { WebLLMDownloadDialog } from "../components/WebLLMDownloadDialog";
 import { SearchBar } from "../components/SearchBar";
 import { SyncStatusBar } from "../components/SyncStatusBar";
 import { OllamaConfigPanel } from "../components/OllamaConfigPanel";
+import { DeveloperModePanel } from "../components/DeveloperModePanel";
 import { FilterBar } from "../components/FilterBar";
 import { RepoResultCard } from "../components/RepoResultCard";
 import { SessionSidebar } from "../components/SessionSidebar";
@@ -3206,111 +3207,17 @@ export default function UsagePage() {
                 onTestConnection={() => void handleTestOllamaConnection()}
               />
             </div>
-            <Card className="border-border/60 bg-secondary/20">
-              <CardContent className="space-y-2 pt-4">
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={isSudoUser}
-                    onChange={(event) => setIsSudoUser(event.target.checked)}
-                    className="rounded border-border"
-                  />
-                  Enable developer advanced mode (sudo)
-                </label>
-                <p className="text-xs text-destructive">
-                  ⚠ Advanced tuning can improve results for your corpus, but it can also reduce relevance, speed, or
-                  efficiency. Use only for controlled experiments.
-                </p>
-                {isSudoUser ? (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => void handleRebuildEmbeddings()}
-                      disabled={fetchingStars}
-                    >
-                      {fetchingStars ? "Rebuilding..." : "Rebuild Embeddings"}
-                    </Button>
-                    <p className="text-xs text-muted-foreground">
-                      Re-runs embedding generation with your current embedding settings.
-                    </p>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-            {showAdvancedTuning ? (
-              <Collapsible open={advancedTuningOpen} onOpenChange={setAdvancedTuningOpen}>
-                <CollapsibleTrigger asChild>
-                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs">
-                    Advanced Retrieval Tuning
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <Card className="mt-2 border-border/60 bg-secondary/20">
-                    <CardHeader className="pb-2">
-                      <p className="text-xs text-muted-foreground">
-                        Sudo mode: tune retrieval for your corpus size.
-                      </p>
-                    </CardHeader>
-                    <CardContent className="grid gap-2 sm:grid-cols-2">
-                      <label className="text-xs text-muted-foreground">
-                        fetchK
-                        <input
-                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
-                          type="number"
-                          value={retrievalTuning.fetchK}
-                          min={80}
-                          max={300}
-                          onChange={(event) => updateRetrievalTuning({ fetchK: Number(event.target.value) })}
-                        />
-                      </label>
-                      <label className="text-xs text-muted-foreground">
-                        topK
-                        <input
-                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
-                          type="number"
-                          value={retrievalTuning.topK}
-                          min={10}
-                          max={40}
-                          onChange={(event) => updateRetrievalTuning({ topK: Number(event.target.value) })}
-                        />
-                      </label>
-                      <label className="text-xs text-muted-foreground">
-                        MMR lambda
-                        <input
-                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
-                          type="number"
-                          step={0.01}
-                          value={retrievalTuning.mmrLambda}
-                          min={0.55}
-                          max={0.9}
-                          onChange={(event) => updateRetrievalTuning({ mmrLambda: Number(event.target.value) })}
-                        />
-                      </label>
-                      <label className="text-xs text-muted-foreground">
-                        Max chunks per repo
-                        <input
-                          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
-                          type="number"
-                          value={retrievalTuning.maxChunksPerRepo}
-                          min={1}
-                          max={5}
-                          onChange={(event) => updateRetrievalTuning({ maxChunksPerRepo: Number(event.target.value) })}
-                        />
-                      </label>
-                      {retrievalTuning.fetchK < retrievalTuning.topK * 4 && (
-                        <p className="sm:col-span-2 text-xs text-amber-500">
-                          fetchK is low relative to topK. Increase fetchK to at least 4x topK to preserve MMR
-                          diversity.
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                </CollapsibleContent>
-              </Collapsible>
-            ) : null}
+            <DeveloperModePanel
+              isSudoUser={isSudoUser}
+              onSudoChange={setIsSudoUser}
+              showAdvancedTuning={showAdvancedTuning}
+              advancedTuningOpen={advancedTuningOpen}
+              onAdvancedTuningOpenChange={setAdvancedTuningOpen}
+              retrievalTuning={retrievalTuning}
+              onUpdateRetrievalTuning={updateRetrievalTuning}
+              onRebuildEmbeddings={() => void handleRebuildEmbeddings()}
+              isRebuilding={fetchingStars}
+            />
 
             <SyncStatusBar
               indexingStatus={indexingStatus}
