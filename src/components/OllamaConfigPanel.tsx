@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Settings2 } from "lucide-react";
+import { CUSTOM_MODEL_OPTION } from "../ollama/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,8 +16,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-
-const CUSTOM_MODEL_OPTION = "__custom__";
 
 interface OllamaConfigPanelProps {
   allowOllamaEmbedding: boolean;

@@ -4,6 +4,7 @@ import * as React from "react";
 import type { ChatMessageRecord } from "../db/types";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
 import type { WebLLMModelProfile } from "../llm/webllm/modelCatalog";
+import { CUSTOM_MODEL_OPTION } from "../ollama/constants";
 import SafeMarkdown from "./SafeMarkdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,8 +22,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ArrowUpIcon, SettingsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const CUSTOM_MODEL_OPTION = "__custom__";
 
 export interface SessionChatProps {
   messages: ChatMessageRecord[];
