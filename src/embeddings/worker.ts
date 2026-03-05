@@ -9,6 +9,7 @@ import {
   BROWSER_EMBEDDING_FALLBACK_MODEL,
   DEFAULT_BROWSER_EMBEDDING_MODEL,
 } from "./retrievalProfile";
+import { resolveEmbeddingPooling } from "./poolingProfile";
 
 // Skip local model checks since we are running in the browser
 import { env } from "@huggingface/transformers";
@@ -227,12 +228,13 @@ self.addEventListener("message", async (event) => {
 
   try {
     const pipe = await EmbeddingPipeline.getInstance(preferred, preferredModels);
+    const pooling = resolveEmbeddingPooling(EmbeddingPipeline.selectedModel);
 
     const embeddings: Array<Float32Array | null> = Array.from({ length: batchTexts.length }, () => null);
     const errors: Array<string | null> = Array.from({ length: batchTexts.length }, () => null);
 
     try {
-      const batchOutput = await pipe(batchTexts, { pooling: "mean", normalize: true });
+      const batchOutput = await pipe(batchTexts, { pooling, normalize: true });
       const normalized = normalizeBatchOutput(batchOutput, batchTexts.length);
       if (!normalized) {
         throw new Error("invalid batched embedding output shape");
@@ -244,7 +246,7 @@ self.addEventListener("message", async (event) => {
       for (let i = 0; i < batchTexts.length; i += 1) {
         const itemText = batchTexts[i];
         try {
-          const output = await pipe(itemText, { pooling: "mean", normalize: true });
+          const output = await pipe(itemText, { pooling, normalize: true });
           const normalized = normalizeBatchOutput(output, 1);
           embeddings[i] = normalized?.[0] ?? null;
         } catch (itemError) {

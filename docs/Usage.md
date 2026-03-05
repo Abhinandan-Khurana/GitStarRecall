@@ -151,6 +151,7 @@ Important:
   - Browser embedding recommendation is capability-based:
     - strong desktop + WebGPU -> `onnx-community/embeddinggemma-300m-ONNX`
     - mobile / no-WebGPU / weak desktop / probe-failed -> `Xenova/all-MiniLM-L6-v2`
+  - Browser embedding pooling currently uses `mean` for the recommended models (including embeddinggemma).
   - Unknown browser memory/perf hints are treated as neutral (no capability bonus).
   - Embedding settings shows browser capability diagnostics (reason, cores, RAM hint, perf score when available).
   - Custom embedding models are supported but marked experimental with warning.
@@ -275,6 +276,7 @@ Reset actions in UI:
 - `denseScore` reflects the relevance signal used by rerank:
   - dense-only path: cosine similarity from dense retrieval,
   - lexical-fusion path: normalized fused (RRF) relevance score used for MMR candidate scoring.
+- UI display clamps negative rerank scores to `0.000` for readability.
 - UI keeps a compact band (`High/Medium/Low`) and a finite decimal score.
 
 ## 12.8 Browser embedding model keeps re-downloading

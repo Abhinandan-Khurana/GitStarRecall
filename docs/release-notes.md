@@ -1,5 +1,13 @@
 # Release Notes
 
+## 2026-03-05 (Remaining Concerns Follow-up - Score Display + Pooling Verification)
+
+- Search result score display now clamps negative rerank values to `0.000` in UI for readability (ranking/order unchanged).
+- Browser embedding pooling strategy is now explicit and centralized:
+  - `embeddinggemma` uses `mean` pooling with source-backed rationale from the model card’s TEI guidance.
+  - fallback/default remains `mean` for current browser embedding candidates.
+- Verified dependency concern: `@huggingface/transformers@3.8.1` currently pulls `onnxruntime-node` and `sharp` as required transitive dependencies; tracked as a portability/CI risk pending upstream or package-level mitigation.
+
 ## 2026-03-05 (Minor PR Review Remediation - CSP + Model Warning + Ollama Order)
 
 - Tightened CSP `script-src` allowance for transformers runtime script loading:
