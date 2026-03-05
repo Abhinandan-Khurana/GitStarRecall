@@ -52,9 +52,7 @@ export function OllamaConfigPanel({
   const [customModelMode, setCustomModelMode] = useState(false);
 
   useEffect(() => {
-    if (!embeddingModelOptions.includes(ollamaModel)) {
-      setCustomModelMode(true);
-    }
+    setCustomModelMode(!embeddingModelOptions.includes(ollamaModel));
   }, [embeddingModelOptions, ollamaModel]);
 
   const selectedEmbeddingOption = customModelMode

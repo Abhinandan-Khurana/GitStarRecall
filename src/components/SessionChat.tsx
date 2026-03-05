@@ -183,7 +183,21 @@ function ModelSettingsPopover({
 }: Readonly<ModelSettingsPopoverProps>) {
   const isWebLLM = providerId === "webllm";
   const isOllama = providerId === "ollama";
-  const selectedOllamaOption = ollamaModels.includes(providerModel) ? providerModel : CUSTOM_MODEL_OPTION;
+  const [customOllamaModelMode, setCustomOllamaModelMode] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!isOllama) {
+      setCustomOllamaModelMode(false);
+      return;
+    }
+    setCustomOllamaModelMode(!ollamaModels.includes(providerModel));
+  }, [isOllama, ollamaModels, providerModel]);
+
+  const selectedOllamaOption = customOllamaModelMode
+    ? CUSTOM_MODEL_OPTION
+    : ollamaModels.includes(providerModel)
+      ? providerModel
+      : CUSTOM_MODEL_OPTION;
   const showOllamaCustomModelInput = selectedOllamaOption === CUSTOM_MODEL_OPTION;
 
   return (
@@ -260,9 +274,11 @@ function ModelSettingsPopover({
                     value={selectedOllamaOption}
                     onValueChange={(value) => {
                       if (value === CUSTOM_MODEL_OPTION) {
+                        setCustomOllamaModelMode(true);
                         onProviderModelChange(providerModel.trim() || "llama3.1:8b");
                         return;
                       }
+                      setCustomOllamaModelMode(false);
                       onProviderModelChange(value);
                     }}
                     disabled={ollamaModelsStatus === "loading"}
@@ -284,7 +300,10 @@ function ModelSettingsPopover({
                     <Input
                       id="chat-model"
                       value={providerModel}
-                      onChange={(e) => onProviderModelChange(e.target.value)}
+                      onChange={(e) => {
+                        setCustomOllamaModelMode(true);
+                        onProviderModelChange(e.target.value);
+                      }}
                       placeholder="llama3.1:8b"
                       className="session-chat-settings-input h-8 text-xs"
                     />

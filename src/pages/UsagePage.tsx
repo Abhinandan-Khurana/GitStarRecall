@@ -1333,11 +1333,17 @@ export default function UsagePage() {
         timeoutMs: getOllamaTimeoutMs(),
       });
       const runtime = await client.probeRuntime();
-      const catalog = await refreshOllamaCatalog(normalizedBaseUrl);
       setOllamaConnectionStatus("connected");
-      setOllamaConnectionMessage(
-        `Connected (${runtime.endpoint}) · embedding models ${catalog.embedding.length} · chat models ${catalog.llm.length}`,
-      );
+      try {
+        const catalog = await refreshOllamaCatalog(normalizedBaseUrl);
+        setOllamaConnectionMessage(
+          `Connected (${runtime.endpoint}) · embedding models ${catalog.embedding.length} · chat models ${catalog.llm.length}`,
+        );
+      } catch (catalogError) {
+        setOllamaConnectionMessage(
+          `Connected (${runtime.endpoint}) · model ${runtime.model}. Model list refresh failed: ${formatOllamaConnectionError(catalogError)}`,
+        );
+      }
     } catch (err) {
       setOllamaConnectionStatus("failed");
       setOllamaConnectionMessage(formatOllamaConnectionError(err));
