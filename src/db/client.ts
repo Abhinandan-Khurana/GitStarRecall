@@ -579,7 +579,6 @@ type SearchDiagnostics = {
   lexicalTriggered: boolean;
   lexicalTriggerReason: string | null;
   denseTopScores: number[];
-  denseNaNClampedCount: number;
   lexicalScanLimit: number;
   lexicalPoolRecentCount: number;
   lexicalPoolBroadCount: number;
@@ -588,6 +587,7 @@ type SearchDiagnostics = {
   corpusRepoCount: number;
   corpusChunkCount: number;
   rerankVectorMismatchPairs: number;
+  rerankCapOverrideCount: number;
 };
 
 type SearchOptions = {
@@ -899,16 +899,12 @@ export class LocalDatabase {
 
     const vectorByChunkId = new Map<string, Float32Array>();
     const denseScores: Array<{ chunkId: string; score: number }> = [];
-    let denseNaNClampedCount = 0;
     for (const entry of vectors) {
       vectorByChunkId.set(entry.chunkId, entry.vector);
       const score = cosineSimilaritySafe(queryVector, entry.vector, "throw");
-      if (!Number.isFinite(score)) {
-        denseNaNClampedCount += 1;
-      }
       denseScores.push({
         chunkId: entry.chunkId,
-        score: Number.isFinite(score) ? score : 0,
+        score,
       });
     }
 
@@ -986,6 +982,10 @@ export class LocalDatabase {
         rerankVectorMismatchPairs += 1;
       },
     });
+    const rerankCapOverrideCount = ranked.reduce(
+      (sum, item) => sum + (item.capOverride ? 1 : 0),
+      0,
+    );
 
     const diagnostics: SearchDiagnostics = {
       queryDim: queryVector.length,
@@ -998,7 +998,6 @@ export class LocalDatabase {
       lexicalTriggered: lexicalDecision.trigger,
       lexicalTriggerReason: lexicalDecision.reason,
       denseTopScores,
-      denseNaNClampedCount,
       lexicalScanLimit,
       lexicalPoolRecentCount,
       lexicalPoolBroadCount,
@@ -1007,6 +1006,7 @@ export class LocalDatabase {
       corpusRepoCount: totalRepoCount,
       corpusChunkCount: totalChunkCount,
       rerankVectorMismatchPairs,
+      rerankCapOverrideCount,
     };
     options?.onDiagnostics?.(diagnostics);
 

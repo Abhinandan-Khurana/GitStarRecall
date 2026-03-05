@@ -9,14 +9,17 @@ describe("retrievalProfile", () => {
     });
   });
 
-  it("maps mxbai and embeddinggemma to search profile", () => {
+  it("maps mxbai to search profile", () => {
     expect(getRetrievalProfile("mxbai-embed-large")).toEqual({
       queryPrefix: "search_query: ",
       documentPrefix: "search_document: ",
     });
+  });
+
+  it("keeps embeddinggemma unprefixed per model-card contract", () => {
     expect(getRetrievalProfile("embeddinggemma")).toEqual({
-      queryPrefix: "search_query: ",
-      documentPrefix: "search_document: ",
+      queryPrefix: "",
+      documentPrefix: "",
     });
   });
 

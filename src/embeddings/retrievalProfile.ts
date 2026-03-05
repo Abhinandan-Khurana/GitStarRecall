@@ -17,10 +17,18 @@ export function getRetrievalProfile(model: string): RetrievalProfile {
     };
   }
 
+  if (normalized.includes("embeddinggemma")) {
+    // Source: https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX
+    // The model card retrieval examples encode raw text directly ("no task prompt is needed").
+    return {
+      queryPrefix: "",
+      documentPrefix: "",
+    };
+  }
+
   if (
     normalized.includes("mxbai-embed") ||
-    normalized.includes("nomic-embed") ||
-    normalized.includes("embeddinggemma")
+    normalized.includes("nomic-embed")
   ) {
     return {
       queryPrefix: "search_query: ",

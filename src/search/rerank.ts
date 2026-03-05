@@ -12,6 +12,7 @@ export type RankedCandidate = {
   repoId: number;
   score: number;
   denseScore: number;
+  capOverride: boolean;
 };
 
 export function mmrSelect(params: {
@@ -25,7 +26,14 @@ export function mmrSelect(params: {
   const lambda = Math.max(0, Math.min(1, params.lambda));
   const maxChunksPerRepo = Math.max(1, Math.trunc(params.maxChunksPerRepo));
 
-  const selected: Array<{ chunkId: string; repoId: number; vector: Float32Array; score: number; denseScore: number }> = [];
+  const selected: Array<{
+    chunkId: string;
+    repoId: number;
+    vector: Float32Array;
+    score: number;
+    denseScore: number;
+    capOverride: boolean;
+  }> = [];
   const remaining = [...params.candidates];
   const repoHits = new Map<number, number>();
 
@@ -65,6 +73,37 @@ export function mmrSelect(params: {
       }
     }
 
+    let selectedWithCapOverride = false;
+    if (bestIndex < 0) {
+      for (let i = 0; i < remaining.length; i += 1) {
+        const candidate = remaining[i];
+        if (!candidate) {
+          continue;
+        }
+
+        let redundancy = 0;
+        for (const chosen of selected) {
+          if (candidate.vector.length !== chosen.vector.length) {
+            params.onVectorMismatch?.();
+            continue;
+          }
+          redundancy = Math.max(
+            redundancy,
+            cosineSimilaritySafe(candidate.vector, chosen.vector, "zero"),
+          );
+        }
+
+        const mmrScore = lambda * candidate.denseScore - (1 - lambda) * redundancy;
+        const isBetter = mmrScore > bestMmr || (mmrScore === bestMmr && candidate.denseScore > bestDense);
+        if (isBetter) {
+          bestMmr = mmrScore;
+          bestDense = candidate.denseScore;
+          bestIndex = i;
+        }
+      }
+      selectedWithCapOverride = bestIndex >= 0;
+    }
+
     if (bestIndex < 0) {
       break;
     }
@@ -80,6 +119,7 @@ export function mmrSelect(params: {
       vector: chosen.vector,
       score: bestMmr,
       denseScore: chosen.denseScore,
+      capOverride: selectedWithCapOverride,
     });
     repoHits.set(chosen.repoId, (repoHits.get(chosen.repoId) ?? 0) + 1);
   }
@@ -89,5 +129,6 @@ export function mmrSelect(params: {
     repoId: item.repoId,
     score: item.score,
     denseScore: item.denseScore,
+    capOverride: item.capOverride,
   }));
 }
