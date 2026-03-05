@@ -7,8 +7,9 @@ const Progress = React.forwardRef<
   React.HTMLAttributes<HTMLDivElement> & {
     value?: number
     max?: number
+    indeterminate?: boolean
   }
->(({ className, value = 0, max = 100, ...props }, ref) => {
+>(({ className, value = 0, max = 100, indeterminate = false, ...props }, ref) => {
   const percentage = Math.min(Math.max((value / max) * 100, 0), 100)
 
   return (
@@ -24,10 +25,17 @@ const Progress = React.forwardRef<
       )}
       {...props}
     >
-      <div
-        className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-all duration-500 ease-out"
-        style={{ width: `${percentage}%` }}
-      />
+      {indeterminate ? (
+        <div
+          className="absolute inset-y-0 left-0 w-2/5 rounded-full bg-gradient-to-r from-primary to-accent"
+          style={{ animation: "progress-indeterminate 1.2s ease-in-out infinite" }}
+        />
+      ) : (
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-all duration-500 ease-out"
+          style={{ width: `${percentage}%` }}
+        />
+      )}
     </div>
   )
 })

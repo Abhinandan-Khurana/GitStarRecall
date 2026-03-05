@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { deriveSyncProgressState } from "./syncProgress";
 
 interface IndexingStatus {
   phase: string;
@@ -67,30 +68,15 @@ export function SyncStatusBar({
   const hasContent = indexingStatus || starsSummary || dbStorageMode;
   if (!hasContent && historyLoadState === "idle") return null;
 
-  const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
-  const statusEmbeddingTarget = indexingStatus?.embeddingTarget ?? 0;
-  const statusEmbeddingsCreated = indexingStatus?.embeddingsCreated ?? 0;
-  const metricsEmbeddingTarget = embeddingRunMetrics
-    ? embeddingRunMetrics.embeddingsProcessed + embeddingRunMetrics.queueDepth
-    : 0;
-  const metricsEmbeddingsCreated = embeddingRunMetrics?.embeddingsProcessed ?? 0;
-  const embeddingTarget = statusEmbeddingTarget > 0 ? statusEmbeddingTarget : metricsEmbeddingTarget;
-  const embeddingsCreated = statusEmbeddingTarget > 0 ? statusEmbeddingsCreated : metricsEmbeddingsCreated;
-  const embeddingProgress =
-    embeddingTarget > 0 ? clampPercent((embeddingsCreated / embeddingTarget) * 100) : 0;
-  const readmeProgress =
-    indexingStatus && indexingStatus.readmesTarget > 0
-      ? clampPercent((indexingStatus.readmesCompleted / indexingStatus.readmesTarget) * 100)
-      : 0;
-  const phaseIndicatesEmbedding = Boolean(indexingStatus?.phase.toLowerCase().includes("embedding"));
-  const metricsIndicateEmbedding = Boolean(
-    embeddingRunMetrics && (embeddingRunMetrics.queueDepth > 0 || embeddingRunMetrics.embeddingsProcessed > 0),
-  );
-  const embeddingStageActive = phaseIndicatesEmbedding || metricsIndicateEmbedding;
-  const hasEmbeddingProgress = embeddingTarget > 0;
-  const hasReadmeProgress = Boolean(
-    indexingStatus && indexingStatus.readmesTarget > 0 && !embeddingStageActive,
-  );
+  const {
+    embeddingTarget,
+    embeddingsCreated,
+    embeddingProgress,
+    readmeProgress,
+    hasReadmeProgress,
+    hasEmbeddingProgress,
+    embeddingInitializing,
+  } = deriveSyncProgressState(indexingStatus, embeddingRunMetrics);
 
   return (
     <div className="animate-fade-in space-y-2">
@@ -109,7 +95,7 @@ export function SyncStatusBar({
             </span>
           </div>
 
-          {(hasReadmeProgress || hasEmbeddingProgress || embeddingStageActive) && (
+          {(hasReadmeProgress || hasEmbeddingProgress || embeddingInitializing) && (
             <div className="space-y-2">
               {hasReadmeProgress && (
                 <div className="space-y-1">
@@ -121,7 +107,7 @@ export function SyncStatusBar({
                   <Progress value={readmeProgress} />
                 </div>
               )}
-              {(hasEmbeddingProgress || embeddingStageActive) && (
+              {(hasEmbeddingProgress || embeddingInitializing) && (
                 <div className="space-y-1">
                   <div className="flex justify-between text-[11px] text-muted-foreground">
                     <span>
@@ -130,7 +116,7 @@ export function SyncStatusBar({
                         : "Embeddings: initializing…"}
                     </span>
                   </div>
-                  <Progress value={embeddingProgress} />
+                  <Progress value={embeddingProgress} indeterminate={embeddingInitializing} />
                 </div>
               )}
             </div>

@@ -1,5 +1,13 @@
 # Release Notes
 
+## 2026-03-05 (Sync Progress UX Fix - README + Ollama Embeddings)
+
+- Fixed sync progress visibility during staged indexing:
+  - README progress now remains visible during active README work even when incremental embedding metrics are present.
+  - Embedding initialization now renders an indeterminate animated progress bar until a concrete embedding target is known.
+  - Embedding progress automatically switches to determinate (`completed/target`) once chunk targets are available.
+- Added progress-state regression coverage in `src/components/SyncStatusBar.test.ts`.
+
 ## 2026-03-05 (Remaining Concerns Follow-up - Score Display + Pooling Verification)
 
 - Search result score display now clamps negative rerank values to `0.000` in UI for readability (ranking/order unchanged).

@@ -128,6 +128,9 @@ Important:
 
 - Search does not auto-refresh stars.
 - Fetching latest stars is user-driven via `Fetch Stars`.
+- Sync status shows separate stage progress:
+  - README fetch progress remains visible while READMEs are still being processed.
+  - Embedding stage shows an animated initializing bar first, then switches to numeric embedding progress when target counts are known.
 
 ## 9) LLM Modes
 
