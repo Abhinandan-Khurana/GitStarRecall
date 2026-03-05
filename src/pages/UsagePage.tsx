@@ -937,10 +937,6 @@ export default function UsagePage() {
     void ensureBrowserEmbeddingRecommendation();
   }, [ensureBrowserEmbeddingRecommendation]);
 
-  useEffect(() => {
-    resetSearchEmbedder();
-  }, [browserEmbeddingModelCandidates, resetSearchEmbedder]);
-
   const activeResults = useMemo(() => activeSession?.results ?? [], [activeSession]);
   const activeSessionMessages = useMemo(() => {
     if (!activeSessionId) {
@@ -1899,8 +1895,8 @@ export default function UsagePage() {
           readmesMissing: readmeResult.missingCount,
           readmesFailed: readmeResult.failedCount,
           chunkTotal: localChunkCount,
-          embeddingsCreated: localEmbeddingCount,
-          embeddingTarget: hasPendingEmbeddingChunks ? previous.embeddingTarget : 0,
+          embeddingsCreated: hasPendingEmbeddingChunks ? 0 : localEmbeddingCount,
+          embeddingTarget: 0,
           elapsedSeconds: hasPendingEmbeddingChunks
             ? undefined
             : Math.max(1, Math.round((Date.now() - previous.startedAt) / 1000)),
@@ -1980,12 +1976,16 @@ export default function UsagePage() {
     let embeddingPool: EmbeddingWorkerPool | null = null;
     let restartWithBrowser = false;
     try {
+      const incrementalMode = options?.incremental === true;
       setFetchPhase("Initializing embedding model (this may take a moment)…");
       setIndexingStatus((previous) =>
         previous
           ? {
               ...previous,
-              phase: "Initializing embedding model",
+              phase: incrementalMode ? previous.phase : "Initializing embedding model",
+              embeddingsCreated: incrementalMode ? previous.embeddingsCreated : 0,
+              embeddingTarget: incrementalMode ? previous.embeddingTarget : 0,
+              duplicateEmbeddingHits: incrementalMode ? previous.duplicateEmbeddingHits : 0,
             }
           : previous,
       );
@@ -2014,7 +2014,6 @@ export default function UsagePage() {
       const largeLibraryModeEnabled = getLargeLibraryModeEnabled();
       const largeLibraryThreshold = getLargeLibraryThreshold();
       const forceBrowser = options?.forceBrowser === true;
-      const incrementalMode = options?.incremental === true;
       const repoIdsFilter = options?.repoIds;
       const maxChunks = options?.maxChunks;
       const ollamaEnabled = allowOllamaEmbedding && !forceBrowser;
@@ -2180,7 +2179,9 @@ export default function UsagePage() {
             ? {
                 ...previous,
                 phase: "Generating embeddings",
+                embeddingsCreated: 0,
                 embeddingTarget,
+                duplicateEmbeddingHits: 0,
               }
             : previous,
         );
@@ -3296,6 +3297,12 @@ export default function UsagePage() {
                           onChange={(event) => updateRetrievalTuning({ maxChunksPerRepo: Number(event.target.value) })}
                         />
                       </label>
+                      {retrievalTuning.fetchK < retrievalTuning.topK * 4 && (
+                        <p className="sm:col-span-2 text-xs text-amber-500">
+                          fetchK is low relative to topK. Increase fetchK to at least 4x topK to preserve MMR
+                          diversity.
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
                 </CollapsibleContent>
