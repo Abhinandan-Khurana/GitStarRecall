@@ -7,8 +7,22 @@ export const DEFAULT_BROWSER_EMBEDDING_MODEL = "onnx-community/embeddinggemma-30
 export const BROWSER_EMBEDDING_FALLBACK_MODEL = "Xenova/all-MiniLM-L6-v2";
 export const DEFAULT_OLLAMA_EMBEDDING_MODEL = "qwen3-embedding:0.6b";
 
+function normalizeModelId(model: string): string {
+  return model.trim().toLowerCase();
+}
+
+export function isCuratedRetrievalModel(model: string): boolean {
+  const normalized = normalizeModelId(model);
+  return (
+    normalized.includes("qwen3-embedding") ||
+    normalized.includes("embeddinggemma") ||
+    normalized.includes("mxbai-embed") ||
+    normalized.includes("nomic-embed")
+  );
+}
+
 export function getRetrievalProfile(model: string): RetrievalProfile {
-  const normalized = model.trim().toLowerCase();
+  const normalized = normalizeModelId(model);
 
   if (normalized.includes("qwen3-embedding")) {
     return {

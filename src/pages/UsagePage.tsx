@@ -27,6 +27,7 @@ import {
   DEFAULT_OLLAMA_EMBEDDING_MODEL,
   formatForEmbedding,
   getRetrievalProfile,
+  isCuratedRetrievalModel,
 } from "../embeddings/retrievalProfile";
 import { inferBackendFromModel } from "../embeddings/modelRouting";
 import {
@@ -510,14 +511,7 @@ function getRetrievalTuningStorageKey(scope: string): string {
 }
 
 function getCustomModelWarning(model: string): string | null {
-  const normalized = model.trim().toLowerCase();
-  const isCurated =
-    normalized.startsWith("qwen3-embedding") ||
-    normalized.startsWith("mxbai-embed-large") ||
-    normalized.startsWith("nomic-embed-text") ||
-    normalized.startsWith("embeddinggemma");
-
-  if (isCurated) {
+  if (isCuratedRetrievalModel(model)) {
     return null;
   }
   return (
@@ -1946,6 +1940,15 @@ export default function UsagePage() {
   };
 
   const handleRebuildEmbeddings = async () => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "Rebuild embeddings now?\n\nThis clears all existing embeddings and re-generates them with current settings. This can take time.",
+      )
+    ) {
+      return;
+    }
+
     try {
       setFetchingStars(true);
       setError(null);

@@ -568,6 +568,12 @@ type SearchTuning = {
   lexicalHighConfidenceBypassTop1: number;
 };
 
+type LexicalTriggerReason =
+  | "low_top1"
+  | "low_top5_mean"
+  | "low_repo_diversity"
+  | "rare_token_query";
+
 type SearchDiagnostics = {
   queryDim: number;
   sampledIndexDims: number[];
@@ -577,7 +583,7 @@ type SearchDiagnostics = {
   maxChunksPerRepo: number;
   denseSuspicious: boolean;
   lexicalTriggered: boolean;
-  lexicalTriggerReason: string | null;
+  lexicalTriggerReason: LexicalTriggerReason | null;
   denseTopScores: number[];
   lexicalScanLimit: number;
   lexicalPoolRecentCount: number;
@@ -848,7 +854,7 @@ export class LocalDatabase {
     totalChunkCount: number;
     queryText: string;
     tuning: SearchTuning;
-  }): { trigger: boolean; reason: string | null } {
+  }): { trigger: boolean; reason: LexicalTriggerReason | null } {
     const top1 = params.denseTopScores[0] ?? 0;
     const top5 = params.denseTopScores.slice(0, 5);
     const top5Mean = top5.length === 0 ? 0 : top5.reduce((sum, value) => sum + value, 0) / top5.length;
@@ -1000,7 +1006,10 @@ export class LocalDatabase {
       topK: tuning.topK,
       mmrLambda: tuning.mmrLambda,
       maxChunksPerRepo: tuning.maxChunksPerRepo,
-      denseSuspicious: lexicalDecision.trigger,
+      denseSuspicious:
+        lexicalDecision.reason === "low_top1" ||
+        lexicalDecision.reason === "low_top5_mean" ||
+        lexicalDecision.reason === "low_repo_diversity",
       lexicalTriggered: lexicalDecision.trigger,
       lexicalTriggerReason: lexicalDecision.reason,
       denseTopScores,
