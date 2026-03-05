@@ -11,6 +11,12 @@
 - Improved Ollama embedding recommendation matching to support tagged model names (prefix match for curated defaults).
 - Added model-catalog regression test for tagged embedding model names.
 
+## 2026-03-05 (Docs + Retrieval Follow-up Alignment)
+
+- Updated retrieval/chunking notes to match latest behavior:
+  - large-README chunk budget quality scoring now evaluates normalized window text before budget selection,
+  - lexical safety-net fused candidates now carry fused relevance into MMR reranking (lexical-only candidates no longer enter rerank as hard-zero relevance).
+
 ## 2026-03-05 (Follow-up PR Review Fixes - Model Routing + Capability + Chunk Budget)
 
 - Fixed browser capability scoring so `perfScore == null` is neutral (`+0`), preventing weak/timeout devices from receiving an unintended heavy-model boost.
@@ -39,10 +45,10 @@
   - corpus counters
   - rerank vector mismatch counters
 - Fixed browser embedding capability scoring so unknown `deviceMemory` is neutral (no positive boost).
-- Updated chunk budgeting flow so quality scoring runs on markdown-preserving windows before normalization.
+- Updated chunk budgeting flow so quality scoring runs on normalized windows before final chunk selection.
 - Deduplicated query tokens in lexical overlap and rare-token counting.
 - Hardened rerank behavior for vector-size mismatch (no full-pass hard fail).
-- Rerank output now preserves both MMR ranking score (`score`) and raw dense score (`denseScore`).
+- Rerank output now preserves both MMR ranking score (`score`) and rerank relevance signal (`denseScore`).
 
 ## 2026-03-05 (Browser Embedding Capability UX + Advanced Tuning Visibility)
 

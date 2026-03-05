@@ -182,6 +182,7 @@ Recommended:
   - lexical safety-net only when dense confidence is weak (or rare-token intent is detected),
   - tiny-corpus high-confidence queries skip the lexical branch to avoid onboarding latency,
   - lexical pool is mixed (recent + oldest + broad deterministic window), not recency-only,
+  - when lexical safety-net fusion triggers, fused relevance is used in MMR candidate scoring,
   - MMR rerank with per-repo cap.
 
 ## 10.1 Retrieval Tuning (Sudo/Advanced)
@@ -271,7 +272,9 @@ Reset actions in UI:
 ## 12.9 Score semantics (MMR vs dense)
 
 - Search result `score` reflects the rerank decision score (MMR objective).
-- Dense cosine score is retained internally as `denseScore` for diagnostics/debugging.
+- `denseScore` reflects the relevance signal used by rerank:
+  - dense-only path: cosine similarity from dense retrieval,
+  - lexical-fusion path: normalized fused (RRF) relevance score used for MMR candidate scoring.
 - UI keeps a compact band (`High/Medium/Low`) and a finite decimal score.
 
 ## 12.8 Browser embedding model keeps re-downloading
