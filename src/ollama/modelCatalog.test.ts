@@ -32,6 +32,21 @@ describe("buildOllamaModelCatalogFromPayload", () => {
     expect(catalog.recommendedLlm).toBeNull();
   });
 
+  test("matches recommended embedding models even when ollama names include tags", () => {
+    const catalog = buildOllamaModelCatalogFromPayload(
+      {
+        models: [
+          { name: "mxbai-embed-large:latest" },
+          { name: "nomic-embed-text:latest" },
+          { name: "llama3.1:8b", details: { family: "llama" } },
+        ],
+      },
+      null,
+    );
+    expect(catalog.embedding[0]).toBe("mxbai-embed-large:latest");
+    expect(catalog.recommendedEmbedding).toBe("mxbai-embed-large:latest");
+  });
+
   test("deduplicates and sorts model names", () => {
     const catalog = buildOllamaModelCatalogFromPayload(
       {

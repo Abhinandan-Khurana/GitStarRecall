@@ -510,13 +510,14 @@ function getRetrievalTuningStorageKey(scope: string): string {
 }
 
 function getCustomModelWarning(model: string): string | null {
-  const curated = new Set([
-    "qwen3-embedding:4b",
-    "qwen3-embedding:0.6b",
-    "mxbai-embed-large",
-    "embeddinggemma",
-  ]);
-  if (curated.has(model.trim().toLowerCase())) {
+  const normalized = model.trim().toLowerCase();
+  const isCurated =
+    normalized.startsWith("qwen3-embedding") ||
+    normalized.startsWith("mxbai-embed-large") ||
+    normalized.startsWith("nomic-embed-text") ||
+    normalized.startsWith("embeddinggemma");
+
+  if (isCurated) {
     return null;
   }
   return (

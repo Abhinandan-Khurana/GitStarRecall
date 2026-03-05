@@ -4,7 +4,6 @@ const EMBEDDING_RECOMMENDATION_ORDER = [
   "qwen3-embedding:4b",
   "qwen3-embedding:0.6b",
   "mxbai-embed-large",
-  "embeddinggemma",
   "nomic-embed-text",
 ];
 
@@ -103,12 +102,21 @@ function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
 }
 
+function matchesPreferredModel(model: string, preferred: string): boolean {
+  return model === preferred || model.startsWith(`${preferred}:`);
+}
+
 function orderEmbeddingModels(values: string[]): string[] {
   const unique = Array.from(new Set(values));
   const curated: string[] = [];
   for (const preferred of EMBEDDING_RECOMMENDATION_ORDER) {
-    if (unique.includes(preferred)) {
-      curated.push(preferred);
+    for (const model of unique) {
+      if (curated.includes(model)) {
+        continue;
+      }
+      if (matchesPreferredModel(model, preferred)) {
+        curated.push(model);
+      }
     }
   }
   const remaining = unique
@@ -130,8 +138,10 @@ function isEmbeddingModel(entry: OllamaModelEntry): boolean {
 
 function pickRecommendedEmbedding(models: string[]): string {
   for (const preferred of EMBEDDING_RECOMMENDATION_ORDER) {
-    if (models.includes(preferred)) {
-      return preferred;
+    for (const model of models) {
+      if (matchesPreferredModel(model, preferred)) {
+        return model;
+      }
     }
   }
   return models[0] ?? DEFAULT_EMBEDDING_MODEL;
