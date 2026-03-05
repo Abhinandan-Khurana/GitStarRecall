@@ -1106,17 +1106,14 @@ export default function UsagePage() {
   }, [providerId, providerModel]);
 
   useEffect(() => {
-    if (ollamaCatalogStatus === "loading") {
-      return;
-    }
     if (providerId !== "ollama") {
       return;
     }
-    if (ollamaCatalogStatus === "ready" && ollamaCatalog) {
+    if (ollamaCatalogStatus !== "idle") {
       return;
     }
     void refreshOllamaCatalog().catch(() => undefined);
-  }, [providerId, ollamaCatalog, ollamaCatalogStatus, refreshOllamaCatalog]);
+  }, [providerId, ollamaCatalogStatus, refreshOllamaCatalog]);
 
   useEffect(() => {
     if (!ollamaCatalog) {
@@ -1270,6 +1267,8 @@ export default function UsagePage() {
     setOllamaCatalog(null);
     setOllamaCatalogStatus("idle");
     setOllamaCatalogError(null);
+    ollamaEmbeddingModelManuallySetRef.current = false;
+    ollamaChatModelManuallySetRef.current = false;
   }, [ollamaBaseUrl]);
 
   /* Chat scroll is handled inside SessionChat (only the message list scrolls, not the page) */
