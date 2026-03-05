@@ -875,6 +875,8 @@ export class LocalDatabase {
     if (countRareLikeTokens(params.queryText) >= 2) {
       const denseConfident = top1 >= params.tuning.lexicalHighConfidenceBypassTop1;
       const denseLexicallyAligned = params.topDenseLexicalOverlap > 0;
+      // Rare-token queries still run lexical recovery when dense top-1 has no literal token overlap,
+      // even if semantic confidence is high.
       if (!denseConfident || !denseLexicallyAligned) {
         return { trigger: true, reason: "rare_token_query" };
       }

@@ -143,7 +143,7 @@ describe("chunker", () => {
     expect(chunks.some((chunk) => chunk.text.includes("lowwindowtoken"))).toBe(false);
   });
 
-  test("chunk budget fallback keeps quality floor for very low-signal remainder", () => {
+  test("chunk budget intentionally under-fills rather than padding low-signal remainder", () => {
     const lowSignal = [
       "| | | | | | | | | | | | | | | | | |",
       "https://example.com/a https://example.com/b https://example.com/c https://example.com/d",
@@ -167,6 +167,7 @@ describe("chunker", () => {
     });
 
     const chunks = chunkRepo(repo);
+    expect(chunks.length).toBeLessThan(120);
     expect(chunks.some((chunk) => chunk.text.includes("highsignalfallbacktoken"))).toBe(true);
     expect(chunks.some((chunk) => chunk.text.includes("lowsignalwindowtoken"))).toBe(false);
   });

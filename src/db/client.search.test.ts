@@ -485,6 +485,94 @@ describe("LocalDatabase semantic search", () => {
     expect(reason).toBeNull();
   });
 
+  it("keeps rare-token lexical trigger when dense top-1 is confident but lexically misaligned", async () => {
+    const rawDb = new SQL.Database();
+    runSchema(rawDb);
+    const localDb = createLocalDatabase(rawDb);
+
+    await localDb.upsertRepos([
+      {
+        id: 1,
+        fullName: "acme/r1",
+        name: "r1",
+        description: null,
+        topics: [],
+        language: "TypeScript",
+        htmlUrl: "https://github.com/acme/r1",
+        stars: 1,
+        forks: 0,
+        updatedAt: "2026-01-01T00:00:00Z",
+        readmeUrl: null,
+        readmeText: "alpha",
+        checksum: "a",
+        lastSyncedAt: 1,
+      },
+      {
+        id: 2,
+        fullName: "acme/r2",
+        name: "r2",
+        description: null,
+        topics: [],
+        language: "TypeScript",
+        htmlUrl: "https://github.com/acme/r2",
+        stars: 1,
+        forks: 0,
+        updatedAt: "2026-01-01T00:00:00Z",
+        readmeUrl: null,
+        readmeText: "beta",
+        checksum: "b",
+        lastSyncedAt: 1,
+      },
+      {
+        id: 3,
+        fullName: "acme/r3",
+        name: "r3",
+        description: null,
+        topics: [],
+        language: "TypeScript",
+        htmlUrl: "https://github.com/acme/r3",
+        stars: 1,
+        forks: 0,
+        updatedAt: "2026-01-01T00:00:00Z",
+        readmeUrl: null,
+        readmeText: "gamma",
+        checksum: "c",
+        lastSyncedAt: 1,
+      },
+    ]);
+
+    await localDb.upsertChunks([
+      {
+        id: "c1",
+        repoId: 1,
+        chunkId: "c1",
+        text: "semantic dense hit without literal query token overlap",
+        source: "readme",
+        createdAt: 1,
+      },
+      { id: "c2", repoId: 2, chunkId: "c2", text: "beta dense hit", source: "readme", createdAt: 2 },
+      { id: "c3", repoId: 3, chunkId: "c3", text: "gamma dense hit", source: "readme", createdAt: 3 },
+    ]);
+    await localDb.upsertEmbeddings([
+      { id: "e1", chunkId: "c1", model: "test-model", dimension: 3, vectorBlob: toBlob(new Float32Array([1, 0, 0])), createdAt: 1 },
+      { id: "e2", chunkId: "c2", model: "test-model", dimension: 3, vectorBlob: toBlob(new Float32Array([0.2, 0.8, 0])), createdAt: 2 },
+      { id: "e3", chunkId: "c3", model: "test-model", dimension: 3, vectorBlob: toBlob(new Float32Array([0.1, 0.1, 0.9])), createdAt: 3 },
+    ]);
+
+    let lexicalTriggered = false;
+    let reason: string | null = null;
+    await localDb.findSimilarChunks(new Float32Array([1, 0, 0]), 10, {
+      queryText: "socket.io v4.5",
+      onDiagnostics(payload) {
+        lexicalTriggered = payload.lexicalTriggered;
+        reason = payload.lexicalTriggerReason;
+      },
+    });
+
+    expect(lexicalTriggered).toBe(true);
+    expect(reason).toBe("rare_token_query");
+  });
+
   it("lexical safety-net can recover relevant older chunks from outside the recent window", async () => {
     const rawDb = new SQL.Database();
     runSchema(rawDb);

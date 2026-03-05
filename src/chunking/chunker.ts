@@ -204,28 +204,8 @@ function applyChunkBudget(windows: string[], combinedLength: number): string[] {
   const candidates = scored
     .sort((a, b) => b.score - a.score || a.index - b.index);
 
-  const selected: typeof scored = [];
-  for (const item of candidates) {
-    if (selected.length >= MAX_CHUNKS_FOR_LARGE_README) {
-      break;
-    }
-    if (item.score >= MIN_CHUNK_QUALITY_SCORE) {
-      selected.push(item);
-    }
-  }
-
-  if (selected.length < MAX_CHUNKS_FOR_LARGE_README) {
-    const fallback = scored
-      .filter((item) => !selected.some((existing) => existing.index === item.index))
-      .filter((item) => item.score >= MIN_CHUNK_QUALITY_SCORE)
-      .sort((a, b) => b.score - a.score || a.index - b.index);
-    for (const item of fallback) {
-      if (selected.length >= MAX_CHUNKS_FOR_LARGE_README) {
-        break;
-      }
-      selected.push(item);
-    }
-  }
+  // Intentionally under-fill when few windows clear quality; avoid padding with low-signal chunks.
+  const selected = candidates.filter((item) => item.score >= MIN_CHUNK_QUALITY_SCORE).slice(0, MAX_CHUNKS_FOR_LARGE_README);
 
   selected.sort((a, b) => a.index - b.index);
   return selected.map((item) => item.text);
