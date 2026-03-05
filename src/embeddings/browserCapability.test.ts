@@ -58,16 +58,26 @@ describe("browser embedding capability recommendations", () => {
       reason: "strong-desktop",
       score: 5,
       threshold: 5,
-      capability: capability({ hardwareConcurrency: 8, deviceMemoryGB: null, perfScore: 1200 }),
+      capability: capability({ hardwareConcurrency: 10, deviceMemoryGB: null, perfScore: 1200 }),
       modelCandidates: [DEFAULT_BROWSER_EMBEDDING_MODEL, BROWSER_EMBEDDING_FALLBACK_MODEL],
     };
     const next = recommendBrowserEmbeddingModelFromCapability(
-      capability({ hardwareConcurrency: 8, deviceMemoryGB: null, perfScore: 800 }),
+      capability({ hardwareConcurrency: 10, deviceMemoryGB: null, perfScore: 800 }),
       { previousRecommendation },
     );
     expect(next.modelId).toBe(DEFAULT_BROWSER_EMBEDDING_MODEL);
     expect(next.reason).toBe("strong-desktop");
     expect(next.score).toBe(4);
+  });
+
+  it("treats unknown device memory as neutral (no bonus)", () => {
+    const unknownMemory = scoreBrowserDesktopStrength(
+      capability({ hardwareConcurrency: 6, deviceMemoryGB: null, perfScore: 800 }),
+    );
+    const lowMemory = scoreBrowserDesktopStrength(
+      capability({ hardwareConcurrency: 6, deviceMemoryGB: 6, perfScore: 800 }),
+    );
+    expect(unknownMemory).toBeLessThan(lowMemory);
   });
 });
 

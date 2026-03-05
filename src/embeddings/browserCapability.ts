@@ -111,7 +111,7 @@ function desktopScoreFromCapability(capability: BrowserEmbeddingCapability): num
   }
 
   if (capability.deviceMemoryGB == null) {
-    score += 1;
+    score += 0;
   } else if (capability.deviceMemoryGB >= 16) {
     score += 3;
   } else if (capability.deviceMemoryGB >= 8) {

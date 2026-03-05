@@ -41,4 +41,34 @@ describe("chunker", () => {
     expect(chunks[0].id).toBe("42:0");
     expect(chunks.every((chunk) => chunk.repoId === 42)).toBe(true);
   });
+
+  test("chunk budget preserves high-signal markdown sections on large readmes", () => {
+    const noisySection = [
+      "```ts",
+      "const value = 1;",
+      "```",
+      "| col | val |",
+      "| --- | --- |",
+      "| a | b |",
+      "",
+    ].join("\n");
+    const highSignalSection = [
+      "## High Signal Section",
+      "This section includes legacyneedle important context for semantic retrieval.",
+      "",
+    ].join("\n");
+
+    const noisyPrefix = new Array(250).fill(noisySection).join("\n");
+    const noisySuffix = new Array(80).fill(noisySection).join("\n");
+    const largeReadme = `${noisyPrefix}\n${highSignalSection}\n${noisySuffix}`;
+
+    const repo = makeRepo({
+      id: 77,
+      readmeText: largeReadme,
+    });
+
+    const chunks = chunkRepo(repo);
+    expect(chunks.length).toBeLessThanOrEqual(120);
+    expect(chunks.some((chunk) => chunk.text.includes("legacyneedle"))).toBe(true);
+  });
 });

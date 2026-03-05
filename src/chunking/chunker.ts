@@ -186,19 +186,27 @@ function applyChunkBudget(windows: string[], combinedLength: number): string[] {
 export function chunkRepo(repo: RepoRecord): ChunkRecord[] {
   const header = buildMetadataHeader(repo);
 
-  let readmeBody = "";
+  let readmeBodyForBudget = "";
   if (repo.readmeText) {
     const sectioned = splitReadmeIntoSections(repo.readmeText).join("\n\n");
-    readmeBody = normalizeText(sectioned);
-    if (readmeBody.length > MAX_README_LENGTH) {
-      readmeBody = readmeBody.slice(0, MAX_README_LENGTH);
+    readmeBodyForBudget = sectioned;
+    if (readmeBodyForBudget.length > MAX_README_LENGTH) {
+      readmeBodyForBudget = readmeBodyForBudget.slice(0, MAX_README_LENGTH);
     }
   }
 
-  const combined = readmeBody.length > 0 ? `${header}\n\n${readmeBody}` : header;
+  const combinedForBudget = readmeBodyForBudget.length > 0 ? `${header}\n\n${readmeBodyForBudget}` : header;
 
-  const { size, overlap } = resolveChunkConfig(combined.length);
-  const windows = applyChunkBudget(splitIntoChunks(combined, size, overlap), combined.length);
+  const { size, overlap } = resolveChunkConfig(combinedForBudget.length);
+  const windowsForBudget = splitIntoChunks(combinedForBudget, size, overlap);
+  const selectedWindows = applyChunkBudget(windowsForBudget, combinedForBudget.length);
+  const windows = selectedWindows.map((windowText) => {
+    const normalized = normalizeText(windowText);
+    if (normalized.length > 0) {
+      return normalized;
+    }
+    return windowText.trim();
+  });
   const now = Date.now();
 
   return windows.map((text, index) => {
