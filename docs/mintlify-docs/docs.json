@@ -1,41 +1,115 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "GitStarRecall Docs",
-  "description": "GitStarRecall documentation and guides",
-  "colors": {
-    "primary": "#22c55e"
+  "name": "GitStarRecall",
+  "description": "AI-powered semantic search and recall engine for GitHub starred repositories.",
+  "logo": {
+    "dark": "/logo/dark.svg",
+    "light": "/logo/light.svg"
   },
+  "colors": {
+    "primary": "#6366f1",
+    "light": "#818cf8",
+    "dark": "#4338ca"
+  },
+  "favicon": "/favicon.ico",
+
   "navigation": {
     "groups": [
       {
+        "group": "Introduction",
+        "pages": [
+          "introduction",
+          "problem",
+          "how-it-works"
+        ]
+      },
+      {
         "group": "Getting Started",
         "pages": [
-          "introduction"
+          "installation",
+          "quickstart",
+          "configuration"
         ]
       },
       {
-        "group": "Core Guides",
+        "group": "Core Features",
         "pages": [
-          "setup",
-          "usage",
-          "features"
+          "semantic-search",
+          "repo-ingestion",
+          "embedding-engine",
+          "rag-pipeline",
+          "web-interface"
         ]
       },
       {
-        "group": "Advanced",
+        "group": "Architecture",
         "pages": [
-          "architecture",
-          "security-model"
+          "system-architecture",
+          "embedding-architecture",
+          "vector-storage",
+          "hybrid-search",
+          "performance"
         ]
       },
       {
-        "group": "Resources",
+        "group": "AI & LLM Stack",
+        "pages": [
+          "local-llm-support",
+          "webllm",
+          "ollama",
+          "supported-models"
+        ]
+      },
+      {
+        "group": "Scaling & Performance",
+        "pages": [
+          "large-star-repos",
+          "progressive-indexing",
+          "caching",
+          "memory-optimization"
+        ]
+      },
+      {
+        "group": "Security",
+        "pages": [
+          "security-model",
+          "data-privacy",
+          "threat-model"
+        ]
+      },
+      {
+        "group": "Developer Guide",
+        "pages": [
+          "project-structure",
+          "api-reference",
+          "extending-the-system",
+          "plugin-architecture"
+        ]
+      },
+      {
+        "group": "Contribution",
+        "pages": [
+          "contributing",
+          "development-setup",
+          "roadmap"
+        ]
+      },
+      {
+        "group": "Troubleshooting",
         "pages": [
           "faq",
-          "troubleshooting"
+          "common-errors",
+          "debugging"
         ]
       }
     ]
+  },
+
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Abhinandan-Khurana/GitStarRecall",
+      "twitter": "https://x.com/L0u51f3r007"
+    }
   }
 }
