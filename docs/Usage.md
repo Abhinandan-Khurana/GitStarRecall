@@ -342,6 +342,7 @@ README batching pipeline controls:
 - Endpoint is restricted to localhost patterns only.
 - Payload to Ollama includes only embedding text + model (no GitHub token).
 - If Ollama is unavailable, indexing automatically restarts with browser embeddings.
+- "No embedding models detected" guidance appears only when Ollama mode is enabled.
 
 ### Ollama Setup
 

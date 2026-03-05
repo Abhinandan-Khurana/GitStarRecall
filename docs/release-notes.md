@@ -22,6 +22,9 @@
 - Fixed custom-model selection edge case in Ollama embedding settings:
   - selecting `Custom model...` no longer forces a fallback model when the input is blank,
   - prevents custom input from collapsing immediately when common defaults are installed locally.
+- Narrowed `ollamaConnectionStatus` typing in `OllamaConfigPanel` from loose `string` to the explicit status union (`idle|testing|connected|failed|inactive`) for stronger compile-time safety.
+- Ollama empty-model guidance now respects toggle state:
+  - "No embedding models detected" is shown only when Ollama embedding mode is enabled.
 - Removed duplicate `RetrievalTuning` type declarations by importing the shared type from `DeveloperModePanel` into `UsagePage`, preventing silent type drift.
 - Synced docs for these controls in `docs/Usage.md`.
 

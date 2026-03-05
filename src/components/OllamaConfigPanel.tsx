@@ -39,6 +39,8 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 
+type OllamaConnectionStatus = "idle" | "testing" | "connected" | "failed" | "inactive";
+
 interface OllamaConfigPanelProps {
   allowOllamaEmbedding: boolean;
   onAllowOllamaChange: (checked: boolean) => void;
@@ -52,12 +54,12 @@ interface OllamaConfigPanelProps {
   customModelWarning: string | null;
   browserEmbeddingRecommendation: BrowserEmbeddingRecommendation | null;
   onRefreshModels: () => void;
-  ollamaConnectionStatus: string;
+  ollamaConnectionStatus: OllamaConnectionStatus;
   ollamaConnectionMessage: string | null;
   onTestConnection: () => void;
 }
 
-function ConnectionStatusIndicator({ status }: { status: string }) {
+function ConnectionStatusIndicator({ status }: { status: OllamaConnectionStatus }) {
   if (status === "connected") {
     return (
       <Badge className="border-0 bg-primary/15 text-primary">
@@ -483,7 +485,8 @@ export function OllamaConfigPanel({
           </div>
 
           {/* Status Messages */}
-          {embeddingModelOptions.length === 0 &&
+          {allowOllamaEmbedding &&
+            embeddingModelOptions.length === 0 &&
             embeddingModelStatus !== "loading" && (
               <div className="flex items-start gap-2 rounded-lg border border-border/30 bg-background/20 px-3 py-2">
                 <Zap className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
