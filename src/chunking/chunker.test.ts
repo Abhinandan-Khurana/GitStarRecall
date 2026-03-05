@@ -1,4 +1,4 @@
-import { chunkRepo, normalizeText } from "./chunker";
+import { chunkRepo, normalizeText, splitReadmeIntoSections } from "./chunker";
 import type { RepoRecord } from "../db/types";
 
 function makeRepo(overrides: Partial<RepoRecord> = {}): RepoRecord {
@@ -40,6 +40,24 @@ describe("chunker", () => {
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks[0].id).toBe("42:0");
     expect(chunks.every((chunk) => chunk.repoId === 42)).toBe(true);
+  });
+
+  test("splitReadmeIntoSections ignores markdown headings inside fenced code blocks", () => {
+    const readme = [
+      "# Intro",
+      "Some content.",
+      "```bash",
+      "# not-a-real-heading",
+      "echo ok",
+      "```",
+      "## Real Section",
+      "More content",
+    ].join("\n");
+
+    const sections = splitReadmeIntoSections(readme);
+    expect(sections).toHaveLength(2);
+    expect(sections[0]).toContain("# not-a-real-heading");
+    expect(sections[1]).toContain("## Real Section");
   });
 
   test("chunk budget preserves high-signal markdown sections on large readmes", () => {
@@ -123,5 +141,33 @@ describe("chunker", () => {
     expect(chunks.length).toBeLessThanOrEqual(120);
     expect(chunks.some((chunk) => chunk.text.includes("highsignalwindowtoken"))).toBe(true);
     expect(chunks.some((chunk) => chunk.text.includes("lowwindowtoken"))).toBe(false);
+  });
+
+  test("chunk budget fallback keeps quality floor for very low-signal remainder", () => {
+    const lowSignal = [
+      "| | | | | | | | | | | | | | | | | |",
+      "https://example.com/a https://example.com/b https://example.com/c https://example.com/d",
+      "| | | | | | | | | | | | | | | | | |",
+      "https://example.com/e https://example.com/f https://example.com/g https://example.com/h",
+      "lowsignalwindowtoken",
+      "",
+    ].join("\n");
+    const highSignal = [
+      "## Core Design",
+      "Meaningful architecture explanation with retrieval semantics and ranking intuition.",
+      "highsignalfallbacktoken",
+      "",
+    ].join("\n");
+
+    const lowPrefix = new Array(900).fill(lowSignal).join("\n");
+    const highBody = new Array(40).fill(highSignal).join("\n");
+    const repo = makeRepo({
+      id: 124,
+      readmeText: `${highBody}\n${lowPrefix}`,
+    });
+
+    const chunks = chunkRepo(repo);
+    expect(chunks.some((chunk) => chunk.text.includes("highsignalfallbacktoken"))).toBe(true);
+    expect(chunks.some((chunk) => chunk.text.includes("lowsignalwindowtoken"))).toBe(false);
   });
 });

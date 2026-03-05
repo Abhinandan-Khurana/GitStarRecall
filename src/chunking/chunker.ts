@@ -126,12 +126,65 @@ function splitIntoChunks(text: string, size: number, overlap: number): string[] 
   return chunks;
 }
 
-function splitReadmeIntoSections(readme: string): string[] {
+function isFenceDelimiter(line: string): { marker: "`" | "~"; length: number } | null {
+  const trimmed = line.trimStart();
+  const match = trimmed.match(/^(`{3,}|~{3,})/);
+  if (!match || !match[1]) {
+    return null;
+  }
+  const markerChar = match[1][0];
+  if (markerChar !== "`" && markerChar !== "~") {
+    return null;
+  }
+  return {
+    marker: markerChar,
+    length: match[1].length,
+  };
+}
+
+export function splitReadmeIntoSections(readme: string): string[] {
   const normalizedLineEndings = readme.replace(/\r\n/g, "\n");
-  const parts = normalizedLineEndings
-    .split(/\n(?=#{1,6}\s)/g)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
+  if (normalizedLineEndings.trim().length === 0) {
+    return [normalizedLineEndings];
+  }
+
+  const lines = normalizedLineEndings.split("\n");
+  const parts: string[] = [];
+  let current: string[] = [];
+  let activeFence: { marker: "`" | "~"; length: number } | null = null;
+
+  for (const line of lines) {
+    const fence = isFenceDelimiter(line);
+    if (fence) {
+      if (!activeFence) {
+        activeFence = fence;
+      } else if (fence.marker === activeFence.marker && fence.length >= activeFence.length) {
+        activeFence = null;
+      }
+      current.push(line);
+      continue;
+    }
+
+    const isHeadingStart = /^#{1,6}\s/.test(line.trimStart());
+    if (isHeadingStart && !activeFence && current.length > 0) {
+      const section = current.join("\n").trim();
+      if (section.length > 0) {
+        parts.push(section);
+      }
+      current = [line];
+      continue;
+    }
+
+    current.push(line);
+  }
+
+  if (current.length > 0) {
+    const section = current.join("\n").trim();
+    if (section.length > 0) {
+      parts.push(section);
+    }
+  }
+
   if (parts.length === 0) {
     return [normalizedLineEndings];
   }
@@ -164,7 +217,8 @@ function applyChunkBudget(windows: string[], combinedLength: number): string[] {
   if (selected.length < MAX_CHUNKS_FOR_LARGE_README) {
     const fallback = scored
       .filter((item) => !selected.some((existing) => existing.index === item.index))
-      .sort((a, b) => a.index - b.index);
+      .filter((item) => item.score >= MIN_CHUNK_QUALITY_SCORE)
+      .sort((a, b) => b.score - a.score || a.index - b.index);
     for (const item of fallback) {
       if (selected.length >= MAX_CHUNKS_FOR_LARGE_README) {
         break;

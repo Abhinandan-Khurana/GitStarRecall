@@ -14,6 +14,9 @@
   - lexical safety-net still runs for high-confidence but lexically mismatched dense top-1 results.
 - Curated embedding warning logic now matches retrieval-profile model families (for example `mxbai-embed*`, `nomic-embed*`) to avoid false custom-model warnings on valid variants.
 - `Rebuild Embeddings` now requires explicit user confirmation before clearing and regenerating the embedding index.
+- README section splitting for large-readme chunking is now code-fence-aware, so heading-like lines inside fenced code blocks do not create artificial section boundaries.
+- Chunk-budget fallback now enforces the quality floor instead of appending unchecked low-quality remainder windows.
+- Pooling profile resolution now inspects model identity and emits a one-time warning for unknown model families before using mean pooling fallback.
 - Verified dependency concern: `@huggingface/transformers@3.8.1` currently pulls `onnxruntime-node` and `sharp` as required transitive dependencies; tracked as a portability/CI risk pending upstream or package-level mitigation.
 
 ## 2026-03-05 (Minor PR Review Remediation - CSP + Model Warning + Ollama Order)

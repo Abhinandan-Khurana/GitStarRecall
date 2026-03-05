@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveEmbeddingPooling } from "./poolingProfile";
 
 describe("resolveEmbeddingPooling", () => {
@@ -11,5 +11,12 @@ describe("resolveEmbeddingPooling", () => {
     expect(resolveEmbeddingPooling("Xenova/all-MiniLM-L6-v2")).toBe("mean");
     expect(resolveEmbeddingPooling("")).toBe("mean");
     expect(resolveEmbeddingPooling(null)).toBe("mean");
+  });
+
+  it("warns once for unknown model families while defaulting to mean pooling", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(resolveEmbeddingPooling("myorg/custom-embedding-v1")).toBe("mean");
+    expect(resolveEmbeddingPooling("myorg/custom-embedding-v1")).toBe("mean");
+    expect(warnSpy).toHaveBeenCalledTimes(1);
   });
 });
