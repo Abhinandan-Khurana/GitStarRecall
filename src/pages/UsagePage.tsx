@@ -28,6 +28,7 @@ import {
   formatForEmbedding,
   getRetrievalProfile,
 } from "../embeddings/retrievalProfile";
+import { inferBackendFromModel } from "../embeddings/modelRouting";
 import {
   recommendBrowserEmbeddingModel,
   type BrowserEmbeddingRecommendation,
@@ -230,19 +231,6 @@ function formatOllamaConnectionError(err: unknown): string {
     ].join(" ");
   }
   return message;
-}
-
-function isBrowserModelIdentifier(model: string): boolean {
-  const normalized = model.trim().toLowerCase();
-  return (
-    normalized.includes("/") ||
-    normalized.startsWith("xenova") ||
-    normalized.startsWith("onnx-community")
-  );
-}
-
-function inferBackendFromModel(model: string): "browser" | "ollama" {
-  return isBrowserModelIdentifier(model) ? "browser" : "ollama";
 }
 
 function formatBrowserEmbeddingSessionError(model: string, err: unknown): Error {

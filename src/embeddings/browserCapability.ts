@@ -121,7 +121,7 @@ function desktopScoreFromCapability(capability: BrowserEmbeddingCapability): num
   }
 
   if (capability.perfScore == null) {
-    score += 1;
+    score += 0;
   } else if (capability.perfScore >= 1600) {
     score += 3;
   } else if (capability.perfScore >= 1100) {

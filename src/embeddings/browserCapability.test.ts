@@ -79,6 +79,16 @@ describe("browser embedding capability recommendations", () => {
     );
     expect(unknownMemory).toBeLessThan(lowMemory);
   });
+
+  it("treats unknown perf score as neutral (no bonus)", () => {
+    const unknownPerf = scoreBrowserDesktopStrength(
+      capability({ hardwareConcurrency: 8, deviceMemoryGB: 8, perfScore: null }),
+    );
+    const lowPerf = scoreBrowserDesktopStrength(
+      capability({ hardwareConcurrency: 8, deviceMemoryGB: 8, perfScore: 800 }),
+    );
+    expect(unknownPerf).toBeLessThan(lowPerf);
+  });
 });
 
 describe("browser embedding desktop strength scoring", () => {

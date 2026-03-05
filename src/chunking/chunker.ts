@@ -148,12 +148,10 @@ function applyChunkBudget(windows: string[], combinedLength: number): string[] {
     index,
     score: chunkQualityScore(text),
   }));
-  const mandatory = scored.filter((item) => item.index < 3);
   const candidates = scored
-    .filter((item) => item.index >= 3)
     .sort((a, b) => b.score - a.score || a.index - b.index);
 
-  const selected = [...mandatory];
+  const selected: typeof scored = [];
   for (const item of candidates) {
     if (selected.length >= MAX_CHUNKS_FOR_LARGE_README) {
       break;

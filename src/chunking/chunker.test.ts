@@ -71,4 +71,35 @@ describe("chunker", () => {
     expect(chunks.length).toBeLessThanOrEqual(120);
     expect(chunks.some((chunk) => chunk.text.includes("legacyneedle"))).toBe(true);
   });
+
+  test("chunk budget does not force-include low-quality first windows", () => {
+    const lowSignal = [
+      "| badge | value |",
+      "| --- | --- |",
+      "| ci | pass |",
+      "```txt",
+      "xxxx",
+      "```",
+      "lowwindowtoken",
+      "",
+    ].join("\n");
+    const highSignal = [
+      "## Core Architecture",
+      "This section explains retrieval quality and semantic ranking decisions in detail.",
+      "highsignalwindowtoken",
+      "",
+    ].join("\n");
+
+    const lowPrefix = new Array(80).fill(lowSignal).join("\n");
+    const highBody = new Array(700).fill(highSignal).join("\n");
+    const repo = makeRepo({
+      id: 88,
+      readmeText: `${lowPrefix}\n${highBody}`,
+    });
+
+    const chunks = chunkRepo(repo);
+    expect(chunks.length).toBeLessThanOrEqual(120);
+    expect(chunks.some((chunk) => chunk.text.includes("highsignalwindowtoken"))).toBe(true);
+    expect(chunks.some((chunk) => chunk.text.includes("lowwindowtoken"))).toBe(false);
+  });
 });
