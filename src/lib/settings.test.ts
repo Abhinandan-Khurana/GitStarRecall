@@ -62,6 +62,7 @@ describe("llm provider settings", () => {
       providerId: "webllm",
       baseUrl: "",
       model: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
+      ollamaPreferredModel: "llama3.1:8b",
       apiKey: "",
       allowRemoteProvider: false,
       allowLocalProvider: true,
@@ -78,6 +79,7 @@ describe("llm provider settings", () => {
     expect(loaded?.webllmConsent).toBe(true);
     expect(loaded?.webllmPreferredModel).toBe("SmolLM2-360M-Instruct-q4f16_1-MLC");
     expect(loaded?.webllmLastRecommendedModel).toBe("SmolLM2-360M-Instruct-q4f16_1-MLC");
+    expect(loaded?.ollamaPreferredModel).toBe("llama3.1:8b");
   });
 
   it("supports legacy records without webllm fields", () => {
@@ -100,6 +102,7 @@ describe("llm provider settings", () => {
     expect(loaded?.webllmConsent).toBe(false);
     expect(loaded?.webllmPreferredModel).toBe("");
     expect(loaded?.webllmLastRecommendedModel).toBe("");
+    expect(loaded?.ollamaPreferredModel).toBe("");
   });
 
   it("clears settings for the scoped token", () => {
@@ -107,6 +110,7 @@ describe("llm provider settings", () => {
       providerId: "ollama",
       baseUrl: "http://localhost:11434",
       model: "llama3.1:8b",
+      ollamaPreferredModel: "llama3.1:8b",
       apiKey: "",
       allowRemoteProvider: false,
       allowLocalProvider: true,

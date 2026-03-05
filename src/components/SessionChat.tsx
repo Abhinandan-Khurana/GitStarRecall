@@ -4,6 +4,7 @@ import * as React from "react";
 import type { ChatMessageRecord } from "../db/types";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
 import type { WebLLMModelProfile } from "../llm/webllm/modelCatalog";
+import { CUSTOM_MODEL_OPTION } from "../ollama/constants";
 import SafeMarkdown from "./SafeMarkdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,9 +34,7 @@ export interface SessionChatProps {
   error: string | null;
   canSend: boolean;
   noResultsHint?: boolean;
-  /** Ref for scroll-into-view at end of messages */
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
-  /** Model / provider state */
   providerId: LLMProviderId;
   providerBaseUrl: string;
   providerModel: string;
@@ -51,6 +50,10 @@ export interface SessionChatProps {
   onAllowRemoteChange: (value: boolean) => void;
   onAllowLocalChange: (value: boolean) => void;
   webllmModels: WebLLMModelProfile[];
+  ollamaModels: string[];
+  ollamaModelsStatus: "idle" | "loading" | "ready" | "error";
+  ollamaModelsError: string | null;
+  onRefreshOllamaModels: () => void;
 }
 
 function TypingDots() {
@@ -79,7 +82,6 @@ function MessageList({
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
   const showEmptyState = messages.length === 0 && !isGenerating;
 
-  // Scroll only the chat container to bottom when content changes (not the whole page)
   React.useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
@@ -92,9 +94,7 @@ function MessageList({
       className="session-chat-messages flex min-h-[200px] max-h-[min(50vh,28rem)] flex-col gap-3 overflow-y-auto overflow-x-hidden rounded-xl border p-4"
     >
       {showEmptyState ? (
-        <p className="py-4 text-center text-sm text-muted-foreground">
-          Ask something about the results above.
-        </p>
+        <p className="py-4 text-center text-sm text-muted-foreground">Ask something about the results above.</p>
       ) : null}
       {messages.map((message) => (
         <div
@@ -103,11 +103,14 @@ function MessageList({
             "max-w-[85%] px-4 py-2.5 text-sm transition-all [&_*]:text-inherit",
             message.role === "user"
               ? "session-chat-bubble-user ml-auto shadow-md"
-              : "session-chat-bubble-assistant mr-auto shadow-sm"
+              : "session-chat-bubble-assistant mr-auto shadow-sm",
           )}
         >
           {message.role === "assistant" ? (
-            <SafeMarkdown className="whitespace-pre-wrap text-xs [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:p-2 [&_pre]:bg-muted/50 [&_pre]:text-inherit [&_code]:text-inherit" content={message.content} />
+            <SafeMarkdown
+              className="whitespace-pre-wrap text-xs [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:p-2 [&_pre]:bg-muted/50 [&_pre]:text-inherit [&_code]:text-inherit"
+              content={message.content}
+            />
           ) : (
             <span className="whitespace-pre-wrap">{message.content}</span>
           )}
@@ -148,6 +151,10 @@ type ModelSettingsPopoverProps = {
   allowLocalProvider: boolean;
   onAllowLocalChange: (value: boolean) => void;
   webllmModels: WebLLMModelProfile[];
+  ollamaModels: string[];
+  ollamaModelsStatus: "idle" | "loading" | "ready" | "error";
+  ollamaModelsError: string | null;
+  onRefreshOllamaModels: () => void;
 };
 
 function ModelSettingsPopover({
@@ -168,8 +175,29 @@ function ModelSettingsPopover({
   allowLocalProvider,
   onAllowLocalChange,
   webllmModels,
+  ollamaModels,
+  ollamaModelsStatus,
+  ollamaModelsError,
+  onRefreshOllamaModels,
 }: Readonly<ModelSettingsPopoverProps>) {
   const isWebLLM = providerId === "webllm";
+  const isOllama = providerId === "ollama";
+  const [customOllamaModelMode, setCustomOllamaModelMode] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!isOllama) {
+      setCustomOllamaModelMode(false);
+      return;
+    }
+    setCustomOllamaModelMode(!ollamaModels.includes(providerModel));
+  }, [isOllama, ollamaModels, providerModel]);
+
+  const selectedOllamaOption = customOllamaModelMode
+    ? CUSTOM_MODEL_OPTION
+    : ollamaModels.includes(providerModel)
+      ? providerModel
+      : CUSTOM_MODEL_OPTION;
+  const showOllamaCustomModelInput = selectedOllamaOption === CUSTOM_MODEL_OPTION;
 
   return (
     <div className="flex items-center gap-1">
@@ -181,9 +209,9 @@ function ModelSettingsPopover({
           <SelectValue />
         </SelectTrigger>
         <SelectContent align="start" className="w-56">
-          {providerDefinitions.map((p) => (
-            <SelectItem key={p.id} value={p.id}>
-              {p.label}
+          {providerDefinitions.map((provider) => (
+            <SelectItem key={provider.id} value={provider.id}>
+              {provider.label}
             </SelectItem>
           ))}
         </SelectContent>
@@ -221,6 +249,7 @@ function ModelSettingsPopover({
                   />
                 </div>
               ) : null}
+
               {isWebLLM ? (
                 <div>
                   <Label htmlFor="chat-model-webllm" className="text-muted-foreground">Model</Label>
@@ -237,6 +266,70 @@ function ModelSettingsPopover({
                     </SelectContent>
                   </Select>
                 </div>
+              ) : isOllama ? (
+                <div className="space-y-2">
+                  <Label htmlFor="chat-model-ollama" className="text-muted-foreground">Model</Label>
+                  <Select
+                    value={selectedOllamaOption}
+                    onValueChange={(value) => {
+                      if (value === CUSTOM_MODEL_OPTION) {
+                        setCustomOllamaModelMode(true);
+                        onProviderModelChange(providerModel.trim() || "llama3.1:8b");
+                        return;
+                      }
+                      setCustomOllamaModelMode(false);
+                      onProviderModelChange(value);
+                    }}
+                    disabled={ollamaModelsStatus === "loading"}
+                  >
+                    <SelectTrigger id="chat-model-ollama" className="h-8 text-xs">
+                      <SelectValue placeholder="Select Ollama model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ollamaModels.map((model) => (
+                        <SelectItem key={model} value={model}>
+                          {model}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={CUSTOM_MODEL_OPTION}>Custom model...</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {showOllamaCustomModelInput ? (
+                    <Input
+                      id="chat-model"
+                      value={providerModel}
+                      onChange={(e) => {
+                        setCustomOllamaModelMode(true);
+                        onProviderModelChange(e.target.value);
+                      }}
+                      placeholder="llama3.1:8b"
+                      className="session-chat-settings-input h-8 text-xs"
+                    />
+                  ) : null}
+
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      {ollamaModels.length === 0
+                        ? "No chat models detected. Pull one locally and refresh."
+                        : "Only chat-capable models are listed here."}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px]"
+                      onClick={onRefreshOllamaModels}
+                      disabled={ollamaModelsStatus === "loading"}
+                    >
+                      {ollamaModelsStatus === "loading" ? "Refreshing..." : "Refresh"}
+                    </Button>
+                  </div>
+
+                  {ollamaModelsError ? (
+                    <p className="text-[11px] text-destructive">{ollamaModelsError}</p>
+                  ) : null}
+                </div>
               ) : (
                 <div>
                   <Label htmlFor="chat-model" className="text-muted-foreground">Model</Label>
@@ -250,6 +343,7 @@ function ModelSettingsPopover({
                 </div>
               )}
             </div>
+
             {isWebLLM ? (
               <p className="rounded border border-border/80 px-2 py-2 text-muted-foreground">
                 Runs in your browser. First run downloads model assets locally after confirmation.
@@ -272,17 +366,11 @@ function ModelSettingsPopover({
 
             <div className="flex flex-wrap items-center gap-4 rounded-md border border-border/80 px-2 py-2">
               <label className="flex cursor-pointer items-center gap-2">
-                <Checkbox
-                  checked={allowRemoteProvider}
-                  onCheckedChange={(c) => onAllowRemoteChange(!!c)}
-                />
+                <Checkbox checked={allowRemoteProvider} onCheckedChange={(checked) => onAllowRemoteChange(Boolean(checked))} />
                 <span className="text-muted-foreground">Remote</span>
               </label>
               <label className="flex cursor-pointer items-center gap-2">
-                <Checkbox
-                  checked={allowLocalProvider}
-                  onCheckedChange={(c) => onAllowLocalChange(!!c)}
-                />
+                <Checkbox checked={allowLocalProvider} onCheckedChange={(checked) => onAllowLocalChange(Boolean(checked))} />
                 <span className="text-muted-foreground">Local (Ollama)</span>
               </label>
             </div>
@@ -315,6 +403,10 @@ type ChatComposerProps = {
   allowLocalProvider: boolean;
   onAllowLocalChange: (value: boolean) => void;
   webllmModels: WebLLMModelProfile[];
+  ollamaModels: string[];
+  ollamaModelsStatus: "idle" | "loading" | "ready" | "error";
+  ollamaModelsError: string | null;
+  onRefreshOllamaModels: () => void;
 };
 
 function ChatComposer({
@@ -339,13 +431,19 @@ function ChatComposer({
   allowLocalProvider,
   onAllowLocalChange,
   webllmModels,
+  ollamaModels,
+  ollamaModelsStatus,
+  ollamaModelsError,
+  onRefreshOllamaModels,
 }: Readonly<ChatComposerProps>) {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (prompt.trim() && !isGenerating && canSend) onSend();
+      if (prompt.trim() && !isGenerating && canSend) {
+        onSend();
+      }
     }
   };
 
@@ -379,6 +477,10 @@ function ChatComposer({
             allowLocalProvider={allowLocalProvider}
             onAllowLocalChange={onAllowLocalChange}
             webllmModels={webllmModels}
+            ollamaModels={ollamaModels}
+            ollamaModelsStatus={ollamaModelsStatus}
+            ollamaModelsError={ollamaModelsError}
+            onRefreshOllamaModels={onRefreshOllamaModels}
           />
           <div className="flex items-center gap-1">
             <Button
@@ -435,6 +537,10 @@ export function SessionChat({
   onAllowRemoteChange,
   onAllowLocalChange,
   webllmModels,
+  ollamaModels,
+  ollamaModelsStatus,
+  ollamaModelsError,
+  onRefreshOllamaModels,
 }: Readonly<SessionChatProps>) {
   return (
     <div className="session-chat-root flex min-h-0 flex-1 flex-col gap-3">
@@ -479,6 +585,10 @@ export function SessionChat({
         allowLocalProvider={allowLocalProvider}
         onAllowLocalChange={onAllowLocalChange}
         webllmModels={webllmModels}
+        ollamaModels={ollamaModels}
+        ollamaModelsStatus={ollamaModelsStatus}
+        ollamaModelsError={ollamaModelsError}
+        onRefreshOllamaModels={onRefreshOllamaModels}
       />
 
       {error ? (

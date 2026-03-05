@@ -64,7 +64,7 @@ These must match your GitHub OAuth app settings exactly.
 - `VITE_WEBLLM_ENABLED=1` enables Browser WebLLM provider.
 - `VITE_EMBEDDING_BACKEND_PREFERRED=webgpu|wasm`
 - `VITE_README_BATCH_PIPELINE_V2=1` enables staged README pipeline.
-- `VITE_OLLAMA_BASE_URL`, `VITE_OLLAMA_MODEL`, `VITE_OLLAMA_TIMEOUT_MS`
+- `VITE_OLLAMA_BASE_URL`, `VITE_OLLAMA_TIMEOUT_MS`
 - `VITE_LLM_SETTINGS_ENCRYPTION_KEY` for encrypted provider API key storage.
 
 ## 5) GitHub OAuth Setup
@@ -143,7 +143,8 @@ Important:
 - Endpoint must be reachable from browser.
 - Ollama defaults:
   - URL: `http://localhost:11434`
-  - Example embedding model: `nomic-embed-text`
+  - Default embedding baseline: `nomic-embed-text` (UI-selectable)
+  - Installed model lists are discovered from local `/api/tags` and shown in dropdowns.
 
 ## 9.3 Browser WebLLM
 
@@ -263,9 +264,15 @@ README batching pipeline controls:
 2. Pull embedding model: `ollama pull nomic-embed-text`
 3. In the app, enable `Use Ollama for local embeddings`.
 4. Keep base URL as `http://localhost:11434` (or your localhost override).
-5. Click `Test connection`.
+5. Click `Test connection` (this also refreshes installed model lists).
 6. Run `Fetch Stars` to index with Ollama.
 7. If Ollama goes down, the app falls back to browser embedding automatically.
+
+If connection fails from browser:
+
+- Ensure Ollama is running: `ollama serve`
+- Enable global CORS: `export OLLAMA_ORIGINS="*"`
+- Restart Ollama, then click `Test connection` again
 
 ### Browser WebLLM Provider (Opt-in, Feature-Flagged)
 
@@ -319,7 +326,6 @@ README batching pipeline controls:
 - `VITE_EMBED_TRIGGER_THRESHOLD` (pending chunk threshold for rolling embed windows)
 - `VITE_EMBED_WINDOW_SIZE` (per rolling embed window)
 - `VITE_OLLAMA_BASE_URL` (optional default, must be localhost/127.0.0.1/[::1])
-- `VITE_OLLAMA_MODEL` (optional default, e.g. `nomic-embed-text`)
 - `VITE_OLLAMA_TIMEOUT_MS`
 - `VITE_WEBLLM_ENABLED` (`1` enables Browser WebLLM provider)
 - `VITE_LLM_SETTINGS_ENCRYPTION_KEY=` (openssl rand -hex 32)

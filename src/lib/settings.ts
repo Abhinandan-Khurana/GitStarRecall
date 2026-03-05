@@ -4,6 +4,7 @@ export type LLMProviderSettings = {
   providerId: LLMProviderId;
   baseUrl: string;
   model: string;
+  ollamaPreferredModel: string;
   apiKey: string;
   allowRemoteProvider: boolean;
   allowLocalProvider: boolean;
@@ -70,6 +71,7 @@ function isValidStoredShape(parsed: unknown): parsed is StoredSettings {
     typeof p.providerId === "string" &&
     typeof p.baseUrl === "string" &&
     typeof p.model === "string" &&
+    (p.ollamaPreferredModel === undefined || typeof p.ollamaPreferredModel === "string") &&
     typeof p.allowRemoteProvider === "boolean" &&
     typeof p.allowLocalProvider === "boolean" &&
     (p.webllmConsent === undefined || typeof p.webllmConsent === "boolean") &&
@@ -95,6 +97,8 @@ export function loadSettings(token: string | null): LLMProviderSettings | null {
       providerId: parsed.providerId as LLMProviderId,
       baseUrl: parsed.baseUrl,
       model: parsed.model,
+      ollamaPreferredModel:
+        typeof parsed.ollamaPreferredModel === "string" ? parsed.ollamaPreferredModel : "",
       allowRemoteProvider: parsed.allowRemoteProvider,
       allowLocalProvider: parsed.allowLocalProvider,
       webllmConsent: parsed.webllmConsent === true,
@@ -133,6 +137,8 @@ export async function loadSettingsAsync(token: string | null): Promise<LLMProvid
       providerId: parsed.providerId as LLMProviderId,
       baseUrl: parsed.baseUrl,
       model: parsed.model,
+      ollamaPreferredModel:
+        typeof parsed.ollamaPreferredModel === "string" ? parsed.ollamaPreferredModel : "",
       allowRemoteProvider: parsed.allowRemoteProvider,
       allowLocalProvider: parsed.allowLocalProvider,
       webllmConsent: parsed.webllmConsent === true,
@@ -174,6 +180,7 @@ export function saveSettings(token: string | null, settings: LLMProviderSettings
     providerId: settings.providerId,
     baseUrl: settings.baseUrl,
     model: settings.model,
+    ollamaPreferredModel: settings.ollamaPreferredModel,
     allowRemoteProvider: settings.allowRemoteProvider,
     allowLocalProvider: settings.allowLocalProvider,
     webllmConsent: settings.webllmConsent,

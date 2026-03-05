@@ -1,7 +1,16 @@
+import { useEffect, useState } from "react";
 import { Settings2 } from "lucide-react";
+import { CUSTOM_MODEL_OPTION } from "../ollama/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Collapsible,
   CollapsibleContent,
@@ -15,6 +24,10 @@ interface OllamaConfigPanelProps {
   onBaseUrlChange: (value: string) => void;
   ollamaModel: string;
   onModelChange: (value: string) => void;
+  embeddingModelOptions: string[];
+  embeddingModelStatus: "idle" | "loading" | "ready" | "error";
+  embeddingModelError: string | null;
+  onRefreshModels: () => void;
   ollamaConnectionStatus: string;
   ollamaConnectionMessage: string | null;
   onTestConnection: () => void;
@@ -27,10 +40,27 @@ export function OllamaConfigPanel({
   onBaseUrlChange,
   ollamaModel,
   onModelChange,
+  embeddingModelOptions,
+  embeddingModelStatus,
+  embeddingModelError,
+  onRefreshModels,
   ollamaConnectionStatus,
   ollamaConnectionMessage,
   onTestConnection,
 }: OllamaConfigPanelProps) {
+  const [customModelMode, setCustomModelMode] = useState(false);
+
+  useEffect(() => {
+    setCustomModelMode(!embeddingModelOptions.includes(ollamaModel));
+  }, [embeddingModelOptions, ollamaModel]);
+
+  const selectedEmbeddingOption = customModelMode
+    ? CUSTOM_MODEL_OPTION
+    : embeddingModelOptions.includes(ollamaModel)
+      ? ollamaModel
+      : CUSTOM_MODEL_OPTION;
+  const showCustomModelInput = selectedEmbeddingOption === CUSTOM_MODEL_OPTION;
+
   return (
     <Collapsible>
       <CollapsibleTrigger asChild>
@@ -93,7 +123,7 @@ export function OllamaConfigPanel({
             Requests go only to localhost. No GitHub token is sent.
           </p>
 
-          <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
             <div className="space-y-1">
               <Label htmlFor="ollama-base-url" className="text-[11px] text-muted-foreground">
                 Ollama URL
@@ -110,13 +140,31 @@ export function OllamaConfigPanel({
               <Label htmlFor="ollama-model" className="text-[11px] text-muted-foreground">
                 Embedding model
               </Label>
-              <Input
-                id="ollama-model"
-                value={ollamaModel}
-                onChange={(event) => onModelChange(event.target.value)}
-                placeholder="nomic-embed-text"
-                className="h-8 rounded-md border-border/50 bg-background/50 text-xs"
-              />
+              <Select
+                value={selectedEmbeddingOption}
+                onValueChange={(value) => {
+                  if (value === CUSTOM_MODEL_OPTION) {
+                    setCustomModelMode(true);
+                    onModelChange(ollamaModel.trim() || "nomic-embed-text");
+                    return;
+                  }
+                  setCustomModelMode(false);
+                  onModelChange(value);
+                }}
+                disabled={embeddingModelStatus === "loading"}
+              >
+                <SelectTrigger id="ollama-model" className="h-8 rounded-md border-border/50 bg-background/50 text-xs">
+                  <SelectValue placeholder="Select embedding model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {embeddingModelOptions.map((model) => (
+                    <SelectItem key={model} value={model}>
+                      {model}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={CUSTOM_MODEL_OPTION}>Custom model...</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex items-end">
               <Button
@@ -130,7 +178,41 @@ export function OllamaConfigPanel({
                 {ollamaConnectionStatus === "testing" ? "Testing..." : "Test"}
               </Button>
             </div>
+            <div className="flex items-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onRefreshModels}
+                disabled={embeddingModelStatus === "loading"}
+                className="h-8 rounded-md text-xs"
+              >
+                {embeddingModelStatus === "loading" ? "Refreshing..." : "Refresh"}
+              </Button>
+            </div>
           </div>
+
+          {showCustomModelInput ? (
+            <Input
+              value={ollamaModel}
+              onChange={(event) => {
+                setCustomModelMode(true);
+                onModelChange(event.target.value);
+              }}
+              placeholder="nomic-embed-text"
+              className="h-8 rounded-md border-border/50 bg-background/50 text-xs"
+            />
+          ) : null}
+
+          {embeddingModelOptions.length === 0 && embeddingModelStatus !== "loading" ? (
+            <p className="text-[11px] text-muted-foreground">
+              No embedding models detected yet. Pull one locally (for example `nomic-embed-text`) and refresh.
+            </p>
+          ) : null}
+
+          {embeddingModelError ? (
+            <p className="text-[11px] text-destructive">{embeddingModelError}</p>
+          ) : null}
 
           {ollamaConnectionMessage && (
             <p

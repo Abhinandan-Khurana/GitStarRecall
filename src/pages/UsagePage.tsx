@@ -19,6 +19,7 @@ import {
   OllamaEmbeddingClient,
   type OllamaEmbeddingRuntimeInfo,
 } from "../embeddings/ollamaClient";
+import { fetchOllamaModelCatalog, type OllamaModelCatalog } from "../ollama/modelCatalog";
 import { float32ToBlob } from "../embeddings/vector";
 import { buildSyncPlan, repoMetadataChanged } from "../sync/plan";
 import { sortChatMessages } from "../chat/order";
@@ -131,6 +132,7 @@ type EmbeddingBackendIdentity =
     };
 
 type OllamaConnectionStatus = "idle" | "testing" | "connected" | "failed" | "inactive";
+type OllamaCatalogStatus = "idle" | "loading" | "ready" | "error";
 
 type OllamaPreferenceSnapshot = {
   baseUrl: string;
@@ -197,8 +199,19 @@ function formatEmbeddingError(err: unknown): string {
 
 function formatOllamaConnectionError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
-  if (message.toLowerCase().includes("localhost")) {
+  if (/localhost|127\.0\.0\.1|\[::1\]/i.test(message)) {
     return "Ollama URL must be localhost, 127.0.0.1, or [::1].";
+  }
+  if (/timed out/i.test(message)) {
+    return "Ollama request timed out. Verify localhost URL/port and retry.";
+  }
+  if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
+    return [
+      "Cannot reach Ollama from the browser.",
+      "Ensure Ollama is running (`ollama serve`).",
+      "Enable global CORS (`export OLLAMA_ORIGINS=\"*\"`) and restart Ollama.",
+      "Then click Test again.",
+    ].join(" ");
   }
   return message;
 }
@@ -302,11 +315,7 @@ function getDefaultOllamaBaseUrl(): string {
 }
 
 function getDefaultOllamaModel(): string {
-  const raw = import.meta.env.VITE_OLLAMA_MODEL;
-  if (typeof raw === "string" && raw.trim()) {
-    return raw.trim();
-  }
-  return "nomic-embed-text";
+  return DEFAULT_OLLAMA_EMBEDDING_MODEL;
 }
 
 function getOllamaTimeoutMs(): number {
@@ -396,8 +405,24 @@ const CHAT_SCOPE_PREFIX = "chat";
 const EMBEDDING_BACKEND_META_KEY = "embedding_active_backend";
 const EMBEDDING_MODEL_META_KEY = "embedding_active_model";
 const BROWSER_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
+const DEFAULT_OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
 const OLLAMA_BATCH_SIZE_CAP = 24;
 const OLLAMA_RESTART_BROWSER_ERROR = "__OLLAMA_RESTART_BROWSER__";
+
+function resolveAutoModel(params: {
+  lastUsed: string;
+  recommended: string;
+  available: string[];
+}): string {
+  const { lastUsed, recommended, available } = params;
+  if (lastUsed && available.includes(lastUsed)) {
+    return lastUsed;
+  }
+  if (recommended && available.includes(recommended)) {
+    return recommended;
+  }
+  return available[0] ?? recommended;
+}
 
 function hashTokenScope(raw: string): string {
   let hash = 0;
@@ -601,6 +626,7 @@ export default function UsagePage() {
     (defaultProviderId === "webllm" ? WEBLLM_PRIMARY_MODEL_ID : "gpt-4o-mini"),
   );
   const [providerApiKey, setProviderApiKey] = useState("");
+  const [ollamaPreferredChatModel, setOllamaPreferredChatModel] = useState("llama3.1:8b");
   const [allowRemoteProvider, setAllowRemoteProvider] = useState(false);
   const [allowLocalProvider, setAllowLocalProvider] = useState(false);
   const [webllmConsent, setWebllmConsent] = useState(false);
@@ -618,6 +644,9 @@ export default function UsagePage() {
   const [allowOllamaEmbedding, setAllowOllamaEmbedding] = useState(false);
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState(getDefaultOllamaBaseUrl());
   const [ollamaModel, setOllamaModel] = useState(getDefaultOllamaModel());
+  const [ollamaCatalog, setOllamaCatalog] = useState<OllamaModelCatalog | null>(null);
+  const [ollamaCatalogStatus, setOllamaCatalogStatus] = useState<OllamaCatalogStatus>("idle");
+  const [ollamaCatalogError, setOllamaCatalogError] = useState<string | null>(null);
   const [ollamaConnectionStatus, setOllamaConnectionStatus] = useState<OllamaConnectionStatus>("idle");
   const [ollamaConnectionMessage, setOllamaConnectionMessage] = useState<string | null>(null);
   const [llmPrompt, setLlmPrompt] = useState("");
@@ -627,6 +656,9 @@ export default function UsagePage() {
   const generationControllerRef = useRef<AbortController | null>(null);
   const pendingWebllmGenerationRef = useRef(false);
   const generateAnswerRef = useRef<() => Promise<void>>(async () => undefined);
+  const ollamaCatalogRequestIdRef = useRef(0);
+  const ollamaEmbeddingModelManuallySetRef = useRef(false);
+  const ollamaChatModelManuallySetRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const restoreRequestTrackerRef = useRef(createRestoreRequestTracker());
   const webllmPreviousRecommendationRef = useRef<WebLLMRecommendation | null>(null);
@@ -648,6 +680,63 @@ export default function UsagePage() {
     return (
       providerDefinitions.find((provider) => provider.id === providerId) ?? providerDefinitions[0]
     );
+  }, [providerId]);
+  const ollamaProviderDefinition = useMemo<LLMProviderDefinition | null>(() => {
+    return providerDefinitions.find((provider) => provider.id === "ollama") ?? null;
+  }, [providerDefinitions]);
+  const ollamaEmbeddingModelOptions = useMemo(() => ollamaCatalog?.embedding ?? [], [ollamaCatalog]);
+  const ollamaChatModelOptions = useMemo(() => ollamaCatalog?.llm ?? [], [ollamaCatalog]);
+  const ollamaChatRecommendedModel = useMemo(() => {
+    const providerDefault = ollamaProviderDefinition?.defaultModel ?? "llama3.1:8b";
+    if (ollamaChatModelOptions.includes(providerDefault)) {
+      return providerDefault;
+    }
+    return ollamaCatalog?.recommendedLlm ?? providerDefault;
+  }, [ollamaCatalog, ollamaChatModelOptions, ollamaProviderDefinition]);
+
+  const refreshOllamaCatalog = useCallback(async (baseUrlInput?: string): Promise<OllamaModelCatalog> => {
+    const normalizedBaseUrl = (baseUrlInput ?? ollamaBaseUrl).trim() || getDefaultOllamaBaseUrl();
+    const nextRequestId = ollamaCatalogRequestIdRef.current + 1;
+    ollamaCatalogRequestIdRef.current = nextRequestId;
+
+    setOllamaCatalogStatus("loading");
+    setOllamaCatalogError(null);
+    try {
+      const catalog = await fetchOllamaModelCatalog({
+        baseUrl: normalizedBaseUrl,
+        timeoutMs: getOllamaTimeoutMs(),
+        preferredLlmModel: ollamaProviderDefinition?.defaultModel ?? null,
+      });
+      if (ollamaCatalogRequestIdRef.current === nextRequestId) {
+        setOllamaCatalog(catalog);
+        setOllamaCatalogStatus("ready");
+      }
+      return catalog;
+    } catch (err) {
+      const formatted = formatOllamaConnectionError(err);
+      if (ollamaCatalogRequestIdRef.current === nextRequestId) {
+        setOllamaCatalogStatus("error");
+        setOllamaCatalogError(formatted);
+      }
+      throw new Error(formatted);
+    }
+  }, [ollamaBaseUrl, ollamaProviderDefinition]);
+
+  const handleEmbeddingModelChange = useCallback((value: string) => {
+    ollamaEmbeddingModelManuallySetRef.current = true;
+    setOllamaModel(value);
+  }, []);
+
+  const handleProviderModelChange = useCallback((value: string) => {
+    if (providerId === "ollama") {
+      ollamaChatModelManuallySetRef.current = true;
+      setOllamaPreferredChatModel(value);
+    }
+    setProviderModel(value);
+    if (providerId === "webllm") {
+      setWebllmSelectedModel(resolveHermesModelSelection(value));
+      setWebllmModelManuallySet(true);
+    }
   }, [providerId]);
 
   const activeResults = useMemo(() => activeSession?.results ?? [], [activeSession]);
@@ -922,6 +1011,7 @@ export default function UsagePage() {
       setProviderId(savedProviderId);
       setProviderBaseUrl(sync.baseUrl || savedProviderDefinition.defaultBaseUrl);
       setProviderModel(sync.model || savedProviderDefinition.defaultModel);
+      setOllamaPreferredChatModel(sync.ollamaPreferredModel || "llama3.1:8b");
       setProviderApiKey(sync.apiKey);
       setAllowRemoteProvider(sync.allowRemoteProvider);
       setAllowLocalProvider(sync.allowLocalProvider);
@@ -948,6 +1038,7 @@ export default function UsagePage() {
       setProviderId(savedProviderId);
       setProviderBaseUrl(saved.baseUrl || savedProviderDefinition.defaultBaseUrl);
       setProviderModel(saved.model || savedProviderDefinition.defaultModel);
+      setOllamaPreferredChatModel(saved.ollamaPreferredModel || "llama3.1:8b");
       setProviderApiKey(saved.apiKey);
       setAllowRemoteProvider(saved.allowRemoteProvider);
       setAllowLocalProvider(saved.allowLocalProvider);
@@ -981,6 +1072,7 @@ export default function UsagePage() {
         webllmConsent,
         webllmPreferredModel: webllmSelectedModel,
         webllmLastRecommendedModel,
+        ollamaPreferredModel: ollamaPreferredChatModel,
       });
     }
   }, [
@@ -994,6 +1086,70 @@ export default function UsagePage() {
     webllmConsent,
     webllmSelectedModel,
     webllmLastRecommendedModel,
+    ollamaPreferredChatModel,
+  ]);
+
+  useEffect(() => {
+    if (providerId !== "ollama") {
+      return;
+    }
+    const normalizedModel = providerModel.trim();
+    if (!normalizedModel) {
+      return;
+    }
+    setOllamaPreferredChatModel((previous) => {
+      if (previous === normalizedModel) {
+        return previous;
+      }
+      return normalizedModel;
+    });
+  }, [providerId, providerModel]);
+
+  useEffect(() => {
+    if (providerId !== "ollama") {
+      return;
+    }
+    if (ollamaCatalogStatus !== "idle") {
+      return;
+    }
+    void refreshOllamaCatalog().catch(() => undefined);
+  }, [providerId, ollamaCatalogStatus, refreshOllamaCatalog]);
+
+  useEffect(() => {
+    if (!ollamaCatalog) {
+      return;
+    }
+    if (!ollamaEmbeddingModelManuallySetRef.current && ollamaCatalog.embedding.length > 0) {
+      const resolvedEmbeddingModel = resolveAutoModel({
+        lastUsed: ollamaModel.trim(),
+        recommended: ollamaCatalog.recommendedEmbedding,
+        available: ollamaCatalog.embedding,
+      });
+      if (resolvedEmbeddingModel !== ollamaModel) {
+        setOllamaModel(resolvedEmbeddingModel);
+      }
+    }
+
+    if (providerId === "ollama" && !ollamaChatModelManuallySetRef.current && ollamaCatalog.llm.length > 0) {
+      const resolvedChatModel = resolveAutoModel({
+        lastUsed: ollamaPreferredChatModel.trim(),
+        recommended: ollamaChatRecommendedModel,
+        available: ollamaCatalog.llm,
+      });
+      if (resolvedChatModel !== providerModel) {
+        setProviderModel(resolvedChatModel);
+      }
+      if (resolvedChatModel !== ollamaPreferredChatModel) {
+        setOllamaPreferredChatModel(resolvedChatModel);
+      }
+    }
+  }, [
+    ollamaCatalog,
+    ollamaModel,
+    ollamaPreferredChatModel,
+    ollamaChatRecommendedModel,
+    providerId,
+    providerModel,
   ]);
 
   useEffect(() => {
@@ -1082,6 +1238,11 @@ export default function UsagePage() {
     }
     setOllamaConnectionStatus("idle");
     setOllamaConnectionMessage(null);
+    setOllamaCatalog(null);
+    setOllamaCatalogStatus("idle");
+    setOllamaCatalogError(null);
+    ollamaEmbeddingModelManuallySetRef.current = false;
+    ollamaChatModelManuallySetRef.current = false;
   }, [embeddingPreferenceScopeKey]);
 
   useEffect(() => {
@@ -1102,6 +1263,14 @@ export default function UsagePage() {
     }
   }, [allowOllamaEmbedding, embeddingPreferenceScopeKey, ollamaBaseUrl, ollamaModel]);
 
+  useEffect(() => {
+    setOllamaCatalog(null);
+    setOllamaCatalogStatus("idle");
+    setOllamaCatalogError(null);
+    ollamaEmbeddingModelManuallySetRef.current = false;
+    ollamaChatModelManuallySetRef.current = false;
+  }, [ollamaBaseUrl]);
+
   /* Chat scroll is handled inside SessionChat (only the message list scrolls, not the page) */
 
   const handleProviderChange = (nextProviderId: LLMProviderId) => {
@@ -1112,6 +1281,17 @@ export default function UsagePage() {
     if (nextProviderId === "webllm") {
       const nextModel = resolveHermesModelSelection(webllmSelectedModel || nextProvider.defaultModel);
       setProviderModel(nextModel);
+    } else if (nextProviderId === "ollama") {
+      const nextModel = resolveAutoModel({
+        lastUsed: ollamaPreferredChatModel.trim(),
+        recommended: ollamaChatRecommendedModel,
+        available: ollamaChatModelOptions,
+      });
+      setProviderModel(nextModel);
+      setOllamaPreferredChatModel(nextModel);
+      if (ollamaCatalogStatus === "idle" || ollamaCatalogStatus === "error") {
+        void refreshOllamaCatalog();
+      }
     } else {
       setProviderModel(nextProvider.defaultModel);
     }
@@ -1153,14 +1333,21 @@ export default function UsagePage() {
       });
       const runtime = await client.probeRuntime();
       setOllamaConnectionStatus("connected");
-      setOllamaConnectionMessage(
-        `Connected (${runtime.endpoint}) · model ${runtime.model} · ${runtime.availableModels.length} models detected`,
-      );
+      try {
+        const catalog = await refreshOllamaCatalog(normalizedBaseUrl);
+        setOllamaConnectionMessage(
+          `Connected (${runtime.endpoint}) · embedding models ${catalog.embedding.length} · chat models ${catalog.llm.length}`,
+        );
+      } catch (catalogError) {
+        setOllamaConnectionMessage(
+          `Connected (${runtime.endpoint}) · model ${runtime.model}. Model list refresh failed: ${formatOllamaConnectionError(catalogError)}`,
+        );
+      }
     } catch (err) {
       setOllamaConnectionStatus("failed");
       setOllamaConnectionMessage(formatOllamaConnectionError(err));
     }
-  }, [ollamaBaseUrl, ollamaModel]);
+  }, [ollamaBaseUrl, ollamaModel, refreshOllamaCatalog]);
 
   const syncStarsToLocal = async (
     database: Awaited<ReturnType<typeof getLocalDatabase>>,
@@ -2654,7 +2841,13 @@ export default function UsagePage() {
                 ollamaBaseUrl={ollamaBaseUrl}
                 onBaseUrlChange={setOllamaBaseUrl}
                 ollamaModel={ollamaModel}
-                onModelChange={setOllamaModel}
+                onModelChange={handleEmbeddingModelChange}
+                embeddingModelOptions={ollamaEmbeddingModelOptions}
+                embeddingModelStatus={ollamaCatalogStatus}
+                embeddingModelError={ollamaCatalogError}
+                onRefreshModels={() => {
+                  void refreshOllamaCatalog();
+                }}
                 ollamaConnectionStatus={ollamaConnectionStatus}
                 ollamaConnectionMessage={ollamaConnectionMessage}
                 onTestConnection={() => void handleTestOllamaConnection()}
@@ -2796,13 +2989,7 @@ export default function UsagePage() {
                       providerApiKey={providerApiKey}
                       onProviderIdChange={(id) => handleProviderChange(id)}
                       onProviderBaseUrlChange={setProviderBaseUrl}
-                      onProviderModelChange={(value) => {
-                        setProviderModel(value);
-                        if (providerId === "webllm") {
-                          setWebllmSelectedModel(resolveHermesModelSelection(value));
-                          setWebllmModelManuallySet(true);
-                        }
-                      }}
+                      onProviderModelChange={handleProviderModelChange}
                       onProviderApiKeyChange={setProviderApiKey}
                       selectedProvider={selectedProvider}
                       providerDefinitions={providerDefinitions}
@@ -2811,6 +2998,12 @@ export default function UsagePage() {
                       onAllowRemoteChange={setAllowRemoteProvider}
                       onAllowLocalChange={setAllowLocalProvider}
                       webllmModels={webLLMModels}
+                      ollamaModels={ollamaChatModelOptions}
+                      ollamaModelsStatus={ollamaCatalogStatus}
+                      ollamaModelsError={ollamaCatalogError}
+                      onRefreshOllamaModels={() => {
+                        void refreshOllamaCatalog();
+                      }}
                     />
                   </CardContent>
                 </Card>
