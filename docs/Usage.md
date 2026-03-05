@@ -181,6 +181,7 @@ Recommended:
   - dense retrieval with `fetchK`,
   - dense confidence gate,
   - lexical safety-net only when dense confidence is weak (or rare-token intent is detected),
+  - rare-token lexical trigger is bypassed when dense top-1 is both highly confident and lexically aligned with the query,
   - tiny-corpus high-confidence queries skip the lexical branch to avoid onboarding latency,
   - lexical pool is mixed (recent + oldest + broad deterministic window), not recency-only,
   - when lexical safety-net fusion triggers, fused relevance is used in MMR candidate scoring,

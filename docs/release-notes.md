@@ -9,6 +9,9 @@
 - Search diagnostics signal is now less ambiguous:
   - `denseSuspicious` reports dense-confidence concerns (`low_top1`, `low_top5_mean`, `low_repo_diversity`),
   - `lexicalTriggered` still reports whether lexical safety-net executed (including rare-token triggers).
+- Rare-token lexical trigger now has a confidence/alignment bypass:
+  - lexical safety-net is skipped when dense top-1 is highly confident *and* lexically aligned with the rare-token query,
+  - lexical safety-net still runs for high-confidence but lexically mismatched dense top-1 results.
 - Curated embedding warning logic now matches retrieval-profile model families (for example `mxbai-embed*`, `nomic-embed*`) to avoid false custom-model warnings on valid variants.
 - `Rebuild Embeddings` now requires explicit user confirmation before clearing and regenerating the embedding index.
 - Verified dependency concern: `@huggingface/transformers@3.8.1` currently pulls `onnxruntime-node` and `sharp` as required transitive dependencies; tracked as a portability/CI risk pending upstream or package-level mitigation.
