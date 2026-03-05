@@ -42,7 +42,7 @@ This document reviews the GitStarRecall codebase against the threats and mitigat
   - strong desktop + WebGPU -> `onnx-community/embeddinggemma-300m-ONNX`
   - mobile / weak / no-WebGPU / probe-failed -> `Xenova/all-MiniLM-L6-v2`
 - Added visible developer advanced-mode checkbox + red warning + scoped persistence key (`gitstarrecall.sudo.<scope>`).
-- Added explicit `script-src` allowance for `https://cdn.jsdelivr.net` for ORT JSEP module loading in browser embedding runtime.
+- Added explicit `script-src` allowance for pinned transformers jsDelivr dist path used by ORT JSEP module loading in browser embedding runtime.
 
 Security posture notes:
 
@@ -69,7 +69,7 @@ Security posture notes:
 | Mitigation | Status | Evidence / Gap |
 |------------|--------|-----------------|
 | Sanitize README rendering | **Done** | `src/components/SafeMarkdown.tsx`: all README and chat markdown is rendered via `ReactMarkdown` with `rehypeSanitize` (no `dangerouslySetInnerHTML`). |
-| CSP + no inline scripts | **Partial** | `vite.config.ts`: CSP is set in server/preview headers. `script-src` now explicitly includes `https://cdn.jsdelivr.net` because browser embedding runtime loads ORT JSEP module from jsDelivr. **Gaps:** (1) Production still has `script-src 'self' 'unsafe-eval'` (needed for runtime/tooling; document if intentional). (2) `style-src` includes `'unsafe-inline'` for fonts/styles. (3) No CSP in `index.html` for static hosting without Vite – if the app is deployed without Vite’s server/preview, CSP may not apply. |
+| CSP + no inline scripts | **Partial** | `vite.config.ts`: CSP is set in server/preview headers. `script-src` includes a pinned transformers jsDelivr dist path (instead of broad jsDelivr host access) because browser embedding runtime loads ORT JSEP module from that path. **Gaps:** (1) Production still has `script-src 'self' 'unsafe-eval'` (needed for runtime/tooling; document if intentional). (2) `style-src` includes `'unsafe-inline'` for fonts/styles. (3) No CSP in `index.html` for static hosting without Vite – if the app is deployed without Vite’s server/preview, CSP may not apply. |
 | Checksum format and integrity | **Done** | `src/github/checksum.ts`: `sha256Hex` and `canonicalChecksumInput`; used in `github/client.ts` for repo/README checksums. DB stores `checksum` and uses it for diffing (e.g. `UsagePage` “Diffing repos with checksum state”). |
 | Write operations only through controlled paths | **Done** | DB writes go through `src/db/client.ts` (e.g. `upsertRepos`, `upsertChunks`, etc.); no raw SQL from user input. |
 | Pin model source / versions | **Context** | Embedding model is loaded from Hugging Face / CDN; CSP `connect-src` restricts to known hosts. Version pinning is build/deploy concern. |

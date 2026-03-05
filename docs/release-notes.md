@@ -1,5 +1,16 @@
 # Release Notes
 
+## 2026-03-05 (Minor PR Review Remediation - CSP + Model Warning + Ollama Order)
+
+- Tightened CSP `script-src` allowance for transformers runtime script loading:
+  - replaced broad `https://cdn.jsdelivr.net` host allowance with a pinned transformers dist path (`@huggingface/transformers@<resolved-version>/dist/`).
+- Fixed curated custom-model warning regression:
+  - `nomic-embed-text` now treated as curated/supported in embedding warning logic.
+  - curated checks now support tagged model forms (e.g. `:latest`) for supported families.
+- Removed dead `embeddinggemma` entry from Ollama embedding recommendation order.
+- Improved Ollama embedding recommendation matching to support tagged model names (prefix match for curated defaults).
+- Added model-catalog regression test for tagged embedding model names.
+
 ## 2026-03-05 (Follow-up PR Review Fixes - Model Routing + Capability + Chunk Budget)
 
 - Fixed browser capability scoring so `perfScore == null` is neutral (`+0`), preventing weak/timeout devices from receiving an unintended heavy-model boost.
