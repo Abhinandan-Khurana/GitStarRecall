@@ -151,8 +151,10 @@ Important:
   - Browser embedding recommendation is capability-based:
     - strong desktop + WebGPU -> `onnx-community/embeddinggemma-300m-ONNX`
     - mobile / no-WebGPU / weak desktop / probe-failed -> `Xenova/all-MiniLM-L6-v2`
+  - Unknown browser memory/perf hints are treated as neutral (no capability bonus).
   - Embedding settings shows browser capability diagnostics (reason, cores, RAM hint, perf score when available).
   - Custom embedding models are supported but marked experimental with warning.
+  - Namespaced Ollama models (for example `myorg/custom-embed:latest`) remain routed to Ollama, not browser embeddings.
 
 ## 9.3 Browser WebLLM
 

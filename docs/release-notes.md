@@ -1,5 +1,20 @@
 # Release Notes
 
+## 2026-03-05 (Follow-up PR Review Fixes - Model Routing + Capability + Chunk Budget)
+
+- Fixed browser capability scoring so `perfScore == null` is neutral (`+0`), preventing weak/timeout devices from receiving an unintended heavy-model boost.
+- Fixed embedding backend routing heuristic:
+  - removed slash-based browser detection,
+  - now routes browser embeddings only for explicit browser model prefixes (`onnx-community/`, `xenova/`),
+  - prevents namespaced Ollama models (`myorg/custom-embed:latest`) from being misrouted to browser runtime.
+- Fixed chunk budgeting quality gate:
+  - removed unconditional inclusion of first 3 windows,
+  - all windows now pass through quality selection before fallback fill.
+- Added regression coverage:
+  - `src/embeddings/modelRouting.test.ts`
+  - `src/embeddings/browserCapability.test.ts` (null perf signal)
+  - `src/chunking/chunker.test.ts` (first-window quality bypass)
+
 ## 2026-03-05 (PR Review Remediation - Search Correctness and Stability)
 
 - Fixed critical dense cosine bug in `src/db/client.ts` where zero-norm vectors could produce `NaN` and corrupt ranking order.
