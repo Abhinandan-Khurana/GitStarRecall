@@ -205,7 +205,8 @@ When enabled, advanced controls become available:
 - `topK` (`10..40`)
 - `mmrLambda` (`0.55..0.9`)
 - `maxChunksPerRepo` (`1..5`)
-- lexical trigger thresholds (`top1`, `top5Mean`)
+- `lexicalTop1Threshold` (`0.05..0.5`)
+- `lexicalTop5MeanThreshold` (`0.05..0.5`)
 - `Rebuild Embeddings` action to regenerate vectors using current embedding settings/model selection (with confirmation prompt).
 
 Warning behavior:

@@ -42,7 +42,7 @@ import { WebLLMDownloadDialog } from "../components/WebLLMDownloadDialog";
 import { SearchBar } from "../components/SearchBar";
 import { SyncStatusBar } from "../components/SyncStatusBar";
 import { OllamaConfigPanel } from "../components/OllamaConfigPanel";
-import { DeveloperModePanel } from "../components/DeveloperModePanel";
+import { DeveloperModePanel, type RetrievalTuning } from "../components/DeveloperModePanel";
 import { FilterBar } from "../components/FilterBar";
 import { RepoResultCard } from "../components/RepoResultCard";
 import { SessionSidebar } from "../components/SessionSidebar";
@@ -458,15 +458,6 @@ function sameStringArray(a: string[], b: string[]): boolean {
   }
   return true;
 }
-
-type RetrievalTuning = {
-  fetchK: number;
-  topK: number;
-  mmrLambda: number;
-  maxChunksPerRepo: number;
-  lexicalTop1Threshold: number;
-  lexicalTop5MeanThreshold: number;
-};
 
 const RETRIEVAL_TUNING_KEY_PREFIX = "gitstarrecall.retrieval.tuning";
 const DEFAULT_RETRIEVAL_TUNING: RetrievalTuning = {

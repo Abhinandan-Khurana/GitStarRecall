@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ShieldAlert,
   FlaskConical,
@@ -108,6 +108,12 @@ export function DeveloperModePanel({
   const [confirmRebuild, setConfirmRebuild] = useState(false);
   const fetchKWarning =
     retrievalTuning.fetchK < retrievalTuning.topK * 4;
+
+  useEffect(() => {
+    if (!isSudoUser) {
+      setConfirmRebuild(false);
+    }
+  }, [isSudoUser]);
 
   return (
     <Card className="border-border/40 bg-card/70 backdrop-blur-sm">
@@ -283,6 +289,34 @@ export function DeveloperModePanel({
                       max={5}
                       onChange={(v) =>
                         onUpdateRetrievalTuning({ maxChunksPerRepo: v })
+                      }
+                    />
+                    <TuningField
+                      id="tuning-lexicalTop1Threshold"
+                      label="Lexical Top-1 Threshold"
+                      description="If the top dense hit score drops below this threshold, lexical retrieval safety-net can be triggered."
+                      value={retrievalTuning.lexicalTop1Threshold}
+                      min={0.05}
+                      max={0.5}
+                      step={0.01}
+                      onChange={(v) =>
+                        onUpdateRetrievalTuning({
+                          lexicalTop1Threshold: v,
+                        })
+                      }
+                    />
+                    <TuningField
+                      id="tuning-lexicalTop5MeanThreshold"
+                      label="Lexical Top-5 Mean Threshold"
+                      description="If average score of top-5 dense hits falls below this threshold, lexical retrieval safety-net can be triggered."
+                      value={retrievalTuning.lexicalTop5MeanThreshold}
+                      min={0.05}
+                      max={0.5}
+                      step={0.01}
+                      onChange={(v) =>
+                        onUpdateRetrievalTuning({
+                          lexicalTop5MeanThreshold: v,
+                        })
                       }
                     />
                   </div>
