@@ -244,6 +244,16 @@ export async function detectBrowserEmbeddingCapability(): Promise<BrowserEmbeddi
     };
   }
 
+  if (!hasWebGPU) {
+    return {
+      isMobile,
+      hasWebGPU,
+      hardwareConcurrency,
+      deviceMemoryGB,
+      perfScore: null,
+    };
+  }
+
   const perfScore = await runPerfProbe(1_000);
   return {
     isMobile,
