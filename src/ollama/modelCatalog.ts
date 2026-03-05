@@ -1,5 +1,12 @@
 const LOCAL_ENDPOINT_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
-const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
+const DEFAULT_EMBEDDING_MODEL = "qwen3-embedding:0.6b";
+const EMBEDDING_RECOMMENDATION_ORDER = [
+  "qwen3-embedding:4b",
+  "qwen3-embedding:0.6b",
+  "mxbai-embed-large",
+  "embeddinggemma",
+  "nomic-embed-text",
+];
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
@@ -96,6 +103,20 @@ function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
 }
 
+function orderEmbeddingModels(values: string[]): string[] {
+  const unique = Array.from(new Set(values));
+  const curated: string[] = [];
+  for (const preferred of EMBEDDING_RECOMMENDATION_ORDER) {
+    if (unique.includes(preferred)) {
+      curated.push(preferred);
+    }
+  }
+  const remaining = unique
+    .filter((item) => !curated.includes(item))
+    .sort((left, right) => left.localeCompare(right));
+  return [...curated, ...remaining];
+}
+
 const EMBEDDING_NAME_HINT =
   /(embed|embedding|nomic-embed|mxbai-embed|snowflake-arctic-embed|bge|e5|minilm|gte|jina-embeddings)/i;
 const EMBEDDING_FAMILIES = new Set(["bert", "clip", "sentence-transformers"]);
@@ -108,8 +129,10 @@ function isEmbeddingModel(entry: OllamaModelEntry): boolean {
 }
 
 function pickRecommendedEmbedding(models: string[]): string {
-  if (models.includes(DEFAULT_EMBEDDING_MODEL)) {
-    return DEFAULT_EMBEDDING_MODEL;
+  for (const preferred of EMBEDDING_RECOMMENDATION_ORDER) {
+    if (models.includes(preferred)) {
+      return preferred;
+    }
   }
   return models[0] ?? DEFAULT_EMBEDDING_MODEL;
 }
@@ -120,7 +143,7 @@ export function buildOllamaModelCatalogFromPayload(
 ): OllamaModelCatalog {
   const entries = parseModelEntries(payload);
   const all = uniqueSorted(entries.map((entry) => entry.name));
-  const embedding = uniqueSorted(entries.filter((entry) => isEmbeddingModel(entry)).map((entry) => entry.name));
+  const embedding = orderEmbeddingModels(entries.filter((entry) => isEmbeddingModel(entry)).map((entry) => entry.name));
   const llm = uniqueSorted(entries.filter((entry) => !isEmbeddingModel(entry)).map((entry) => entry.name));
   const normalizedPreferredLlm = preferredLlmModel ? preferredLlmModel.trim() : "";
 

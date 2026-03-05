@@ -8,6 +8,7 @@ type WorkerResponse = {
   errors?: Array<string | null>;
   error?: string;
   selectedBackend?: "webgpu" | "wasm";
+  selectedModel?: string | null;
   fallbackReason?: string | null;
 };
 
@@ -94,18 +95,27 @@ describe("Embedder batch API", () => {
 
   test("passes preferred backend and captures runtime fallback diagnostics", async () => {
     let postedPreferredBackend: string | null = null;
+    let postedModelCandidates: string[] | null = null;
     const embedder = new Embedder({
       preferredBackend: "webgpu",
+      modelCandidates: ["onnx-community/embeddinggemma-300m-ONNX", "Xenova/all-MiniLM-L6-v2"],
       workerFactory: () =>
         new FakeWorker((payload) => {
-          const request = payload as { id: string; texts: string[]; preferredBackend?: string };
+          const request = payload as {
+            id: string;
+            texts: string[];
+            preferredBackend?: string;
+            modelCandidates?: string[];
+          };
           postedPreferredBackend = request.preferredBackend ?? null;
+          postedModelCandidates = request.modelCandidates ?? null;
           return {
             id: request.id,
             status: "complete",
             embeddings: [Float32Array.from([1, 2, 3])],
             errors: [null],
             selectedBackend: "wasm",
+            selectedModel: "Xenova/all-MiniLM-L6-v2",
             fallbackReason: "navigator.gpu unavailable",
           };
         }),
@@ -114,9 +124,14 @@ describe("Embedder batch API", () => {
     const result = await embedder.embedBatch(["hello"]);
     expect(result[0]?.error).toBeNull();
     expect(postedPreferredBackend).toBe("webgpu");
+    expect(postedModelCandidates).toEqual([
+      "onnx-community/embeddinggemma-300m-ONNX",
+      "Xenova/all-MiniLM-L6-v2",
+    ]);
     expect(embedder.getRuntimeInfo()).toEqual({
       preferredBackend: "webgpu",
       selectedBackend: "wasm",
+      selectedModel: "Xenova/all-MiniLM-L6-v2",
       fallbackReason: "navigator.gpu unavailable",
     });
   });

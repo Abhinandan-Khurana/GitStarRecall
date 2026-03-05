@@ -7,10 +7,12 @@ export type BatchEmbeddingResultItem = {
 };
 
 export type EmbeddingBackendPreference = "webgpu" | "wasm";
+export type BrowserEmbeddingModelCandidates = string[];
 
 export type EmbeddingRuntimeInfo = {
   preferredBackend: EmbeddingBackendPreference;
   selectedBackend: EmbeddingBackendPreference | null;
+  selectedModel: string | null;
   fallbackReason: string | null;
 };
 
@@ -28,6 +30,7 @@ type EmbedderWorker = {
 type EmbedderOptions = {
   workerFactory?: () => EmbedderWorker;
   preferredBackend?: EmbeddingBackendPreference;
+  modelCandidates?: BrowserEmbeddingModelCandidates;
 };
 
 function coerceFloat32Array(value: unknown): Float32Array | null {
@@ -50,7 +53,9 @@ export class Embedder {
   private worker: EmbedderWorker;
   private pending = new Map<string, PendingJob>();
   private preferredBackend: EmbeddingBackendPreference;
+  private modelCandidates: BrowserEmbeddingModelCandidates;
   private selectedBackend: EmbeddingBackendPreference | null = null;
+  private selectedModel: string | null = null;
   private fallbackReason: string | null = null;
 
   constructor(optionsOrWorkerFactory?: EmbedderOptions | (() => EmbedderWorker)) {
@@ -59,22 +64,28 @@ export class Embedder {
         ? { workerFactory: optionsOrWorkerFactory }
         : (optionsOrWorkerFactory ?? {});
     this.preferredBackend = options.preferredBackend ?? "webgpu";
+    this.modelCandidates = options.modelCandidates ?? [];
     this.worker = options.workerFactory
       ? options.workerFactory()
       : (new Worker() as unknown as EmbedderWorker);
     this.worker.onmessage = (event) => {
-      const { id, status, embeddings, errors, error, selectedBackend, fallbackReason } = event.data as {
+      const { id, status, embeddings, errors, error, selectedBackend, selectedModel, fallbackReason } = event.data as {
         id: string;
         status: "complete" | "error";
         embeddings?: unknown[];
         errors?: unknown[];
         error?: string;
         selectedBackend?: EmbeddingBackendPreference;
+        selectedModel?: string | null;
         fallbackReason?: string | null;
       };
       if (selectedBackend === "webgpu" || selectedBackend === "wasm") {
         this.selectedBackend = selectedBackend;
       }
+      this.selectedModel =
+        typeof selectedModel === "string" && selectedModel.trim().length > 0
+          ? selectedModel.trim()
+          : null;
       this.fallbackReason = fallbackReason == null ? null : String(fallbackReason);
       const job = this.pending.get(id);
 
@@ -109,7 +120,12 @@ export class Embedder {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.worker.postMessage({ id, texts, preferredBackend: this.preferredBackend });
+      this.worker.postMessage({
+        id,
+        texts,
+        preferredBackend: this.preferredBackend,
+        modelCandidates: this.modelCandidates,
+      });
     });
   }
 
@@ -131,6 +147,7 @@ export class Embedder {
     return {
       preferredBackend: this.preferredBackend,
       selectedBackend: this.selectedBackend,
+      selectedModel: this.selectedModel,
       fallbackReason: this.fallbackReason,
     };
   }
