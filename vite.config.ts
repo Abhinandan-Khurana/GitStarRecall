@@ -19,6 +19,8 @@ function resolveTransformersVersion(): string {
 
 // Content-Security-Policy: see docs/threat-modeling-stride.md and docs/security-review-stride.md.
 // Production uses script-src 'unsafe-eval' for runtime needs (e.g. embedding worker); avoid adding inline scripts.
+// Keep the pinned jsDelivr transformers path in `script-src`: ONNX Runtime helper modules are loaded as script resources,
+// while `worker-src` only governs worker entry URLs.
 const TRANSFORMERS_VERSION = resolveTransformersVersion();
 const JSDELIVR_TRANSFORMERS_SCRIPT_SRC = `https://cdn.jsdelivr.net/npm/@huggingface/transformers@${TRANSFORMERS_VERSION}/dist/`;
 const BASE_CSP_DIRECTIVES = [
