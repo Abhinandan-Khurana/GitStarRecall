@@ -1112,7 +1112,7 @@ export default function UsagePage() {
     if (providerId !== "ollama") {
       return;
     }
-    if (ollamaCatalog && ollamaCatalog.all.length > 0) {
+    if (ollamaCatalogStatus === "ready" && ollamaCatalog) {
       return;
     }
     void refreshOllamaCatalog().catch(() => undefined);
