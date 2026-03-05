@@ -1,5 +1,25 @@
 # Release Notes
 
+## 2026-03-04 (Ollama Model Discovery + UI Selection)
+
+- Removed env-coupled embedding model selection from runtime (`VITE_OLLAMA_MODEL` is no longer used by app flow).
+- Added baseline Ollama embedding default of `nomic-embed-text` when no user preference exists.
+- Added automatic local model catalog discovery from Ollama (`GET /api/tags`) with typed parsing/classification:
+  - embedding-capable model list
+  - chat/LLM model list
+- Added embedding settings dropdown backed by discovered embedding models, with custom model override.
+- Added chat settings Ollama dropdown backed by discovered LLM models, with custom model override.
+- Added auto-selection policy:
+  - prefer last-used model if still installed
+  - otherwise use recommended default
+  - then first available model
+- Expanded connection diagnostics for unreachable/CORS/timeouts with actionable remediation:
+  - run `ollama serve`
+  - set global CORS `OLLAMA_ORIGINS=\"*\"`
+  - retry connection test
+- Added new model catalog tests in `src/ollama/modelCatalog.test.ts`.
+- Updated docs/env guidance to remove `VITE_OLLAMA_MODEL` references and document UI-first model selection.
+
 ## 2026-02-24 (WebLLM Recommendation Calibration for macOS/Desktop)
 
 - Fixed WebLLM model recommendation logic that could incorrectly classify strong Mac desktops as weak when memory hints were unavailable.
