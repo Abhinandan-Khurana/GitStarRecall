@@ -1,5 +1,18 @@
 # Release Notes
 
+## 2026-03-08 (Dead Code Cleanup and Dependency Prune)
+
+- Removed unused code paths that had no live in-repo reachability from the current app entrypoints:
+  - orphaned shadcn UI wrappers for avatar, breadcrumb, dropdown menu, skeleton, tabs, toggle, and toggle group,
+  - unused `AppStateRedirect` route helper that was no longer wired into routing,
+  - legacy `NativeEmbeddingClient` path and its isolated test, after Ollama/browser embedding paths became the only supported runtime backends.
+- Pruned now-unused package dependencies introduced only for those deleted UI wrappers:
+  - `@radix-ui/react-dropdown-menu`
+  - `@radix-ui/react-tabs`
+  - `@radix-ui/react-toggle`
+  - `@radix-ui/react-toggle-group`
+- Re-ran repository-wide reachability checks from `src/main.tsx`, then verified the cleaned tree with lint, tests, and production build.
+
 ## 2026-03-08 (Landing Page Parallax Redesign and Public Auth Flow Refresh)
 
 - Rebuilt the public landing page into a parallax-first product narrative instead of a static two-column auth-first layout.
@@ -25,7 +38,7 @@
 ## 2026-03-08 (Workspace Shell, Route Split, and Auth-Scoped Local State)
 
 - Reworked the authenticated app from a single overloaded `/app` page into a route-based workspace:
-  - `/app` now redirects by corpus state,
+  - `/app` is now a dedicated workspace home/launch surface,
   - `/app/setup` for first-run indexing,
   - `/app/recall` for search and chat,
   - `/app/library` for repo browsing,
@@ -334,7 +347,6 @@
   - automatic fallback to browser path on batch failure
 - Added explicit user consent toggle for local embeddings in UI.
 - Added new tests:
-  - `src/embeddings/nativeClient.test.ts`
   - `src/db/client.embedding-queue.test.ts`
 
 ## 2026-02-23 (Chat History Isolation + Restore Race Fix)
