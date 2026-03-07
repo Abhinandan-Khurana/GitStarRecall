@@ -19,62 +19,62 @@ html {
   --font-body: "IBM Plex Sans", ui-sans-serif, system-ui;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  --background: 24 22% 97%;
-  --foreground: 276 24% 14%;
+  --background: 20 62% 97%;
+  --foreground: 320 22% 16%;
   --card: 0 0% 100%;
-  --card-foreground: 276 24% 14%;
+  --card-foreground: 320 22% 16%;
   --popover: 0 0% 100%;
-  --popover-foreground: 276 24% 14%;
-  --primary: 289 34% 37%;
+  --popover-foreground: 320 22% 16%;
+  --primary: 332 42% 49%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 300 16% 93%;
-  --secondary-foreground: 276 24% 18%;
-  --muted: 300 14% 94%;
-  --muted-foreground: 274 12% 40%;
-  --accent: 330 46% 45%;
+  --secondary: 26 40% 92%;
+  --secondary-foreground: 320 22% 18%;
+  --muted: 30 36% 94%;
+  --muted-foreground: 318 10% 42%;
+  --accent: 23 82% 67%;
   --accent-foreground: 0 0% 100%;
   --destructive: 0 72% 54%;
   --destructive-foreground: 0 0% 100%;
-  --border: 286 14% 85%;
-  --input: 286 14% 85%;
-  --ring: 289 34% 37%;
+  --border: 18 35% 85%;
+  --input: 18 35% 85%;
+  --ring: 332 42% 49%;
   --radius: 0.625rem;
-  --chart-1: 289 34% 37%;
-  --chart-2: 330 46% 45%;
-  --chart-3: 266 28% 48%;
-  --chart-4: 22 78% 55%;
-  --chart-5: 196 46% 42%;
+  --chart-1: 332 42% 49%;
+  --chart-2: 23 82% 67%;
+  --chart-3: 286 33% 58%;
+  --chart-4: 45 92% 66%;
+  --chart-5: 193 46% 48%;
 
-  --app-bg: hsl(24 22% 97%);
+  --app-bg: hsl(20 62% 97%);
   --app-panel: hsl(0 0% 100%);
-  --app-panel-muted: hsl(300 20% 96%);
-  --app-grid: rgba(76, 46, 88, 0.06);
+  --app-panel-muted: hsl(16 42% 95%);
+  --app-grid: rgba(134, 96, 120, 0.08);
 }
 
 .dark {
-  --background: 255 18% 10%;
-  --foreground: 282 18% 92%;
-  --card: 255 18% 13%;
-  --card-foreground: 282 18% 92%;
-  --popover: 255 18% 13%;
-  --popover-foreground: 282 18% 92%;
-  --primary: 289 40% 63%;
-  --primary-foreground: 255 18% 10%;
-  --secondary: 255 14% 18%;
-  --secondary-foreground: 282 18% 92%;
-  --muted: 255 14% 16%;
-  --muted-foreground: 282 10% 68%;
-  --accent: 330 52% 59%;
-  --accent-foreground: 255 18% 10%;
+  --background: 314 26% 8%;
+  --foreground: 18 38% 94%;
+  --card: 314 24% 11%;
+  --card-foreground: 18 38% 94%;
+  --popover: 314 24% 11%;
+  --popover-foreground: 18 38% 94%;
+  --primary: 332 62% 69%;
+  --primary-foreground: 314 26% 8%;
+  --secondary: 308 16% 18%;
+  --secondary-foreground: 18 38% 94%;
+  --muted: 308 14% 15%;
+  --muted-foreground: 18 12% 72%;
+  --accent: 25 88% 69%;
+  --accent-foreground: 314 26% 8%;
   --destructive: 0 72% 58%;
   --destructive-foreground: 0 0% 100%;
-  --border: 255 10% 24%;
-  --input: 255 10% 24%;
-  --ring: 289 40% 63%;
-  --app-bg: hsl(255 20% 8%);
-  --app-panel: hsl(255 18% 12%);
-  --app-panel-muted: hsl(255 16% 15%);
-  --app-grid: rgba(206, 183, 219, 0.08);
+  --border: 313 12% 24%;
+  --input: 313 12% 24%;
+  --ring: 332 62% 69%;
+  --app-bg: hsl(314 28% 7%);
+  --app-panel: hsl(314 22% 11%);
+  --app-panel-muted: hsl(313 18% 14%);
+  --app-grid: rgba(255, 228, 238, 0.08);
 }
 
 * {
@@ -90,7 +90,7 @@ body {
   background-image:
     linear-gradient(var(--app-grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--app-grid) 1px, transparent 1px),
-    radial-gradient(circle at top left, rgba(161, 103, 187, 0.08), transparent 28%);
+    radial-gradient(circle at top left, rgba(230, 147, 178, 0.12), transparent 32%);
   background-size: 24px 24px, 24px 24px, auto;
   background-position: 0 0, 0 0, 0 0;
 }
