@@ -1,5 +1,54 @@
 # Release Notes
 
+## 2026-03-08 (Workspace Shell, Route Split, and Auth-Scoped Local State)
+
+- Reworked the authenticated app from a single overloaded `/app` page into a route-based workspace:
+  - `/app` now redirects by corpus state,
+  - `/app/setup` for first-run indexing,
+  - `/app/recall` for search and chat,
+  - `/app/library` for repo browsing,
+  - `/app/sessions` for transcript/history review,
+  - `/app/settings` for sync, providers, privacy, and local data.
+- Added a persistent app shell with:
+  - workspace health summary,
+  - nav rail,
+  - keyboard shortcuts,
+  - command palette (`Cmd/Ctrl+K`),
+  - quick route switching (`G` then `R` / `L` / `S`).
+- Rebuilt the landing and auth callback flow to match the productized workspace:
+  - PAT fallback stays visible on the landing page,
+  - callback page now shows staged auth progress before redirecting into the app shell.
+- Added standalone `Library` and `Sessions` views so repo browsing and transcript review no longer compete with the main Recall surface.
+- Split setup/settings concerns out of the main Recall canvas:
+  - setup now guides import -> README fetch -> embedding generation,
+  - settings owns embedding runtime, provider defaults, developer retrieval tuning, privacy, and local data controls.
+- Extracted shared provider configuration UI into `ProviderSettingsForm` so chat/settings configuration paths stay aligned.
+- Hardened local-state isolation across identities:
+  - local SQLite/OPFS/localStorage database names are scoped by auth token hash,
+  - auth-scoped helpers now isolate chat/session continuity and embedding preference keys,
+  - added scope regression tests for auth helpers and DB naming.
+- Expanded local schema support for future workspace features:
+  - added `repo_tags`,
+  - added `repo_tag_assignments`,
+  - added `session_context_items`.
+
+## 2026-03-08 (Sync Status Semantics and Embedding Progress Simplification)
+
+- Replaced phase-string-driven sync progress inference with explicit runtime status fields.
+- Fixed first-sync copy so initial indexing no longer says `changed repositories`:
+  - first sync now uses labels like `Fetching READMEs for starred repositories` and `Chunking repositories`,
+  - incremental sync uses `new or updated` / `updated repositories` wording only when local state already exists.
+- Fixed chunking progress publication so chunking counts advance as chunk upserts complete, not after a later embedding window returns.
+- Kept staged overlap behavior, but changed the status bar to reflect live work correctly:
+  - once embeddings start, embedding becomes the primary active stage,
+  - unfinished chunking remains visible as secondary work instead of hijacking the main label.
+- Added explicit handling for windowed incremental embedding runs so the UI no longer treats the window cap as the total backlog.
+- Simplified active embedding UX after multiple follow-ups:
+  - active embedding generation now shows an indeterminate `Embedding in progress` loader,
+  - removed moving ETA/progress math from the embedding row,
+  - added a concise timing note for large libraries instead of unstable batch-based countdowns.
+- Added focused regression coverage for sync-stage derivation, first-sync labeling, overlap handling, and sync-status rendering.
+
 ## 2026-03-05 (Usage Settings UI Follow-up Fixes)
 
 - Completed the developer retrieval-tuning panel so all persisted knobs are editable in UI:

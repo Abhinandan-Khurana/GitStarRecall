@@ -67,6 +67,7 @@ What stays local by default:
 - README content.
 - Chunks and embeddings.
 - Chat sessions and message history.
+- Auth-scoped local databases and settings, so one GitHub identity does not silently reuse another identity's local index.
 
 What can go remote (opt-in only):
 - Prompt context sent to a remote LLM provider when you enable it.
@@ -88,17 +89,22 @@ Read more:
 ## Product Capabilities
 
 - GitHub OAuth and PAT authentication paths.
+- Route-based workspace with dedicated `Setup`, `Recall`, `Library`, `Sessions`, and `Settings` surfaces.
+- Persistent app shell with workspace health, keyboard navigation, and command palette (`Cmd/Ctrl+K`).
 - Star sync with pagination handling (manual via `Fetch Stars`).
 - Checksum-based diff sync for changed/new/removed stars.
 - README fetch pipeline with missing/failure tracking.
 - Adaptive batched README ingestion pipeline (feature-flagged rollout).
 - Local chunking + embedding generation.
+- Auth-scoped local database/storage isolation for repos, embeddings, chat state, and runtime preferences.
 - Browser embedding capability test with model recommendation (mobile-safe fallback).
 - Persistent chat sessions with ordered messages.
+- Library browsing and session transcript views outside the main Recall workflow.
 - Session-aware search and follow-up flow on existing local embeddings.
 - Local and remote LLM answer modes.
 - Browser-local LLM mode via WebLLM (feature-flagged, explicit download consent).
 - Embedding acceleration controls (batching, worker pool, backend fallback).
+- Sync status that distinguishes first sync from incremental sync and keeps embedding generation as the primary active stage during overlap.
 
 ---
 
@@ -134,6 +140,7 @@ Notes:
 - Star sync is user-triggered via `Fetch Stars`; search runs on existing local embeddings.
 - Vector data is stored as Float32 blobs in local SQLite tables.
 - Retrieval/search is local; no server-side vector index is required.
+- The authenticated app now uses a route-based shell: `/app` redirects to `Setup` until repos and embeddings exist, then defaults to `Recall`.
 - Browser embedding model is capability-driven (`embeddinggemma` on strong desktop, `Xenova/all-MiniLM-L6-v2` on mobile/weak/no-WebGPU); local Ollama embedding is opt-in.
 - Retrieval path uses dense fetch + confidence gate + conditional lexical safety net + MMR with per-repo cap.
 - WebLLM/local/remote generation paths are explicit opt-in with consent controls.

@@ -6,7 +6,7 @@ Design reference:
 - The HTML/CSS in `rought-UI-design` is a reference only, not a pixel-perfect target.
 - The final UI should incorporate creative improvements while respecting the overall layout intent.
 - Emphasize security and local-first behavior visually and in copy.
-- Use a landing page UI that routes to a usage page after GitHub OAuth login.
+- Use a landing page plus an authenticated app shell with dedicated setup, recall, library, sessions, and settings routes after GitHub login.
 - Landing page is accessible without login, with developer/security-friendly details and a demo video.
 
 ---
@@ -133,19 +133,26 @@ Reference:
 
 ### 2.1 High-Level Flow
 1. User authenticates with GitHub OAuth or provides a PAT.
-2. App fetches all starred repositories via GitHub REST API (paginated).
-3. For each repo, fetch README and metadata.
-4. Chunk README + metadata.
-5. Embedding orchestrator schedules micro-batches to worker pool (preferred backend `webgpu`, fallback `wasm`).
-6. Store embeddings and repo metadata in SQLite WASM and build vector index.
-7. Checkpoint DB periodically and flush on completion.
-8. User query is embedded locally and run against the local vector index.
-9. Top-K results are shown immediately; optionally, the user can ask an LLM to summarize or suggest.
-10. Each query can open a new chat session, and users can also continue an existing session with follow-up queries.
-11. Star sync is user-initiated via `Fetch Stars`; search queries run against the current local index.
+2. `/app` routes the user to `Setup` until repos and embeddings exist, then defaults to `Recall`.
+3. App fetches all starred repositories via GitHub REST API (paginated).
+4. For each repo, fetch README and metadata.
+5. Chunk README + metadata.
+6. Embedding orchestrator schedules micro-batches to worker pool (preferred backend `webgpu`, fallback `wasm`).
+7. Store embeddings and repo metadata in SQLite WASM and build vector index.
+8. Checkpoint DB periodically and flush on completion.
+9. User query is embedded locally and run against the local vector index.
+10. Top-K results are shown immediately; optionally, the user can ask an LLM to summarize or suggest.
+11. Each query can open a new chat session, and users can also continue an existing session with follow-up queries.
+12. Star sync is user-initiated via `Fetch Stars`; search queries run against the current local index.
 
 ### 2.2 Components
-- UI: search, filters, results, suggestions
+- Public landing + authenticated app shell
+- Setup workspace for first-run indexing
+- Recall workspace: search, filters, results, suggestions, session-aware chat
+- Library workspace for repo browsing and README preview
+- Sessions workspace for transcript/history review
+- Settings workspace for providers, embeddings, sync, privacy, and local data
+- Command palette and keyboard navigation layer
 - Chat session manager: per-query threads, history, and context window
 - GitHub client: fetcher with rate-limit handling and retries
 - Embedding orchestrator: batching, queueing, worker-pool scheduling, backend selection, checkpoint coordination
@@ -174,6 +181,9 @@ Reference:
   - `checkpoint_policy_version`
   - `last_checkpoint_at`
   - `embedding_perf_last_run` (JSON summary)
+- Local persistence scope
+  - auth-hash-scoped SQLite filename / fallback storage key
+  - auth-hash-scoped settings keys for embedding/runtime preferences and session continuity
 
 ### 2.3.1 Chat Schema Sketch (SQLite)
 Example tables for persistence:

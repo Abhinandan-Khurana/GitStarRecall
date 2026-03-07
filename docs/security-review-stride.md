@@ -50,6 +50,17 @@ Security posture notes:
 - Positive: dimension mismatch now fails fast instead of silently degrading results.
 - Residual: custom model path can still degrade quality if model contracts differ; warning is advisory.
 
+## 2026-03-08 Update (Workspace Shell + Auth-Scoped Persistence)
+
+- Reworked the authenticated product into a route-based shell (`/app/setup`, `/app/recall`, `/app/library`, `/app/sessions`, `/app/settings`) while preserving the public landing page and OAuth callback surface.
+- Added a command palette and keyboard route switching, improving operator ergonomics without widening data exposure.
+- Scoped browser-local database files/keys by auth token hash:
+  - OPFS filenames,
+  - localStorage SQLite fallbacks,
+  - auth-scoped continuity/settings keys.
+- Preserved token handling in React memory only; the new scope keys derive from a one-way hash helper rather than storing raw tokens in browser persistence.
+- Added scope regression tests for auth helper keys and database naming to reduce cross-identity local-data bleed risk.
+
 ---
 
 ## 1) S – Spoofing
@@ -57,7 +68,7 @@ Security posture notes:
 | Mitigation | Status | Evidence / Gap |
 |------------|--------|-----------------|
 | OAuth PKCE; avoid tokens in URL | **Done** | `src/auth/githubOAuth.ts`: `buildGitHubAuthorizeUrl` uses `code_challenge` (S256) and `code_verifier` in sessionStorage; token is obtained via `exchangeOAuthCode` (server-side exchange). Callback uses only `code` and `state` from URL; token never in URL. |
-| Clear separation landing vs login | **Done** | `LandingPage` at `/`, `UsagePage` at `/app`, `AuthCallbackPage` at `/auth/callback`; auth state in React/sessionStorage. |
+| Clear separation public vs authenticated surfaces | **Done** | Public `LandingPage` remains at `/`, `AuthCallbackPage` remains at `/auth/callback`, and authenticated views now live behind `AppShell` routes (`/app/setup`, `/app/recall`, `/app/library`, `/app/sessions`, `/app/settings`). Auth token state remains in React memory; OAuth PKCE verifier/state use `sessionStorage` only for the OAuth handshake. |
 | Warning banner when PAT is used; recommend OAuth | **Done** | Auth method is shown in the sessions collapsible (`authMethod`: "oauth" / "pat") and there is **explicit warning** when user is logged in with PAT (e.g. “You’re using a PAT. Prefer OAuth for better security.”).
 | Strict CSP | **Done** | See Tampering / CSP below. |
 | Explicit opt-in for local endpoints; show endpoint origin | **Done** | `allowLocalProvider` is off by default; user must enable local providers in SessionChat model settings. Browser WebLLM additionally requires consent modal before first model download. |
@@ -101,8 +112,8 @@ Security posture notes:
 |------------|--------|-----------------|
 | External LLM off by default; explicit opt-in | **Done** | `allowRemoteProvider` and `allowLocalProvider` default to `false` in `UsagePage.tsx`; sending requires enabling the matching checkbox. |
 | Send only top-K snippets to LLM | **Done** | `src/llm/providers.ts`: `TOP_K_LIMIT = 8`; `buildContextBlock` uses `snippets.slice(0, TOP_K_LIMIT)`. `UsagePage` passes `filteredResults.slice(0, 8)`. |
-| Token in memory or encrypted storage | **Done** | `AuthContext` keeps token in React state only; no `localStorage`/sessionStorage for token. “Clear token” and “Delete local data” are available. |
-| Chat backup remains local-only and wipeable | **Done** | Chat sessions/messages are also backed up client-side (`src/db/chatBackup.ts`) using IndexedDB with localStorage fallback. No token is written to backup. `clearAllData` now clears OPFS/localStorage DB bytes and chat backup copy (`clearChatBackup`). |
+| Token in memory or encrypted storage | **Done** | `AuthContext` keeps the raw GitHub token in React state only; no token value is written to `localStorage` or SQLite. New auth-scope helpers derive one-way hashed scope keys for local persistence isolation. |
+| Chat backup remains local-only and wipeable | **Done** | Chat sessions/messages are backed up client-side (`src/db/chatBackup.ts`) using IndexedDB with localStorage fallback. No token is written to backup. `clearAllData` clears scoped OPFS/localStorage DB bytes and chat backup copy (`clearChatBackup`). |
 | “Clear all data” and “Clear token” | **Done** | UsagePage: “Clear token” (logout) and “Delete local data” (`handleClearLocalData` → `database.clearAllData()`). |
 | Restrict debug logs (IDs/counts/timings; no README plaintext) | **Mostly done** | GitHub client logger (DEV-only) logs page/count/total/remaining, repo `full_name`, status, and README **length** only – not token or README content. **Gap:** `UsagePage.tsx` uses `console.error("Embedding generation failed", err)` and `console.error("Search failed", err)`; if any error ever includes token or user content in its message, it could leak. |
 

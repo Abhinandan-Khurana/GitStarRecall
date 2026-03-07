@@ -1,7 +1,15 @@
+import type { IndexingStatus } from "../sync/status";
+
 export interface SyncProgressIndexingStatusLike {
-  phase: string;
+  primaryStage: IndexingStatus["primaryStage"];
+  readmeActive: boolean;
+  chunkingActive: boolean;
+  embeddingActive: boolean;
+  embeddingWindowed: boolean;
   readmesTarget: number;
   readmesCompleted: number;
+  chunkingTarget: number;
+  chunkingCompleted: number;
   embeddingTarget: number;
   embeddingsCreated: number;
 }
@@ -26,30 +34,45 @@ export function deriveSyncProgressState(
   const embeddingsCreated = statusEmbeddingTarget > 0 ? statusEmbeddingsCreated : metricsEmbeddingsCreated;
   const embeddingProgress =
     embeddingTarget > 0 ? clampPercent((embeddingsCreated / embeddingTarget) * 100) : 0;
+  const embeddingRemaining = Math.max(embeddingTarget - embeddingsCreated, 0);
   const readmeProgress =
     indexingStatus && indexingStatus.readmesTarget > 0
       ? clampPercent((indexingStatus.readmesCompleted / indexingStatus.readmesTarget) * 100)
       : 0;
-  const phaseIndicatesReadme = Boolean(indexingStatus?.phase.toLowerCase().includes("readme"));
-  const phaseIndicatesEmbedding = Boolean(indexingStatus?.phase.toLowerCase().includes("embedding"));
+  const chunkingTarget = indexingStatus?.chunkingTarget ?? 0;
+  const chunkingCompleted = indexingStatus?.chunkingCompleted ?? 0;
+  const chunkingProgress =
+    chunkingTarget > 0 ? clampPercent((chunkingCompleted / chunkingTarget) * 100) : 0;
+  const chunkingRemaining = Math.max(chunkingTarget - chunkingCompleted, 0);
   const metricsIndicateEmbedding = Boolean(
     embeddingRunMetrics && (embeddingRunMetrics.queueDepth > 0 || embeddingRunMetrics.embeddingsProcessed > 0),
   );
-  const embeddingStageActive = phaseIndicatesEmbedding || metricsIndicateEmbedding;
+  const readmeStageActive = Boolean(indexingStatus?.readmeActive);
+  const chunkingStageActive = Boolean(indexingStatus?.chunkingActive);
+  const embeddingStageActive = Boolean(indexingStatus?.embeddingActive) || metricsIndicateEmbedding;
   const hasEmbeddingProgress = embeddingTarget > 0;
   const embeddingInitializing = embeddingStageActive && !hasEmbeddingProgress;
   const hasReadmeProgress = Boolean(
     indexingStatus &&
       indexingStatus.readmesTarget > 0 &&
-      (indexingStatus.readmesCompleted < indexingStatus.readmesTarget || phaseIndicatesReadme),
+      (indexingStatus.readmesCompleted < indexingStatus.readmesTarget || readmeStageActive),
+  );
+  const hasChunkingProgress = Boolean(
+    indexingStatus &&
+      chunkingTarget > 0 &&
+      (chunkingCompleted < chunkingTarget || chunkingStageActive),
   );
 
   return {
     embeddingTarget,
     embeddingsCreated,
     embeddingProgress,
+    embeddingRemaining,
     readmeProgress,
+    chunkingProgress,
+    chunkingRemaining,
     hasReadmeProgress,
+    hasChunkingProgress,
     hasEmbeddingProgress,
     embeddingInitializing,
   };
