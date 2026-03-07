@@ -1,5 +1,27 @@
 # Release Notes
 
+## 2026-03-08 (Landing Page Parallax Redesign and Public Auth Flow Refresh)
+
+- Rebuilt the public landing page into a parallax-first product narrative instead of a static two-column auth-first layout.
+- Added a shader-backed hero with layered motion and a lower auth entry point:
+  - `Get started` now scrolls to the lower `Connect your stars` section,
+  - `See the workspace flow` jumps to the product journey block,
+  - the landing page now keeps the main product promise and workflow explanation above the auth form.
+- Replaced the static `What you get after login` cards with an animated interactive walkthrough of:
+  - Home,
+  - Recall,
+  - Library,
+  - Sessions,
+  - Settings.
+- Added explicit trust copy on the landing/auth surface:
+  - GitHub OAuth is presented as a read-only path for reading public repositories,
+  - PAT is documented with the same read-only public repository intent.
+- Repositioned the auth experience so `Connect your stars` feels like the landing conclusion instead of competing with the hero.
+- Installed `@paper-design/shaders-react` for the landing shader background.
+- Attempted the requested shadcn Marshmallow theme install via:
+  - `pnpm dlx shadcn@latest add @ss-themes/marshmallow`
+- The remote registry required auth, so the shipped fallback uses a local Marshmallow-style token layer in `src/index.css` instead of the remote theme payload.
+
 ## 2026-03-08 (Workspace Shell, Route Split, and Auth-Scoped Local State)
 
 - Reworked the authenticated app from a single overloaded `/app` page into a route-based workspace:

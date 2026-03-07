@@ -75,7 +75,8 @@ What can go remote (opt-in only):
 Built-in security posture:
 - Strict CSP with explicit allowlist.
 - OAuth code exchange via backend endpoint to avoid exposing client secret.
-- PAT fallback supported for power users.
+- Public landing now spells out that OAuth and PAT are both read-only paths for reading public repositories.
+- PAT fallback supported for power users who want a manual access path.
 - Local data delete flow for cleanup/reset.
 - Threat-model-driven docs in `docs/`.
 
@@ -88,6 +89,11 @@ Read more:
 
 ## Product Capabilities
 
+- Public landing page redesigned as a parallax-first product narrative with:
+  - shader-backed background,
+  - animated post-login workspace walkthrough,
+  - lower `Connect your stars` section reached from `Get started`,
+  - explicit OAuth/PAT read-only access messaging for public repositories.
 - GitHub OAuth and PAT authentication paths.
 - Route-based workspace with dedicated `Setup`, `Recall`, `Library`, `Sessions`, and `Settings` surfaces.
 - Persistent app shell with workspace health, keyboard navigation, and command palette (`Cmd/Ctrl+K`).
@@ -153,7 +159,7 @@ Notes:
 
 - Node.js 20+
 - pnpm 9+
-- A GitHub OAuth app (recommended) or GitHub PAT
+- A GitHub OAuth app (recommended) or GitHub PAT with read-only repository access for reading public repositories
 
 ### Install
 

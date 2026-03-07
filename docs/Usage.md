@@ -106,15 +106,23 @@ Routing:
 
 ## 7) Authentication in App
 
+The public landing page now uses a parallax-first narrative flow:
+
+- `Get started` scrolls to the lower `Connect your stars` block.
+- `See the workspace flow` jumps to the landing workflow section.
+- The landing copy explicitly calls out the read-only access model for both OAuth and PAT.
+
 ## 7.1 OAuth (recommended)
 
-- Click GitHub login and complete OAuth flow.
+- Click `Get started` or continue directly from the lower OAuth card and complete the GitHub OAuth flow.
+- OAuth should be treated as a read-only access path for reading your public repositories.
 - Token is held in memory; not persisted as raw token storage.
 
 ## 7.2 PAT fallback
 
 - Paste raw token (without `Bearer ` prefix).
-- Ensure PAT scopes can read `/user/starred` and required repos.
+- Use a read-only repository token so GitStarRecall can read your public repositories.
+- Ensure PAT scopes can read `/user/starred` and the repositories you want indexed.
 
 ## 8) Daily Usage Flow
 
