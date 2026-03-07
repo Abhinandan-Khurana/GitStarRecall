@@ -4,20 +4,10 @@ import * as React from "react";
 import type { ChatMessageRecord } from "../db/types";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
 import type { WebLLMModelProfile } from "../llm/webllm/modelCatalog";
-import { CUSTOM_MODEL_OPTION } from "../ollama/constants";
 import SafeMarkdown from "./SafeMarkdown";
+import { ProviderSettingsForm } from "./ProviderSettingsForm";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ArrowUpIcon, SettingsIcon } from "lucide-react";
@@ -100,7 +90,7 @@ function MessageList({
         <div
           key={message.id}
           className={cn(
-            "max-w-[85%] px-4 py-2.5 text-sm transition-all [&_*]:text-inherit",
+            "max-w-[85%] break-words px-4 py-2.5 text-sm transition-all [&_*]:text-inherit",
             message.role === "user"
               ? "session-chat-bubble-user ml-auto shadow-md"
               : "session-chat-bubble-assistant mr-auto shadow-sm",
@@ -108,19 +98,19 @@ function MessageList({
         >
           {message.role === "assistant" ? (
             <SafeMarkdown
-              className="whitespace-pre-wrap text-xs [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:p-2 [&_pre]:bg-muted/50 [&_pre]:text-inherit [&_code]:text-inherit"
+              className="break-words whitespace-pre-wrap text-xs [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:p-2 [&_pre]:bg-muted/50 [&_pre]:text-inherit [&_code]:break-words [&_code]:text-inherit"
               content={message.content}
             />
           ) : (
-            <span className="whitespace-pre-wrap">{message.content}</span>
+            <span className="break-words whitespace-pre-wrap">{message.content}</span>
           )}
         </div>
       ))}
       {isGenerating ? (
-        <div className="session-chat-bubble-assistant mr-auto max-w-[85%] px-4 py-2.5 text-sm shadow-sm [&_*]:text-inherit">
+        <div className="session-chat-bubble-assistant mr-auto max-w-[85%] break-words px-4 py-2.5 text-sm shadow-sm [&_*]:text-inherit">
           {streamingContent ? (
             <SafeMarkdown
-              className="whitespace-pre-wrap text-xs [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:text-inherit [&_code]:text-inherit"
+              className="break-words whitespace-pre-wrap text-xs [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted/50 [&_pre]:p-2 [&_pre]:text-inherit [&_code]:break-words [&_code]:text-inherit"
               content={streamingContent}
             />
           ) : (
@@ -180,42 +170,15 @@ function ModelSettingsPopover({
   ollamaModelsError,
   onRefreshOllamaModels,
 }: Readonly<ModelSettingsPopoverProps>) {
-  const isWebLLM = providerId === "webllm";
-  const isOllama = providerId === "ollama";
-  const [customOllamaModelMode, setCustomOllamaModelMode] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!isOllama) {
-      setCustomOllamaModelMode(false);
-      return;
-    }
-    setCustomOllamaModelMode(!ollamaModels.includes(providerModel));
-  }, [isOllama, ollamaModels, providerModel]);
-
-  const selectedOllamaOption = customOllamaModelMode
-    ? CUSTOM_MODEL_OPTION
-    : ollamaModels.includes(providerModel)
-      ? providerModel
-      : CUSTOM_MODEL_OPTION;
-  const showOllamaCustomModelInput = selectedOllamaOption === CUSTOM_MODEL_OPTION;
-
   return (
     <div className="flex items-center gap-1">
-      <Select value={providerId} onValueChange={(v) => onProviderIdChange(v as LLMProviderId)}>
-        <SelectTrigger
-          aria-label="Model"
-          className="session-chat-addon-trigger h-8 w-auto gap-1.5 border-0 bg-transparent px-2 text-xs font-medium shadow-none hover:opacity-80 [&_svg]:text-muted-foreground"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent align="start" className="w-56">
-          {providerDefinitions.map((provider) => (
-            <SelectItem key={provider.id} value={provider.id}>
-              {provider.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <Button
+        type="button"
+        variant="ghost"
+        className="session-chat-addon-trigger h-8 rounded-full px-2 text-xs font-medium"
+      >
+        {selectedProvider.label}
+      </Button>
 
       <Popover open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger asChild>
@@ -235,145 +198,28 @@ function ModelSettingsPopover({
               <p className="text-base font-semibold">Model settings</p>
               <p className="mt-0.5 text-muted-foreground">Configure provider, endpoint, and model.</p>
             </div>
-
-            <div className="space-y-2">
-              {!isWebLLM ? (
-                <div>
-                  <Label htmlFor="chat-base-url" className="text-muted-foreground">Base URL</Label>
-                  <Input
-                    id="chat-base-url"
-                    value={providerBaseUrl}
-                    onChange={(e) => onProviderBaseUrlChange(e.target.value)}
-                    placeholder="Base URL"
-                    className="session-chat-settings-input mt-1 h-8 text-xs"
-                  />
-                </div>
-              ) : null}
-
-              {isWebLLM ? (
-                <div>
-                  <Label htmlFor="chat-model-webllm" className="text-muted-foreground">Model</Label>
-                  <Select value={providerModel} onValueChange={onProviderModelChange}>
-                    <SelectTrigger id="chat-model-webllm" className="mt-1 h-8 text-xs">
-                      <SelectValue placeholder="Select WebLLM model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {webllmModels.map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          {model.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : isOllama ? (
-                <div className="space-y-2">
-                  <Label htmlFor="chat-model-ollama" className="text-muted-foreground">Model</Label>
-                  <Select
-                    value={selectedOllamaOption}
-                    onValueChange={(value) => {
-                      if (value === CUSTOM_MODEL_OPTION) {
-                        setCustomOllamaModelMode(true);
-                        onProviderModelChange(providerModel.trim() || "llama3.1:8b");
-                        return;
-                      }
-                      setCustomOllamaModelMode(false);
-                      onProviderModelChange(value);
-                    }}
-                    disabled={ollamaModelsStatus === "loading"}
-                  >
-                    <SelectTrigger id="chat-model-ollama" className="h-8 text-xs">
-                      <SelectValue placeholder="Select Ollama model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ollamaModels.map((model) => (
-                        <SelectItem key={model} value={model}>
-                          {model}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value={CUSTOM_MODEL_OPTION}>Custom model...</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  {showOllamaCustomModelInput ? (
-                    <Input
-                      id="chat-model"
-                      value={providerModel}
-                      onChange={(e) => {
-                        setCustomOllamaModelMode(true);
-                        onProviderModelChange(e.target.value);
-                      }}
-                      placeholder="llama3.1:8b"
-                      className="session-chat-settings-input h-8 text-xs"
-                    />
-                  ) : null}
-
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[11px] text-muted-foreground">
-                      {ollamaModels.length === 0
-                        ? "No chat models detected. Pull one locally and refresh."
-                        : "Only chat-capable models are listed here."}
-                    </p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-[11px]"
-                      onClick={onRefreshOllamaModels}
-                      disabled={ollamaModelsStatus === "loading"}
-                    >
-                      {ollamaModelsStatus === "loading" ? "Refreshing..." : "Refresh"}
-                    </Button>
-                  </div>
-
-                  {ollamaModelsError ? (
-                    <p className="text-[11px] text-destructive">{ollamaModelsError}</p>
-                  ) : null}
-                </div>
-              ) : (
-                <div>
-                  <Label htmlFor="chat-model" className="text-muted-foreground">Model</Label>
-                  <Input
-                    id="chat-model"
-                    value={providerModel}
-                    onChange={(e) => onProviderModelChange(e.target.value)}
-                    placeholder="Model"
-                    className="session-chat-settings-input mt-1 h-8 text-xs"
-                  />
-                </div>
-              )}
-            </div>
-
-            {isWebLLM ? (
-              <p className="rounded border border-border/80 px-2 py-2 text-muted-foreground">
-                Runs in your browser. First run downloads model assets locally after confirmation.
-              </p>
-            ) : null}
-
-            {selectedProvider.requiresApiKey && !isWebLLM ? (
-              <div>
-                <Label htmlFor="chat-api-key" className="text-muted-foreground">API key</Label>
-                <Input
-                  id="chat-api-key"
-                  type="password"
-                  value={providerApiKey}
-                  onChange={(e) => onProviderApiKeyChange(e.target.value)}
-                  placeholder="API key"
-                  className="session-chat-settings-input mt-1 h-8 text-xs"
-                />
-              </div>
-            ) : null}
-
-            <div className="flex flex-wrap items-center gap-4 rounded-md border border-border/80 px-2 py-2">
-              <label className="flex cursor-pointer items-center gap-2">
-                <Checkbox checked={allowRemoteProvider} onCheckedChange={(checked) => onAllowRemoteChange(Boolean(checked))} />
-                <span className="text-muted-foreground">Remote</span>
-              </label>
-              <label className="flex cursor-pointer items-center gap-2">
-                <Checkbox checked={allowLocalProvider} onCheckedChange={(checked) => onAllowLocalChange(Boolean(checked))} />
-                <span className="text-muted-foreground">Local (Ollama)</span>
-              </label>
-            </div>
+            <ProviderSettingsForm
+              providerId={providerId}
+              onProviderIdChange={onProviderIdChange}
+              providerDefinitions={providerDefinitions}
+              providerBaseUrl={providerBaseUrl}
+              onProviderBaseUrlChange={onProviderBaseUrlChange}
+              providerModel={providerModel}
+              onProviderModelChange={onProviderModelChange}
+              providerApiKey={providerApiKey}
+              onProviderApiKeyChange={onProviderApiKeyChange}
+              selectedProvider={selectedProvider}
+              allowRemoteProvider={allowRemoteProvider}
+              onAllowRemoteChange={onAllowRemoteChange}
+              allowLocalProvider={allowLocalProvider}
+              onAllowLocalChange={onAllowLocalChange}
+              webllmModels={webllmModels}
+              ollamaModels={ollamaModels}
+              ollamaModelsStatus={ollamaModelsStatus}
+              ollamaModelsError={ollamaModelsError}
+              onRefreshOllamaModels={onRefreshOllamaModels}
+              compact
+            />
           </div>
         </PopoverContent>
       </Popover>

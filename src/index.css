@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Syne:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
 
 html {
   scroll-behavior: smooth;
@@ -15,44 +15,66 @@ html {
 @tailwind utilities;
 
 :root {
-  --color-ink: #0b0f14;
-  --color-mist: #e5e7eb;
-  --color-mint: #34d399;
-  --color-cyan: #22d3ee;
-  --color-surface: #111827;
-  --color-surface-elevated: #1f2937;
-  --font-display: "Syne", ui-sans-serif, system-ui;
-  --font-body: "DM Sans", ui-sans-serif, system-ui;
+  --font-display: "Archivo", ui-sans-serif, system-ui;
+  --font-body: "IBM Plex Sans", ui-sans-serif, system-ui;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  /* shadcn/theme (HSL values without hsl() for Tailwind) */
-  --background: 216 28% 5%;
-  --foreground: 220 14% 91%;
-  --card: 220 26% 8%;
-  --card-foreground: 220 14% 91%;
-  --popover: 220 26% 8%;
-  --popover-foreground: 220 14% 91%;
-  --primary: 160 64% 51%;
-  --primary-foreground: 210 25% 6%;
-  --secondary: 215 25% 13%;
-  --secondary-foreground: 220 14% 91%;
-  --muted: 215 25% 13%;
-  --muted-foreground: 220 14% 56%;
-  --accent: 187 85% 53%;
-  --accent-foreground: 210 25% 6%;
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 220 13% 15%;
-  --input: 220 13% 15%;
-  --ring: 160 64% 51%;
+  --background: 24 22% 97%;
+  --foreground: 276 24% 14%;
+  --card: 0 0% 100%;
+  --card-foreground: 276 24% 14%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 276 24% 14%;
+  --primary: 289 34% 37%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 300 16% 93%;
+  --secondary-foreground: 276 24% 18%;
+  --muted: 300 14% 94%;
+  --muted-foreground: 274 12% 40%;
+  --accent: 330 46% 45%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72% 54%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 286 14% 85%;
+  --input: 286 14% 85%;
+  --ring: 289 34% 37%;
   --radius: 0.625rem;
-  --chart-1: 160 64% 51%;
-  --chart-2: 187 85% 53%;
-  --chart-3: 220 70% 50%;
-  --chart-4: 30 80% 55%;
-  --chart-5: 340 75% 55%;
+  --chart-1: 289 34% 37%;
+  --chart-2: 330 46% 45%;
+  --chart-3: 266 28% 48%;
+  --chart-4: 22 78% 55%;
+  --chart-5: 196 46% 42%;
 
-  color: var(--color-mist);
-  background: var(--color-ink);
+  --app-bg: hsl(24 22% 97%);
+  --app-panel: hsl(0 0% 100%);
+  --app-panel-muted: hsl(300 20% 96%);
+  --app-grid: rgba(76, 46, 88, 0.06);
+}
+
+.dark {
+  --background: 255 18% 10%;
+  --foreground: 282 18% 92%;
+  --card: 255 18% 13%;
+  --card-foreground: 282 18% 92%;
+  --popover: 255 18% 13%;
+  --popover-foreground: 282 18% 92%;
+  --primary: 289 40% 63%;
+  --primary-foreground: 255 18% 10%;
+  --secondary: 255 14% 18%;
+  --secondary-foreground: 282 18% 92%;
+  --muted: 255 14% 16%;
+  --muted-foreground: 282 10% 68%;
+  --accent: 330 52% 59%;
+  --accent-foreground: 255 18% 10%;
+  --destructive: 0 72% 58%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 255 10% 24%;
+  --input: 255 10% 24%;
+  --ring: 289 40% 63%;
+  --app-bg: hsl(255 20% 8%);
+  --app-panel: hsl(255 18% 12%);
+  --app-panel-muted: hsl(255 16% 15%);
+  --app-grid: rgba(206, 183, 219, 0.08);
 }
 
 * {
@@ -63,12 +85,14 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--font-body);
-  background: var(--color-ink);
+  color: hsl(var(--foreground));
+  background-color: var(--app-bg);
   background-image:
-    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(15, 23, 42, 0.9) 0%, transparent 70%),
-    radial-gradient(circle at 20% 80%, rgba(52, 211, 153, 0.03) 0%, transparent 40%),
-    radial-gradient(circle at 80% 20%, rgba(34, 211, 238, 0.02) 0%, transparent 40%);
-  background-attachment: fixed;
+    linear-gradient(var(--app-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--app-grid) 1px, transparent 1px),
+    radial-gradient(circle at top left, rgba(161, 103, 187, 0.08), transparent 28%);
+  background-size: 24px 24px, 24px 24px, auto;
+  background-position: 0 0, 0 0, 0 0;
 }
 
 a {

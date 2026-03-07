@@ -12,9 +12,12 @@ interface RepoResultCardProps {
   topics: string[];
   score: number;
   text: string;
+  selected?: boolean;
+  onToggleSelect?: (chunkId: string) => void;
 }
 
 export function RepoResultCard({
+  chunkId,
   repoFullName,
   repoUrl,
   repoDescription,
@@ -22,13 +25,21 @@ export function RepoResultCard({
   topics,
   score,
   text,
+  selected = false,
+  onToggleSelect,
 }: RepoResultCardProps) {
   const displayScore = clampResultScoreForDisplay(score);
   const scoreBand = getResultScoreBand(displayScore);
   const scoreText = displayScore.toFixed(3);
 
   return (
-    <div className="group rounded-lg border border-border/40 bg-card/40 p-3 transition-all duration-200 hover:border-border/70 hover:bg-card/70">
+    <div
+      className={`group rounded-lg border p-3 transition-all duration-200 ${
+        selected
+          ? "border-primary/50 bg-primary/5"
+          : "border-border/40 bg-card/40 hover:border-border/70 hover:bg-card/70"
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <a
@@ -42,6 +53,19 @@ export function RepoResultCard({
           </a>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {onToggleSelect ? (
+            <button
+              type="button"
+              className={`rounded-md border px-2 py-1 text-[10px] font-medium transition-colors ${
+                selected
+                  ? "border-primary/40 bg-primary text-primary-foreground"
+                  : "border-border/60 bg-background/70 text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => onToggleSelect(chunkId)}
+            >
+              {selected ? "Selected" : "Select"}
+            </button>
+          ) : null}
           <Badge
             variant="secondary"
             className={`text-[10px] font-medium ${

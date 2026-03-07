@@ -9,8 +9,10 @@ import {
   exchangeOAuthCode,
   getOAuthConfig,
 } from "./githubOAuth";
+import { buildAuthStorageScope } from "./authScope";
 import { AuthContext } from "./auth-context";
 import type { AuthContextValue, AuthMethod, OAuthCallbackInput } from "./auth-types";
+import { setLocalDatabaseScope } from "@/db/client";
 import { clearSettings } from "@/lib/settings";
 
 function normalizeTokenInput(raw: string): string {
@@ -46,7 +48,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
       state: input.state,
     });
 
-    setAccessToken(normalizeTokenInput(token));
+    const normalizedToken = normalizeTokenInput(token);
+    setLocalDatabaseScope(buildAuthStorageScope(normalizedToken));
+    setAccessToken(normalizedToken);
     setAuthMethod("oauth");
   }, []);
 
@@ -57,12 +61,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
       throw new Error("GitHub token is required");
     }
 
+    setLocalDatabaseScope(buildAuthStorageScope(trimmed));
     setAccessToken(trimmed);
     setAuthMethod("pat");
   }, []);
 
   const logout = useCallback(() => {
     clearSettings(accessToken);
+    setLocalDatabaseScope(buildAuthStorageScope(null));
     setAccessToken(null);
     setAuthMethod(null);
   }, [accessToken]);

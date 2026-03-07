@@ -18,13 +18,14 @@ import type {
   StorageMode,
 } from "./types";
 
-const DB_NAME = "gitstarrecall.sqlite";
-const LOCAL_STORAGE_KEY = "gitstarrecall.sqlite.base64";
+const DB_NAME_PREFIX = "gitstarrecall";
+const LOCAL_STORAGE_KEY_PREFIX = "gitstarrecall.sqlite.base64";
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_EMBEDDINGS = 256;
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_MS = 3000;
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
-let dbPromise: Promise<LocalDatabase> | null = null;
+let currentDatabaseScopeKey = "anon";
+const dbPromiseByScope = new Map<string, Promise<LocalDatabase>>();
 
 type EmbeddingCheckpointPolicy = {
   everyEmbeddings: number;
@@ -57,14 +58,33 @@ function isOpfsSupported(): boolean {
   return typeof navigator !== "undefined" && Boolean(navigator.storage?.getDirectory);
 }
 
-async function loadBytesFromOpfs(): Promise<Uint8Array | null> {
+function normalizeDatabaseScopeKey(scopeKey: string): string {
+  const trimmed = String(scopeKey ?? "").trim();
+  if (!trimmed) {
+    return "anon";
+  }
+  return trimmed.replace(/[^a-z0-9:_-]/gi, "_");
+}
+
+export function getScopedDatabaseFileName(scopeKey: string): string {
+  const normalized = normalizeDatabaseScopeKey(scopeKey);
+  return normalized === "anon"
+    ? `${DB_NAME_PREFIX}.sqlite`
+    : `${DB_NAME_PREFIX}.${normalized}.sqlite`;
+}
+
+export function getScopedDatabaseStorageKey(scopeKey: string): string {
+  return `${LOCAL_STORAGE_KEY_PREFIX}.${normalizeDatabaseScopeKey(scopeKey)}`;
+}
+
+async function loadBytesFromOpfs(scopeKey: string): Promise<Uint8Array | null> {
   if (!isOpfsSupported()) {
     return null;
   }
 
   try {
     const root = await navigator.storage.getDirectory();
-    const handle = await root.getFileHandle(DB_NAME);
+    const handle = await root.getFileHandle(getScopedDatabaseFileName(scopeKey));
     const file = await handle.getFile();
     const arrayBuffer = await file.arrayBuffer();
     return new Uint8Array(arrayBuffer);
@@ -73,14 +93,14 @@ async function loadBytesFromOpfs(): Promise<Uint8Array | null> {
   }
 }
 
-async function writeBytesToOpfs(bytes: Uint8Array): Promise<boolean> {
+async function writeBytesToOpfs(bytes: Uint8Array, scopeKey: string): Promise<boolean> {
   if (!isOpfsSupported()) {
     return false;
   }
 
   try {
     const root = await navigator.storage.getDirectory();
-    const handle = await root.getFileHandle(DB_NAME, { create: true });
+    const handle = await root.getFileHandle(getScopedDatabaseFileName(scopeKey), { create: true });
     const writable = await handle.createWritable();
     const stableBuffer = new ArrayBuffer(bytes.byteLength);
     new Uint8Array(stableBuffer).set(bytes);
@@ -92,21 +112,25 @@ async function writeBytesToOpfs(bytes: Uint8Array): Promise<boolean> {
   }
 }
 
-async function clearOpfsFile(): Promise<void> {
+async function clearOpfsFile(scopeKey: string): Promise<void> {
   if (!isOpfsSupported()) {
     return;
   }
 
   try {
     const root = await navigator.storage.getDirectory();
-    await root.removeEntry(DB_NAME);
+    await root.removeEntry(getScopedDatabaseFileName(scopeKey));
   } catch {
     // noop: best effort
   }
 }
 
-function loadBytesFromLocalStorage(): Uint8Array | null {
-  const encoded = localStorage.getItem(LOCAL_STORAGE_KEY);
+function loadBytesFromLocalStorage(scopeKey: string): Uint8Array | null {
+  if (typeof localStorage === "undefined") {
+    return null;
+  }
+
+  const encoded = localStorage.getItem(getScopedDatabaseStorageKey(scopeKey));
 
   if (!encoded) {
     return null;
@@ -119,12 +143,20 @@ function loadBytesFromLocalStorage(): Uint8Array | null {
   }
 }
 
-function writeBytesToLocalStorage(bytes: Uint8Array): void {
-  localStorage.setItem(LOCAL_STORAGE_KEY, toBase64(bytes));
+function writeBytesToLocalStorage(bytes: Uint8Array, scopeKey: string): void {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+
+  localStorage.setItem(getScopedDatabaseStorageKey(scopeKey), toBase64(bytes));
 }
 
-function clearLocalStorageBytes(): void {
-  localStorage.removeItem(LOCAL_STORAGE_KEY);
+function clearLocalStorageBytes(scopeKey: string): void {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+
+  localStorage.removeItem(getScopedDatabaseStorageKey(scopeKey));
 }
 
 function normalizePositiveInt(value: unknown, fallback: number): number {
@@ -628,6 +660,7 @@ export class LocalDatabase {
   private sql: SqlJsStatic;
   private db: Database;
   private _storageMode: StorageMode;
+  private scopeKey: string;
   private vectorIndexCache: Array<{ chunkId: string; vector: Float32Array }> | null = null;
   private vectorIndexCacheCount = -1;
   private embeddingCheckpointPolicy: EmbeddingCheckpointPolicy;
@@ -639,11 +672,13 @@ export class LocalDatabase {
     sql: SqlJsStatic;
     db: Database;
     storageMode: StorageMode;
+    scopeKey?: string;
     embeddingCheckpointPolicy?: EmbeddingCheckpointPolicy;
   }) {
     this.sql = args.sql;
     this.db = args.db;
     this._storageMode = args.storageMode;
+    this.scopeKey = normalizeDatabaseScopeKey(args.scopeKey ?? "anon");
     this.embeddingCheckpointPolicy = {
       everyEmbeddings: normalizePositiveInt(
         args.embeddingCheckpointPolicy?.everyEmbeddings,
@@ -1076,7 +1111,7 @@ export class LocalDatabase {
     const bytes = this.db.export();
 
     if (this._storageMode === "opfs") {
-      const written = await writeBytesToOpfs(bytes);
+      const written = await writeBytesToOpfs(bytes, this.scopeKey);
 
       if (written) {
         return;
@@ -1087,7 +1122,7 @@ export class LocalDatabase {
 
     if (this._storageMode === "local-storage") {
       try {
-        writeBytesToLocalStorage(bytes);
+        writeBytesToLocalStorage(bytes, this.scopeKey);
       } catch {
         // localStorage quota can be exceeded for large DB snapshots; degrade to in-memory
         // mode instead of failing the active operation.
@@ -2130,16 +2165,25 @@ export class LocalDatabase {
     this.pendingEmbeddingsStartedAt = 0;
     this.lastEmbeddingCheckpointAt = null;
 
-    await clearOpfsFile();
-    clearLocalStorageBytes();
+    await clearOpfsFile(this.scopeKey);
+    clearLocalStorageBytes(this.scopeKey);
     await clearChatBackup();
     await this.persist();
   }
 }
 
+export function setLocalDatabaseScope(scopeKey: string): void {
+  currentDatabaseScopeKey = normalizeDatabaseScopeKey(scopeKey);
+}
+
 export async function getLocalDatabase(): Promise<LocalDatabase> {
-  if (!dbPromise) {
-    dbPromise = (async () => {
+  const scopeKey = currentDatabaseScopeKey;
+  const existingPromise = dbPromiseByScope.get(scopeKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const promise = (async () => {
       const sql = await getSql();
       const embeddingCheckpointPolicy = getEmbeddingCheckpointPolicyFromEnv();
       const createFreshDatabase = async () => {
@@ -2147,7 +2191,13 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
         runSchema(db);
 
         const storageMode: StorageMode = isOpfsSupported() ? "opfs" : "local-storage";
-        const localDb = new LocalDatabase({ sql, db, storageMode, embeddingCheckpointPolicy });
+        const localDb = new LocalDatabase({
+          sql,
+          db,
+          storageMode,
+          scopeKey,
+          embeddingCheckpointPolicy,
+        });
         try {
           await localDb.upsertIndexMeta({
             key: "db_created_at",
@@ -2160,34 +2210,46 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
         return localDb;
       };
 
-      const opfsBytes = await loadBytesFromOpfs();
+      const opfsBytes = await loadBytesFromOpfs(scopeKey);
 
       if (opfsBytes) {
         try {
           const db = new sql.Database(opfsBytes);
           runSchema(db);
-          return new LocalDatabase({ sql, db, storageMode: "opfs", embeddingCheckpointPolicy });
+          return new LocalDatabase({
+            sql,
+            db,
+            storageMode: "opfs",
+            scopeKey,
+            embeddingCheckpointPolicy,
+          });
         } catch {
-          await clearOpfsFile();
+          await clearOpfsFile(scopeKey);
           return createFreshDatabase();
         }
       }
 
-      const localBytes = loadBytesFromLocalStorage();
+      const localBytes = loadBytesFromLocalStorage(scopeKey);
       if (localBytes) {
         try {
           const db = new sql.Database(localBytes);
           runSchema(db);
-          return new LocalDatabase({ sql, db, storageMode: "local-storage", embeddingCheckpointPolicy });
+          return new LocalDatabase({
+            sql,
+            db,
+            storageMode: "local-storage",
+            scopeKey,
+            embeddingCheckpointPolicy,
+          });
         } catch {
-          clearLocalStorageBytes();
+          clearLocalStorageBytes(scopeKey);
           return createFreshDatabase();
         }
       }
 
       return createFreshDatabase();
     })();
-  }
 
-  return dbPromise;
+  dbPromiseByScope.set(scopeKey, promise);
+  return promise;
 }

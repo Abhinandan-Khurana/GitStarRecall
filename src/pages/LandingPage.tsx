@@ -1,328 +1,275 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useAuth } from "../auth/useAuth";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ArrowRight, Brain, Github, KeyRound, Lock, MessageSquare, Search, Shield, Workflow } from "lucide-react";
+import { useAuth } from "@/auth/useAuth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import {
-  Star,
-  Shield,
-  Database,
-  Brain,
-  Search,
-  MessageSquare,
-  Zap,
-  Lock,
-  Github,
-  ArrowRight,
-  Cpu,
-  RefreshCw,
-} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
-/**
- * Custom hook that adds the "revealed" class when the element scrolls into view.
- */
-function useReveal<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
+const WORKFLOW_STEPS = [
+  {
+    title: "Connect GitHub",
+    body: "Use OAuth or a personal token to link your starred repos.",
+    icon: Github,
+  },
+  {
+    title: "Build the index",
+    body: "Import stars, fetch READMEs, and generate embeddings locally.",
+    icon: Workflow,
+  },
+  {
+    title: "Recall by memory",
+    body: "Search by what you remember, inspect the match, then send explicit context to chat.",
+    icon: Search,
+  },
+] as const;
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
-    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (prefersReduced) {
-      el.classList.add("revealed");
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          el.classList.add("revealed");
-          observer.unobserve(el);
-        }
-      },
-      { threshold: 0.15, rootMargin: "0px 0px -40px 0px" }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  return ref;
-}
+const VALUE_POINTS = [
+  {
+    title: "Local-first trust",
+    body: "Your repo index, embeddings, and session history stay on-device unless you explicitly opt into a remote provider.",
+    icon: Shield,
+  },
+  {
+    title: "Context you can see",
+    body: "The rebuild exposes selected context before chat sends anything to a model.",
+    icon: MessageSquare,
+  },
+  {
+    title: "Built for recall",
+    body: "The app is organized around finding and understanding saved repos, not around setup panels.",
+    icon: Brain,
+  },
+] as const;
 
 export default function LandingPage() {
-  const { beginOAuthLogin } = useAuth();
+  const navigate = useNavigate();
+  const { beginOAuthLogin, loginWithPat, isAuthenticated } = useAuth();
   const [authError, setAuthError] = useState<string | null>(null);
-
-  const trustRef = useReveal<HTMLDivElement>();
-  const howRef = useReveal<HTMLDivElement>();
-  const featuresRef = useReveal<HTMLDivElement>();
-  const ctaRef = useReveal<HTMLDivElement>();
+  const [patToken, setPatToken] = useState("");
 
   const handleOAuthLogin = useCallback(async () => {
     try {
       await beginOAuthLogin();
     } catch (err) {
-      setAuthError(
-        err instanceof Error ? err.message : "Unable to start GitHub OAuth"
-      );
+      setAuthError(err instanceof Error ? err.message : "Unable to start GitHub OAuth");
     }
   }, [beginOAuthLogin]);
 
+  const handlePatSubmit = useCallback(
+    (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+
+      try {
+        loginWithPat(patToken);
+        navigate("/app");
+      } catch (err) {
+        setAuthError(err instanceof Error ? err.message : "PAT login failed");
+      }
+    },
+    [loginWithPat, navigate, patToken],
+  );
+
+  const primaryAction = useMemo(
+    () =>
+      isAuthenticated
+        ? {
+            label: "Open app",
+            onClick: () => navigate("/app"),
+          }
+        : {
+            label: "Connect GitHub",
+            onClick: () => void handleOAuthLogin(),
+          },
+    [handleOAuthLogin, isAuthenticated, navigate],
+  );
+
   return (
-    <div className="relative">
-      {/* Background orbs */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-        <div className="animate-float absolute -top-32 left-1/2 h-[500px] w-[800px] -translate-x-1/2 rounded-full bg-primary/5 blur-[120px]" />
-        <div className="absolute right-0 top-1/3 h-[300px] w-[400px] rounded-full bg-accent/3 blur-[100px]" style={{ animation: "float 4s ease-in-out 1s infinite" }} />
-      </div>
+    <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-4 pb-16 pt-8 sm:px-6 lg:px-8">
+      <header className="flex items-center justify-between border-b border-border/60 pb-5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <Github className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="font-display text-lg font-semibold">GitStarRecall</p>
+            <p className="text-sm text-muted-foreground">Local memory for GitHub stars</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" className="rounded-md" asChild>
+            <a href="https://github.com/Abhinandan-Khurana/GitStarRecall" target="_blank" rel="noreferrer">
+              View source
+            </a>
+          </Button>
+          <Button onClick={primaryAction.onClick} className="rounded-md">
+            {primaryAction.label}
+          </Button>
+        </div>
+      </header>
 
-      <article className="relative mx-auto max-w-5xl px-4 pb-20 pt-16 sm:px-6">
-        {/* Hero */}
-        <section className="mx-auto max-w-3xl text-center">
-          <div className="stagger-children">
-            <Badge variant="secondary" className="mb-6 gap-1.5 rounded-full px-3 py-1 text-xs font-medium">
-              <Star className="h-3 w-3 text-primary" />
-              Local-first RAG for GitHub Stars
-            </Badge>
+      <main className="grid flex-1 gap-8 py-10 lg:grid-cols-[minmax(0,1fr)_minmax(520px,0.95fr)]">
+        <section className="flex flex-col justify-center">
+          <Badge variant="outline" className="w-fit rounded-md px-3 py-1">
+            <Lock className="mr-2 h-3.5 w-3.5" />
+            Privacy-first developer workflow
+          </Badge>
+          <h1 className="mt-6 max-w-2xl font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+            Find starred repos by intent, inspect the match, and keep context visible.
+          </h1>
+          <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
+            GitStarRecall turns your GitHub stars into a local workspace for rediscovery. Search by memory, review the match, and continue the thread with explicit chat context.
+          </p>
 
-            <h1 className="font-display text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl md:text-6xl">
-              Find starred repos by{" "}
-              <span className="text-gradient-animated">memory</span>,{" "}
-              not by name
-            </h1>
-
-            <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground">
-              Ask for tailored recommendations from your own stars based on your
-              exact use case. Your data stays{" "}
-              <span className="font-medium text-foreground">on-device</span>, and external LLMs are{" "}
-              <span className="font-medium text-foreground">opt-in only</span>.
-            </p>
-
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              <Button
-                size="lg"
-                onClick={() => void handleOAuthLogin()}
-                className="gap-2 rounded-full px-6 transition-transform hover:scale-[1.02] active:scale-[0.98]"
-              >
-                <Github className="h-4 w-4" />
-                Connect GitHub
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                asChild
-                className="gap-2 rounded-full border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
-              >
-                <a href="https://github.com/Abhinandan-Khurana/GitStarRecall" target="_blank" rel="noopener noreferrer">
-                  View Source
-                  <ArrowRight className="h-4 w-4" />
-                </a>
-              </Button>
-            </div>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Button size="lg" onClick={primaryAction.onClick} className="rounded-md px-6">
+              {primaryAction.label}
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+            <Button size="lg" variant="outline" className="rounded-md px-6" asChild>
+              <a href="#workflow">See the workflow</a>
+            </Button>
           </div>
 
-          {authError && (
-            <Alert variant="destructive" className="mx-auto mt-6 max-w-md">
-              <AlertDescription>{authError}</AlertDescription>
-            </Alert>
-          )}
-        </section>
-
-        {/* Trust signals bar */}
-        <section ref={trustRef} className="reveal mt-16">
-          <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-8">
-            {[
-              { icon: Shield, label: "Privacy-first", highlight: true },
-              { icon: Lock, label: "OAuth PKCE", highlight: true },
-              { icon: Database, label: "On-device storage", highlight: false },
-              { icon: Github, label: "Open source", highlight: false },
-            ].map(({ icon: Icon, label, highlight }) => (
-              <div
-                key={label}
-                className="flex items-center gap-2 text-sm text-muted-foreground"
-              >
-                <Icon className={`h-4 w-4 ${highlight ? "text-accent" : "text-primary/70"}`} />
-                <span className={highlight ? "font-medium text-accent" : ""}>{label}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <Separator className="mx-auto my-16 max-w-xs opacity-30" />
-
-        {/* How it works */}
-        <section ref={howRef} className="reveal">
-          <div className="mb-10 text-center">
-            <h2 className="font-display text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              How it works
-            </h2>
-          </div>
-
-          <div className="relative mx-auto grid max-w-3xl gap-8 md:grid-cols-3 md:gap-6">
-            {/* Connecting line (desktop) */}
-            <div className="absolute left-0 right-0 top-10 hidden h-px bg-gradient-to-r from-transparent via-border to-transparent md:block" aria-hidden="true" />
-
-            {[
-              {
-                step: 1,
-                icon: RefreshCw,
-                title: "Sync your stars",
-                body: "Connect GitHub and incrementally sync your starred repos with checksums -- no full re-indexing needed.",
-              },
-              {
-                step: 2,
-                icon: Brain,
-                title: "Build embeddings",
-                body: "Generate semantic embeddings locally using ONNX models, stored in SQLite WASM with sqlite-vec.",
-              },
-              {
-                step: 3,
-                icon: Search,
-                title: "Search by intent",
-                body: "Describe what you need in natural language and get ranked matches from your personal star collection.",
-              },
-            ].map(({ step, icon: Icon, title, body }) => (
-              <div key={step} className="relative flex flex-col items-center text-center">
-                <div className="relative z-10 mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-border/50 bg-card shadow-lg">
-                  <Icon className="h-5 w-5 text-primary" />
-                  <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
-                    {step}
-                  </span>
-                </div>
-                <h3 className="mb-2 font-display text-base font-semibold text-foreground">
-                  {title}
-                </h3>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  {body}
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <Separator className="mx-auto my-16 max-w-xs opacity-30" />
-
-        {/* Feature grid (bento-style) */}
-        <section ref={featuresRef} className="reveal">
-          <div className="mb-10 text-center">
-            <h2 className="font-display text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              Features
-            </h2>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {[
-              {
-                icon: Database,
-                title: "SQLite WASM",
-                body: "All data lives in your browser using SQLite WASM with sqlite-vec for vector similarity search.",
-                accent: "primary",
-              },
-              {
-                icon: Shield,
-                title: "Security aligned",
-                body: "OAuth PKCE flow, token isolation, and explicit consent before any data leaves your device.",
-                accent: "accent",
-                securityKeywords: ["OAuth PKCE", "token isolation", "explicit consent"],
-              },
-              {
-                icon: MessageSquare,
-                title: "Sessioned recall",
-                body: "Each query becomes a session you can refine, revisit, and continue with full context.",
-                accent: "primary",
-              },
-              {
-                icon: Cpu,
-                title: "Provider optionality",
-                body: "Use Ollama, LM Studio, WebLLM, or remote providers -- only enabled when you choose.",
-                accent: "accent",
-              },
-              {
-                icon: Zap,
-                title: "Incremental sync",
-                body: "Checksum-based sync keeps 1000+ stars fresh without re-downloading everything.",
-                accent: "primary",
-              },
-              {
-                icon: Brain,
-                title: "On-device embeddings",
-                body: "ONNX Runtime generates embeddings entirely in-browser -- no API calls, no tracking.",
-                accent: "accent",
-                securityKeywords: ["no API calls", "no tracking"],
-              },
-            ].map(({ icon: Icon, title, body, accent, securityKeywords }) => {
-              // Highlight security keywords inline
-              let bodyContent: React.ReactNode = body;
-              if (securityKeywords && securityKeywords.length > 0) {
-                const regex = new RegExp(`(${securityKeywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'g');
-                const parts = body.split(regex);
-                bodyContent = parts.map((part, i) =>
-                  securityKeywords.includes(part)
-                    ? <span key={i} className="font-medium text-accent">{part}</span>
-                    : part
-                );
-              }
-
+          <div className="mt-10 grid gap-4 md:grid-cols-3">
+            {VALUE_POINTS.map((item) => {
+              const Icon = item.icon;
               return (
-              <Card
-                key={title}
-                className="glow-border group relative overflow-hidden border-border/50 bg-card/50 transition-all duration-300 hover:-translate-y-0.5 hover:bg-card/80 hover:shadow-lg"
-              >
-                <CardContent className="p-5">
-                  <div
-                    className={`mb-3 flex h-9 w-9 items-center justify-center rounded-lg ${accent === "accent" ? "bg-accent/10" : "bg-primary/10"}`}
-                  >
-                    <Icon
-                      className={`h-4.5 w-4.5 ${accent === "accent" ? "text-accent" : "text-primary"}`}
-                    />
-                  </div>
-                  <h3 className="mb-1.5 font-display text-sm font-semibold text-foreground">
-                    {title}
-                  </h3>
-                  <p className="text-sm leading-relaxed text-muted-foreground">
-                    {bodyContent}
-                  </p>
-                </CardContent>
-              </Card>
+                <Card key={item.title} className="border-border/60 bg-[var(--app-panel)] shadow-none">
+                  <CardHeader className="pb-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
+                      <Icon className="h-4 w-4" />
+                    </div>
+                    <CardTitle className="pt-3 font-display text-base">{item.title}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm leading-6 text-muted-foreground">{item.body}</CardContent>
+                </Card>
               );
             })}
           </div>
         </section>
 
-        <Separator className="mx-auto my-16 max-w-xs opacity-30" />
-
-        {/* Bottom CTA */}
-        <section ref={ctaRef} className="reveal">
-          <Card className="relative overflow-hidden border-border/50 bg-card/60">
-            {/* Accent glow */}
-            <div className="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-primary/10 blur-[60px]" aria-hidden="true" />
-            <CardContent className="relative flex flex-col items-center gap-4 p-8 text-center sm:p-12">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                <Star className="h-6 w-6 text-primary" />
+        <section className="space-y-4">
+          <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
+            <CardHeader className="border-b border-border/60 pb-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="font-display text-lg">Connect your stars</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">OAuth is the primary path. PAT remains available when you need a manual fallback.</p>
+                </div>
+                <Badge variant="secondary" className="rounded-md">Auth</Badge>
               </div>
-              <h2 className="font-display text-2xl font-bold text-foreground sm:text-3xl">
-                Ready to recall your stars?
-              </h2>
-              <p className="max-w-md text-muted-foreground">
-                Connect your GitHub account and start searching your starred
-                repos with natural language -- all{" "}
-                <span className="font-medium text-foreground">locally on your device</span>.
-              </p>
-              <Button
-                size="lg"
-                onClick={() => void handleOAuthLogin()}
-                className="mt-2 gap-2 rounded-full px-8 transition-transform hover:scale-[1.02] active:scale-[0.98]"
-              >
-                <Github className="h-4 w-4" />
-                Get Started
+            </CardHeader>
+            <CardContent className="space-y-4 pt-5">
+              <Button onClick={primaryAction.onClick} className="w-full rounded-md" size="lg">
+                <Github className="mr-2 h-4 w-4" />
+                {primaryAction.label}
               </Button>
+              <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                <p className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <KeyRound className="h-4 w-4 text-primary" />
+                  Personal Access Token
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Use a PAT if you do not want to go through OAuth right now. The token stays in memory for the current session.
+                </p>
+                <form onSubmit={handlePatSubmit} className="mt-4 space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="landing-pat-token" className="text-xs font-medium text-muted-foreground">
+                      Personal Access Token
+                    </Label>
+                    <Input
+                      id="landing-pat-token"
+                      type="password"
+                      value={patToken}
+                      onChange={(event) => setPatToken(event.target.value)}
+                      placeholder="ghp_..."
+                      className="h-11 rounded-md border-border/70 bg-background"
+                    />
+                  </div>
+                  <Button type="submit" variant="outline" className="w-full rounded-md">
+                    Continue with PAT
+                  </Button>
+                </form>
+              </div>
+              {authError ? (
+                <Alert variant="destructive">
+                  <AlertDescription>{authError}</AlertDescription>
+                </Alert>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card className="w-full border-border/60 bg-[var(--app-panel)] shadow-none">
+            <CardHeader className="border-b border-border/60 pb-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="font-display text-lg">What you get after login</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">A focused local workspace instead of a single overloaded page.</p>
+                </div>
+                <Badge variant="secondary" className="rounded-md">Product flow</Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                  <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Home</p>
+                  <p className="mt-2 text-sm text-muted-foreground">See workspace health, choose setup, jump into Recall, or resume prior work.</p>
+                </div>
+                <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                  <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Recall</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Search by memory, inspect the match, and keep chat context explicit before sending.</p>
+                </div>
+                <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                  <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Library</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Browse indexed repos by metadata, topics, and README content without a query.</p>
+                </div>
+                <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                  <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Sessions</p>
+                  <p className="mt-2 text-sm text-muted-foreground">Reopen prior searches and message threads instead of rebuilding context from scratch.</p>
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Why this is easier to use</p>
+                <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+                  <li>Search, setup, browsing, history, and settings are separated into stable views.</li>
+                  <li>Operational controls no longer crowd the main search workflow.</li>
+                  <li>Local-first behavior and provider consent remain visible instead of being hidden behind tiny controls.</li>
+                </ul>
+              </div>
             </CardContent>
           </Card>
         </section>
-      </article>
+      </main>
+
+      <section id="workflow" className="border-t border-border/60 pt-10">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="font-display text-2xl font-semibold">How the workspace flows</p>
+            <p className="mt-2 text-sm text-muted-foreground">The rebuilt UX keeps setup guided, recall search-first, and sessions easy to resume.</p>
+          </div>
+        </div>
+        <div className="mt-6 grid gap-4 lg:grid-cols-3">
+          {WORKFLOW_STEPS.map((step) => {
+            const Icon = step.icon;
+            return (
+              <Card key={step.title} className="border-border/60 bg-[var(--app-panel)] shadow-none">
+                <CardHeader className="pb-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <CardTitle className="pt-3 font-display text-base">{step.title}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm leading-6 text-muted-foreground">{step.body}</CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }

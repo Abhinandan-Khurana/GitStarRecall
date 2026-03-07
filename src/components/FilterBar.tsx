@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 
 interface FilterBarProps {
   sessionMode: "new" | "continue";
@@ -23,6 +24,7 @@ interface FilterBarProps {
   availableTopics: string[];
   filteredCount: number;
   totalCount: number;
+  onResetFilters: () => void;
 }
 
 export function FilterBar({
@@ -39,7 +41,14 @@ export function FilterBar({
   availableTopics,
   filteredCount,
   totalCount,
+  onResetFilters,
 }: FilterBarProps) {
+  const activeFilters = [
+    languageFilter !== "all" ? `Language: ${languageFilter}` : null,
+    topicFilter !== "all" ? `Topic: ${topicFilter}` : null,
+    updatedWithinDaysFilter !== "all" ? `Updated: ${updatedWithinDaysFilter}d` : null,
+  ].filter((value): value is string => Boolean(value));
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -113,7 +122,21 @@ export function FilterBar({
             <SelectItem value="365">Last year</SelectItem>
           </SelectContent>
         </Select>
+
+        <Button type="button" variant="ghost" size="sm" className="h-8 rounded-lg px-2 text-xs" onClick={onResetFilters}>
+          Reset filters
+        </Button>
       </div>
+
+      {activeFilters.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {activeFilters.map((filter) => (
+            <Badge key={filter} variant="outline" className="rounded-md text-[11px] font-normal">
+              {filter}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

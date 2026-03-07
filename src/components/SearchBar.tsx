@@ -24,6 +24,8 @@ export function SearchBar({
   fetchPhase,
   searchProgress,
 }: SearchBarProps) {
+  const activeFetchMessage = isFetching ? fetchPhase ?? "Syncing your stars and README index..." : null;
+
   return (
     <div className="space-y-3">
       {/* Search input row */}
@@ -69,14 +71,13 @@ export function SearchBar({
             className="h-10 gap-1.5 rounded-lg border-border/50 text-xs"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
-            {isFetching ? (fetchPhase ?? "Syncing...") : "Sync Stars"}
+            {isFetching ? "Syncing..." : "Sync Stars"}
           </Button>
         </div>
       </div>
 
-      {searchProgress && (
-        <p className="text-xs text-muted-foreground animate-fade-in">{searchProgress}</p>
-      )}
+      {activeFetchMessage ? <p className="text-xs text-muted-foreground animate-fade-in">{activeFetchMessage}</p> : null}
+      {searchProgress ? <p className="text-xs text-muted-foreground animate-fade-in">{searchProgress}</p> : null}
     </div>
   );
 }

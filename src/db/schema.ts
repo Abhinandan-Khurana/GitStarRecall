@@ -63,7 +63,35 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS repo_tags (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  color TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS repo_tag_assignments (
+  repo_id INTEGER NOT NULL,
+  tag_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (repo_id, tag_id),
+  FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE,
+  FOREIGN KEY (tag_id) REFERENCES repo_tags(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS session_context_items (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  repo_id INTEGER,
+  chunk_id TEXT,
+  position INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_chunks_repo_id ON chunks(repo_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_created_at ON chunks(created_at);
 CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_repo_tag_assignments_repo_id ON repo_tag_assignments(repo_id);
+CREATE INDEX IF NOT EXISTS idx_session_context_items_session_id ON session_context_items(session_id);
 `;
