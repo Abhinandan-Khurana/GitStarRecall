@@ -16,12 +16,13 @@ type ShowcaseItem = {
   highlights: readonly [string, string];
 };
 
+/* Unified pink/magenta accent palette for cohesive value rail */
 const SHOWCASE_ITEMS: ShowcaseItem[] = [
   {
     id: "home",
     title: "Home",
     body: "Check sync health, resume your last thread, and see whether the index is ready before you search.",
-    accent: "from-[#ffddd9] to-[#ffc1df] dark:from-[#6b3956] dark:to-[#a25772]",
+    accent: "from-[#ffe8f0] to-[#ffd6e8] dark:from-[#4a2a3e] dark:to-[#6b3956]",
     icon: Home,
     previewTitle: "Workspace Home",
     previewBody: "The workspace opens with health, last activity, and next actions already visible.",
@@ -31,7 +32,7 @@ const SHOWCASE_ITEMS: ShowcaseItem[] = [
     id: "recall",
     title: "Recall",
     body: "Search by memory, inspect the best match, and choose context before anything goes into chat.",
-    accent: "from-[#ffe6c0] to-[#ffd6ef] dark:from-[#5d3b31] dark:to-[#8b4f79]",
+    accent: "from-[#ffdce9] to-[#f5d9ff] dark:from-[#3d2545] dark:to-[#5c3568]",
     icon: Search,
     previewTitle: "Recall Workspace",
     previewBody: "The strongest match stays readable so you can send an intentional prompt instead of a hidden bundle.",
@@ -41,7 +42,7 @@ const SHOWCASE_ITEMS: ShowcaseItem[] = [
     id: "library",
     title: "Library",
     body: "Browse repos, README content, and metadata like a curated archive instead of a flat list.",
-    accent: "from-[#f5e1ff] to-[#ffd6d8] dark:from-[#47345c] dark:to-[#744152]",
+    accent: "from-[#f5e1ff] to-[#ffdce9] dark:from-[#47345c] dark:to-[#5d3d5a]",
     icon: BookOpen,
     previewTitle: "Library View",
     previewBody: "Repository signals stay browseable even when you are not ready to start a new query.",
@@ -51,7 +52,7 @@ const SHOWCASE_ITEMS: ShowcaseItem[] = [
     id: "sessions",
     title: "Sessions",
     body: "Reopen past searches and transcripts with readable context instead of rebuilding memory from scratch.",
-    accent: "from-[#d7f0ff] to-[#efe2ff] dark:from-[#22485a] dark:to-[#5c4272]",
+    accent: "from-[#ffd6e8] to-[#efe2ff] dark:from-[#3e2a4a] dark:to-[#5c4272]",
     icon: History,
     previewTitle: "Session History",
     previewBody: "Past searches, transcripts, and resume actions stay organized in one place.",
@@ -61,7 +62,7 @@ const SHOWCASE_ITEMS: ShowcaseItem[] = [
     id: "settings",
     title: "Settings",
     body: "Manage providers, sync controls, and local-first defaults without crowding the main recall flow.",
-    accent: "from-[#fff0d0] to-[#ffd9b8] dark:from-[#5e4730] dark:to-[#7e5940]",
+    accent: "from-[#ffe2cf] to-[#ffdce9] dark:from-[#4a3540] dark:to-[#6b3956]",
     icon: Settings,
     previewTitle: "Settings Surface",
     previewBody: "Connection, provider, and trust settings stay reachable without interrupting search.",

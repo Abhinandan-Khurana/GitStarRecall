@@ -188,14 +188,14 @@ export default function AppHomePage() {
         ].map((item) => {
           const Icon = item.icon;
           return (
-            <Card key={item.title} className="border-border/60 bg-[var(--app-panel)] shadow-none">
+            <Card key={item.title} className="flex h-full flex-col border-border/60 bg-[var(--app-panel)] shadow-none">
               <CardHeader className="pb-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary">
                   <Icon className="h-4 w-4" />
                 </div>
                 <CardTitle className="pt-3 font-display text-base">{item.title}</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="flex flex-1 flex-col justify-between gap-4">
                 <p className="text-sm leading-6 text-muted-foreground">{item.body}</p>
                 <Button variant="outline" className="w-full rounded-md" onClick={() => navigate(item.path)}>
                   Open {item.title}

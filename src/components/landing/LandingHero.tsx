@@ -217,7 +217,7 @@ export function LandingHero({
         </div>
       </HeroSection>
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 mx-auto max-w-[1500px] px-4 sm:px-6 lg:px-8">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-50 mx-auto max-w-[1500px] px-4 sm:px-6 lg:px-8">
         <div className="pointer-events-auto flex items-center justify-between border-b border-white/20 py-6 backdrop-blur-md">
           <button type="button" className="flex items-center gap-3 text-left" onClick={onScrollToFlow}>
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-white/12 text-primary shadow-[0_18px_60px_rgba(22,12,35,0.12)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
@@ -230,8 +230,8 @@ export function LandingHero({
           </button>
 
           <div className="flex items-center gap-2">
-            <Button variant="outline" className="rounded-full border-white/25 bg-white/10 backdrop-blur-md" onClick={onOpenSource}>
-              View source
+            <Button variant="outline" size="icon" className="rounded-full border-white/25 bg-white/10 backdrop-blur-md" onClick={onOpenSource} title="View source">
+              <Github className="h-4 w-4" />
             </Button>
             <Button variant="outline" size="icon" className="rounded-full border-white/25 bg-white/10 backdrop-blur-md" onClick={toggleTheme}>
               {resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}

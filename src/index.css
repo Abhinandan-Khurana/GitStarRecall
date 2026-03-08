@@ -31,7 +31,7 @@ html {
   --secondary-foreground: 320 22% 18%;
   --muted: 30 36% 94%;
   --muted-foreground: 318 10% 42%;
-  --accent: 23 82% 67%;
+  --accent: 330 55% 58%;
   --accent-foreground: 0 0% 100%;
   --destructive: 0 72% 54%;
   --destructive-foreground: 0 0% 100%;
@@ -40,7 +40,7 @@ html {
   --ring: 332 42% 49%;
   --radius: 0.625rem;
   --chart-1: 332 42% 49%;
-  --chart-2: 23 82% 67%;
+  --chart-2: 330 55% 58%;
   --chart-3: 286 33% 58%;
   --chart-4: 45 92% 66%;
   --chart-5: 193 46% 48%;
@@ -64,16 +64,16 @@ html {
   --secondary-foreground: 18 38% 94%;
   --muted: 308 14% 15%;
   --muted-foreground: 18 12% 72%;
-  --accent: 25 88% 69%;
+  --accent: 330 50% 65%;
   --accent-foreground: 314 26% 8%;
   --destructive: 0 72% 58%;
   --destructive-foreground: 0 0% 100%;
   --border: 313 12% 24%;
   --input: 313 12% 24%;
   --ring: 332 62% 69%;
-  --app-bg: hsl(314 28% 7%);
-  --app-panel: hsl(314 22% 11%);
-  --app-panel-muted: hsl(313 18% 14%);
+  --app-bg: hsl(314 26% 8%);
+  --app-panel: hsl(314 22% 12%);
+  --app-panel-muted: hsl(313 18% 15%);
   --app-grid: rgba(255, 228, 238, 0.08);
 }
 
@@ -321,8 +321,8 @@ a {
 
 .glass-card {
   background: hsl(var(--card) / 0.7);
-  backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border: 1px solid hsl(var(--border) / 0.5);
 }
 
@@ -338,6 +338,7 @@ a {
   background: linear-gradient(135deg, hsl(var(--primary) / 0.3), hsl(var(--accent) / 0.3), transparent 60%);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask-composite: exclude;
   pointer-events: none;
   opacity: 0;
@@ -369,6 +370,7 @@ a {
 }
 .session-chat-bubble-assistant {
   background: hsl(var(--card) / 0.8);
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   color: hsl(var(--foreground));
   border: 1px solid hsl(var(--border) / 0.5);
@@ -431,24 +433,4 @@ a {
 }
 .session-chat-hint {
   color: hsl(var(--muted-foreground));
-}
-
-@layer base {
-  .dark {
-    --background: 216 28% 5%;
-    --foreground: 220 14% 91%;
-    --card: 220 26% 8%;
-    --card-foreground: 220 14% 91%;
-    --primary: 160 64% 51%;
-    --primary-foreground: 210 25% 6%;
-    --secondary: 215 25% 13%;
-    --muted: 215 25% 13%;
-    --muted-foreground: 220 14% 56%;
-    --accent: 187 85% 53%;
-    --accent-foreground: 210 25% 6%;
-    --destructive: 0 62.8% 50%;
-    --border: 220 13% 15%;
-    --input: 220 13% 15%;
-    --ring: 160 64% 51%;
-  }
 }
