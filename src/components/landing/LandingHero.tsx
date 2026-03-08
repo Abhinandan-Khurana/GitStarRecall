@@ -6,10 +6,10 @@ import { HeroSection } from "@/components/ui/hero-section-with-smooth-bg-shader"
 type LandingHeroProps = {
   onScrollToConnect: () => void;
   onScrollToFlow: () => void;
-  onOpenSource: () => void;
+  _onOpenSource: () => void;
   /** When true, navbar CTA is "Open app" and goes to /app; otherwise "Get started" scrolls to connect */
-  isAuthenticated: boolean;
-  onNavCtaClick: () => void;
+  _isAuthenticated: boolean;
+  _onNavCtaClick: () => void;
   reducedMotion: boolean;
   shaderColors: string[];
   heroOffsetY: number;
