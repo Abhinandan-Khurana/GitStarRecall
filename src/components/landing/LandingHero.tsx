@@ -1,7 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
-import { ArrowDown, ArrowRight, Github, Lock, Sparkles } from "lucide-react";
+import { ArrowDown, ArrowRight, Github, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ThemeToggleButton } from "@/components/ui/ThemeToggleButton";
 import { HeroSection } from "@/components/ui/hero-section-with-smooth-bg-shader";
 
 type LandingHeroProps = {
@@ -54,9 +53,9 @@ function HeroCard({
 export function LandingHero({
   onScrollToConnect,
   onScrollToFlow,
-  onOpenSource,
-  isAuthenticated,
-  onNavCtaClick,
+  _onOpenSource,
+  _isAuthenticated,
+  _onNavCtaClick,
   reducedMotion,
   shaderColors,
   heroOffsetY,
