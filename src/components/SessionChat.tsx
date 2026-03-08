@@ -172,13 +172,9 @@ function ModelSettingsPopover({
 }: Readonly<ModelSettingsPopoverProps>) {
   return (
     <div className="flex items-center gap-1">
-      <Button
-        type="button"
-        variant="ghost"
-        className="session-chat-addon-trigger h-8 cursor-default rounded-full px-2 text-xs font-medium hover:bg-transparent hover:text-foreground"
-      >
+      <span className="session-chat-addon-trigger inline-flex h-8 items-center rounded-full px-2 text-xs font-medium">
         {selectedProvider.label}
-      </Button>
+      </span>
 
       <Popover open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger asChild>
