@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
-import { ArrowDown, ArrowRight, Github, Lock } from "lucide-react";
+import { ArrowDown, ArrowRight, Github, Lock, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ThemeToggleButton } from "@/components/ui/ThemeToggleButton";
 import { HeroSection } from "@/components/ui/hero-section-with-smooth-bg-shader";
 
 type LandingHeroProps = {
@@ -73,24 +74,48 @@ export function LandingHero({
   return (
     <section className="relative min-h-screen overflow-hidden">
       {/* Navbar */}
-      <nav className="fixed inset-x-0 top-0 z-50 flex items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-        <div className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/12 text-primary font-semibold">
-            G
+      <nav className="fixed inset-x-0 top-0 z-50 px-4 pt-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[1500px] border-b border-white/12 pb-5">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0 flex items-center gap-3 sm:gap-4">
+              <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-[18px] border border-white/14 bg-white/[0.07] text-primary shadow-[0_10px_30px_rgba(20,8,26,0.22)] backdrop-blur-xl dark:bg-white/[0.04]">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-lg font-semibold tracking-[-0.02em] text-foreground sm:text-[1.75rem] sm:leading-none">
+                  GitStarRecall
+                </p>
+                <p className="mt-1 hidden truncate text-sm font-medium text-foreground/62 sm:block">
+                  Local memory for GitHub stars
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-shrink-0 items-center gap-2 sm:gap-3">
+              <Button
+                size="sm"
+                className="h-10 rounded-full border border-white/14 bg-white/[0.08] px-4 text-sm font-semibold text-foreground shadow-[0_14px_40px_rgba(20,8,26,0.18)] backdrop-blur-xl hover:bg-white/[0.14] dark:bg-white/[0.06] dark:hover:bg-white/[0.1]"
+                onClick={onNavCtaClick}
+              >
+                {isAuthenticated ? "Open app" : "Get started"}
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 rounded-full border-white/20 bg-white/[0.06] text-foreground shadow-[0_12px_32px_rgba(20,8,26,0.16)] backdrop-blur-xl hover:bg-white/[0.12] hover:text-foreground dark:border-white/12 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
+                onClick={onOpenSource}
+                aria-label="Open GitHub repository"
+              >
+                <Github className="h-4 w-4" />
+              </Button>
+
+              <ThemeToggleButton className="h-10 w-10 rounded-full border-white/20 bg-white/[0.06] shadow-[0_12px_32px_rgba(20,8,26,0.16)] hover:bg-white/[0.12] dark:border-white/12 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]" />
+            </div>
           </div>
-          <p className="hidden text-sm font-semibold text-foreground sm:block">GitStarRecall</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" className="text-sm text-foreground/75 hover:text-foreground" onClick={onOpenSource}>
-            GitHub
-          </Button>
-          <Button size="sm" className="rounded-full px-4" onClick={onNavCtaClick}>
-            {isAuthenticated ? "Open app" : "Get started"}
-          </Button>
         </div>
       </nav>
-      
-      <section className="relative min-h-screen overflow-hidden">
       <HeroSection reducedMotion={reducedMotion} colors={shaderColors} className="min-h-screen items-start justify-start" maxWidth="max-w-[1500px]" renderContent={false}>
         <div className="relative z-20 mx-auto flex min-h-screen w-full flex-col justify-center pb-12 pt-24 sm:pt-28 lg:pt-32">
           <div className="hidden xl:block">
