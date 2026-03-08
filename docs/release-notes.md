@@ -1,5 +1,15 @@
 # Release Notes
 
+## 2026-03-08 (GitHub Auth 401 Fix and Token Normalization)
+
+- Hardened GitHub auth token handling for both OAuth tokens and pasted PATs:
+  - shared token normalization now strips accidental `Bearer ` / `token ` prefixes, surrounding quotes, and extra whitespace before the token is stored or reused,
+  - reduces avoidable authorization failures when users paste tokens copied from shells, headers, or quoted env values.
+- Standardized GitHub API authorization behavior around normalized raw tokens and `Bearer` request headers so login/import flows consistently send the expected credential format.
+- Improved the GitHub 401 error guidance shown to users:
+  - the message now focuses on invalid, expired, revoked, or incorrectly pasted tokens,
+  - removes the misleading implication that extra GitHub scopes are the main fix for starred-repo access failures.
+
 ## 2026-03-08 (Landing Hero Polish, Navbar Restore, and Motion Follow-ups)
 
 - Refined the landing hero after the initial parallax redesign with a more structured composition across desktop, tablet, and mobile breakpoints:
