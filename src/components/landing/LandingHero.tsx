@@ -53,12 +53,9 @@ function HeroCard({
 export function LandingHero({
   onScrollToConnect,
   onScrollToFlow,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  onOpenSource,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  isAuthenticated,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  onNavCtaClick,
+  onOpenSource: _onOpenSource,
+  isAuthenticated: _isAuthenticated,
+  onNavCtaClick: _onNavCtaClick,
   reducedMotion,
   shaderColors,
   heroOffsetY,
