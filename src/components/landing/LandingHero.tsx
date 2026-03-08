@@ -6,10 +6,10 @@ import { HeroSection } from "@/components/ui/hero-section-with-smooth-bg-shader"
 type LandingHeroProps = {
   onScrollToConnect: () => void;
   onScrollToFlow: () => void;
-  _onOpenSource: () => void;
+  onOpenSource: () => void;
   /** When true, navbar CTA is "Open app" and goes to /app; otherwise "Get started" scrolls to connect */
-  _isAuthenticated: boolean;
-  _onNavCtaClick: () => void;
+  isAuthenticated: boolean;
+  onNavCtaClick: () => void;
   reducedMotion: boolean;
   shaderColors: string[];
   heroOffsetY: number;
@@ -53,9 +53,12 @@ function HeroCard({
 export function LandingHero({
   onScrollToConnect,
   onScrollToFlow,
-  _onOpenSource,
-  _isAuthenticated,
-  _onNavCtaClick,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onOpenSource,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  isAuthenticated,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onNavCtaClick,
   reducedMotion,
   shaderColors,
   heroOffsetY,
