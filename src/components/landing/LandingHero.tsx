@@ -230,10 +230,10 @@ export function LandingHero({
           </button>
 
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" className="rounded-full border-white/25 bg-white/10 backdrop-blur-md" onClick={onOpenSource} title="View source">
+            <Button variant="outline" size="icon" className="rounded-full border-white/25 bg-white/10 backdrop-blur-md" onClick={onOpenSource} aria-label="View source">
               <Github className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="icon" className="rounded-full border-white/25 bg-white/10 backdrop-blur-md" onClick={toggleTheme}>
+            <Button variant="outline" size="icon" className="rounded-full border-white/25 bg-white/10 backdrop-blur-md" onClick={toggleTheme} aria-label="Toggle theme">
               {resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
           </div>
