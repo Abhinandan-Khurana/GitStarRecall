@@ -54,10 +54,13 @@ const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_README_CONCURRENCY = 6;
 
 function normalizeGitHubToken(rawToken: string): string {
-  let token = rawToken.trim();
-  token = token.replace(/^bearer\s+/i, "");
-  token = token.replace(/^token\s+/i, "");
-  token = token.replace(/^['"]+|['"]+$/g, "").trim();
+  let token = String(rawToken)
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^bearer\s+/i, "")
+    .replace(/^token\s+/i, "")
+    .replace(/^["']+|["']+$/g, "")
+    .trim();
   return token;
 }
 
@@ -262,7 +265,7 @@ async function requestWithBackoff(args: {
 
     if (response.status === 401) {
       throw new Error(
-        "GitHub authorization failed (401). Use raw token only (no 'Bearer ' prefix) and ensure scopes allow /user/starred.",
+        "GitHub authorization failed (401). Check: token is a raw PAT or OAuth token (no 'Bearer ' prefix when pasting); scopes include read:user (and repo for starred repos); token is not expired or revoked (see github.com/settings/tokens).",
       );
     }
 

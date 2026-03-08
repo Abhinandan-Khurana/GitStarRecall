@@ -16,11 +16,13 @@ import { setLocalDatabaseScope } from "@/db/client";
 import { clearSettings } from "@/lib/settings";
 
 function normalizeTokenInput(raw: string): string {
-  let token = raw.trim();
-  token = token.replace(/^bearer\s+/i, "");
-  token = token.replace(/^token\s+/i, "");
-  token = token.replace(/^['"]+|['"]+$/g, "").trim();
-  return token;
+  return String(raw)
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^bearer\s+/i, "")
+    .replace(/^token\s+/i, "")
+    .replace(/^["']+|["']+$/g, "")
+    .trim();
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
