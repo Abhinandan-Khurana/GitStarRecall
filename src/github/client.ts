@@ -265,7 +265,7 @@ async function requestWithBackoff(args: {
 
     if (response.status === 401) {
       throw new Error(
-        "GitHub authorization failed (401). Check: token is a raw PAT or OAuth token (no 'Bearer ' prefix when pasting); scopes include read:user (and repo for starred repos); token is not expired or revoked (see github.com/settings/tokens).",
+        "GitHub authorization failed (401). Check: token is a raw PAT or OAuth token (no 'Bearer ' prefix when pasting); scope read:user is sufficient for /user/starred; token is not expired or revoked (see github.com/settings/tokens).",
       );
     }
 
