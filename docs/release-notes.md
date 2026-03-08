@@ -1,5 +1,25 @@
 # Release Notes
 
+## 2026-03-08 (Landing Hero Polish, Navbar Restore, and Motion Follow-ups)
+
+- Refined the landing hero after the initial parallax redesign with a more structured composition across desktop, tablet, and mobile breakpoints:
+  - desktop restores a more editorial hero layout with floating support cards around the main value proposition,
+  - tablet/mobile keep the same proof points in a denser stacked/grid composition instead of hiding them behind large-screen-only placement.
+- Restored the upgraded landing navbar from the UI revamp branch:
+  - the hero now uses the branded top bar with source access, theme toggle, and primary CTA,
+  - the navbar remains visually integrated with the shader-backed hero instead of falling back to the earlier simpler inline header.
+- Added and tuned richer hero motion:
+  - staggered entrance animations for headline, supporting copy, proof cards, and CTA row,
+  - cloud-like floating card motion and hover lift for the hero proof blocks.
+- Fixed landing hero motion regressions discovered during review:
+  - delayed entrance animations now use fill behavior that applies the hidden start state during the delay window, avoiding a visible flash before the fade/slide begins,
+  - continuous float motion now runs on a separate wrapper layer from entrance motion, so cards continue drifting after they enter instead of freezing,
+  - background/supporting hero cards keep their intended reduced-opacity hierarchy after the entrance animation completes.
+- Added small UX/accessibility/stability follow-ups around the landing refresh:
+  - improved responsiveness and spacing for the hero and workflow sections,
+  - added missing `aria-label` coverage for landing hero button actions,
+  - cleaned up hero component structure/types and fixed the JSX regression introduced during the refactor.
+
 ## 2026-03-08 (Dead Code Cleanup and Dependency Prune)
 
 - Removed unused code paths that had no live in-repo reachability from the current app entrypoints:
