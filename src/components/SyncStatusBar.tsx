@@ -2,21 +2,7 @@ import { ChevronDown, ChevronUp, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { deriveSyncProgressState } from "./syncProgress";
-
-interface IndexingStatus {
-  phase: string;
-  startedAt: number;
-  repoTotal: number;
-  readmesTarget: number;
-  readmesCompleted: number;
-  readmesMissing: number;
-  readmesFailed: number;
-  chunkTotal: number;
-  embeddingsCreated: number;
-  embeddingTarget: number;
-  duplicateEmbeddingHits: number;
-  elapsedSeconds?: number;
-}
+import type { IndexingStatus } from "../sync/status";
 
 interface EmbeddingRunMetrics {
   backendIdentity: string;
@@ -72,34 +58,40 @@ export function SyncStatusBar({
     embeddingTarget,
     embeddingsCreated,
     embeddingProgress,
+    embeddingRemaining,
     readmeProgress,
+    chunkingProgress,
+    chunkingRemaining,
     hasReadmeProgress,
+    hasChunkingProgress,
     hasEmbeddingProgress,
     embeddingInitializing,
   } = deriveSyncProgressState(indexingStatus, embeddingRunMetrics);
+  const embeddingGenerating =
+    indexingStatus?.primaryStage === "embedding" || indexingStatus?.primaryStage === "embedding-init";
 
   return (
     <div className="animate-fade-in space-y-2">
       {indexingStatus && (
         <div className="rounded-lg border border-border/50 bg-secondary/30 p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               <Activity className="h-3.5 w-3.5 text-accent" />
-              <span className="text-xs font-medium text-foreground">
+              <span className="truncate text-xs font-medium text-foreground">
                 {indexingStatus.phase}
               </span>
             </div>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="shrink-0 text-[11px] text-muted-foreground">
               {indexingStatus.repoTotal} repos
               {indexingStatus.elapsedSeconds != null && ` / ${indexingStatus.elapsedSeconds}s`}
             </span>
           </div>
 
-          {(hasReadmeProgress || hasEmbeddingProgress || embeddingInitializing) && (
+          {(hasReadmeProgress || hasChunkingProgress || hasEmbeddingProgress || embeddingInitializing) && (
             <div className="space-y-2">
               {hasReadmeProgress && (
                 <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] text-muted-foreground">
+                  <div className="flex flex-wrap justify-between gap-2 text-[11px] text-muted-foreground">
                     <span>
                       READMEs: {indexingStatus.readmesCompleted} / {indexingStatus.readmesTarget}
                     </span>
@@ -107,16 +99,52 @@ export function SyncStatusBar({
                   <Progress value={readmeProgress} />
                 </div>
               )}
-              {(hasEmbeddingProgress || embeddingInitializing) && (
+              {hasChunkingProgress && (
                 <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] text-muted-foreground">
-                    <span>
-                      {hasEmbeddingProgress
-                        ? `Embeddings: ${Math.min(embeddingsCreated, embeddingTarget)} / ${embeddingTarget}`
-                        : "Embeddings: initializing…"}
+                  <div className="flex flex-wrap justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span className="min-w-0">
+                      Chunking repositories: {indexingStatus.chunkingCompleted} / {indexingStatus.chunkingTarget}
+                    </span>
+                    <span className="shrink-0">
+                      {indexingStatus.embeddingActive
+                        ? `${chunkingRemaining} still pending`
+                        : `${chunkingRemaining} remaining before embeddings`}
                     </span>
                   </div>
-                  <Progress value={embeddingProgress} indeterminate={embeddingInitializing} />
+                  <Progress value={chunkingProgress} />
+                </div>
+              )}
+              {(hasEmbeddingProgress || embeddingInitializing) && (
+                <div className="space-y-1">
+                  <div className="flex flex-wrap justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span>
+                      {embeddingGenerating
+                        ? "Embedding in progress"
+                        : hasEmbeddingProgress
+                          ? indexingStatus.embeddingWindowed
+                            ? `Embeddings: ${Math.min(embeddingsCreated, embeddingTarget)} processed`
+                            : `Embeddings: ${Math.min(embeddingsCreated, embeddingTarget)} / ${embeddingTarget}`
+                          : "Embeddings: initializing…"}
+                    </span>
+                    {!embeddingGenerating && hasEmbeddingProgress && (
+                      <span className="shrink-0">
+                        {indexingStatus.embeddingWindowed
+                          ? `${embeddingRemaining} queued overall`
+                          : `${embeddingRemaining} remaining`}
+                      </span>
+                    )}
+                  </div>
+                  <Progress
+                    value={embeddingProgress}
+                    indeterminate={embeddingGenerating || embeddingInitializing}
+                  />
+                  {embeddingGenerating && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Large indexes can take longer. Rough guide: about 30s for 300 chunks, around 2m for 200
+                      repos, and roughly 5-60m for large starred libraries depending on the embedding model and
+                      machine.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

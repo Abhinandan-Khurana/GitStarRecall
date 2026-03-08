@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Syne:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
 
 html {
   scroll-behavior: smooth;
@@ -15,44 +15,66 @@ html {
 @tailwind utilities;
 
 :root {
-  --color-ink: #0b0f14;
-  --color-mist: #e5e7eb;
-  --color-mint: #34d399;
-  --color-cyan: #22d3ee;
-  --color-surface: #111827;
-  --color-surface-elevated: #1f2937;
-  --font-display: "Syne", ui-sans-serif, system-ui;
-  --font-body: "DM Sans", ui-sans-serif, system-ui;
+  --font-display: "Archivo", ui-sans-serif, system-ui;
+  --font-body: "IBM Plex Sans", ui-sans-serif, system-ui;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  /* shadcn/theme (HSL values without hsl() for Tailwind) */
-  --background: 216 28% 5%;
-  --foreground: 220 14% 91%;
-  --card: 220 26% 8%;
-  --card-foreground: 220 14% 91%;
-  --popover: 220 26% 8%;
-  --popover-foreground: 220 14% 91%;
-  --primary: 160 64% 51%;
-  --primary-foreground: 210 25% 6%;
-  --secondary: 215 25% 13%;
-  --secondary-foreground: 220 14% 91%;
-  --muted: 215 25% 13%;
-  --muted-foreground: 220 14% 56%;
-  --accent: 187 85% 53%;
-  --accent-foreground: 210 25% 6%;
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 220 13% 15%;
-  --input: 220 13% 15%;
-  --ring: 160 64% 51%;
+  --background: 20 62% 97%;
+  --foreground: 320 22% 16%;
+  --card: 0 0% 100%;
+  --card-foreground: 320 22% 16%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 320 22% 16%;
+  --primary: 332 42% 49%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 26 40% 92%;
+  --secondary-foreground: 320 22% 18%;
+  --muted: 30 36% 94%;
+  --muted-foreground: 318 10% 42%;
+  --accent: 330 55% 58%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72% 54%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 18 35% 85%;
+  --input: 18 35% 85%;
+  --ring: 332 42% 49%;
   --radius: 0.625rem;
-  --chart-1: 160 64% 51%;
-  --chart-2: 187 85% 53%;
-  --chart-3: 220 70% 50%;
-  --chart-4: 30 80% 55%;
-  --chart-5: 340 75% 55%;
+  --chart-1: 332 42% 49%;
+  --chart-2: 330 55% 58%;
+  --chart-3: 286 33% 58%;
+  --chart-4: 45 92% 66%;
+  --chart-5: 193 46% 48%;
 
-  color: var(--color-mist);
-  background: var(--color-ink);
+  --app-bg: hsl(20 62% 97%);
+  --app-panel: hsl(0 0% 100%);
+  --app-panel-muted: hsl(16 42% 95%);
+  --app-grid: rgba(134, 96, 120, 0.08);
+}
+
+.dark {
+  --background: 314 26% 8%;
+  --foreground: 18 38% 94%;
+  --card: 314 24% 11%;
+  --card-foreground: 18 38% 94%;
+  --popover: 314 24% 11%;
+  --popover-foreground: 18 38% 94%;
+  --primary: 332 62% 69%;
+  --primary-foreground: 314 26% 8%;
+  --secondary: 308 16% 18%;
+  --secondary-foreground: 18 38% 94%;
+  --muted: 308 14% 15%;
+  --muted-foreground: 18 12% 72%;
+  --accent: 330 50% 65%;
+  --accent-foreground: 314 26% 8%;
+  --destructive: 0 72% 58%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 313 12% 24%;
+  --input: 313 12% 24%;
+  --ring: 332 62% 69%;
+  --app-bg: hsl(314 26% 8%);
+  --app-panel: hsl(314 22% 12%);
+  --app-panel-muted: hsl(313 18% 15%);
+  --app-grid: rgba(255, 228, 238, 0.08);
 }
 
 * {
@@ -63,12 +85,14 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--font-body);
-  background: var(--color-ink);
+  color: hsl(var(--foreground));
+  background-color: var(--app-bg);
   background-image:
-    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(15, 23, 42, 0.9) 0%, transparent 70%),
-    radial-gradient(circle at 20% 80%, rgba(52, 211, 153, 0.03) 0%, transparent 40%),
-    radial-gradient(circle at 80% 20%, rgba(34, 211, 238, 0.02) 0%, transparent 40%);
-  background-attachment: fixed;
+    linear-gradient(var(--app-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--app-grid) 1px, transparent 1px),
+    radial-gradient(circle at top left, rgba(230, 147, 178, 0.12), transparent 32%);
+  background-size: 24px 24px, 24px 24px, auto;
+  background-position: 0 0, 0 0, 0 0;
 }
 
 a {
@@ -156,9 +180,106 @@ a {
   100% { transform: translateX(200%); }
 }
 
+/* Cloud-like floating animation with motion drift */
+@keyframes float-cloud-a {
+  0% { transform: translateY(0px) translateX(0px); }
+  25% { transform: translateY(-8px) translateX(2px); }
+  50% { transform: translateY(-12px) translateX(-3px); }
+  75% { transform: translateY(-6px) translateX(1px); }
+  100% { transform: translateY(0px) translateX(0px); }
+}
+
+@keyframes float-cloud-b {
+  0% { transform: translateY(0px) translateX(0px); }
+  25% { transform: translateY(-10px) translateX(-2px); }
+  50% { transform: translateY(-14px) translateX(3px); }
+  75% { transform: translateY(-7px) translateX(-1px); }
+  100% { transform: translateY(0px) translateX(0px); }
+}
+
+@keyframes float-cloud-c {
+  0% { transform: translateY(0px) translateX(0px); }
+  25% { transform: translateY(-6px) translateX(3px); }
+  50% { transform: translateY(-10px) translateX(-2px); }
+  75% { transform: translateY(-5px) translateX(2px); }
+  100% { transform: translateY(0px) translateX(0px); }
+}
+
 @keyframes float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-6px); }
+}
+
+/* Smooth entrance animations for hero section */
+@keyframes headline-entrance {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes supporting-entrance {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float-entrance {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes buttons-entrance {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Hero cards: cloud-like float after entrance, each with unique drift pattern */
+.animate-float-card-a {
+  animation: float-cloud-a 4.5s ease-in-out 0.6s infinite;
+}
+.animate-float-card-b {
+  animation: float-cloud-b 5s ease-in-out 0.8s infinite;
+}
+.animate-float-card-c {
+  animation: float-cloud-c 4.8s ease-in-out 0.5s infinite;
+}
+
+.animate-headline-entrance {
+  animation: headline-entrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-supporting-entrance {
+  animation: supporting-entrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-float-entrance {
+  animation: float-entrance 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-buttons-entrance {
+  animation: buttons-entrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .animate-fade-in-up {
@@ -242,6 +363,13 @@ a {
   .animate-slide-in-right,
   .animate-scale-in,
   .animate-float,
+  .animate-float-card-a,
+  .animate-float-card-b,
+  .animate-float-card-c,
+  .animate-headline-entrance,
+  .animate-supporting-entrance,
+  .animate-float-entrance,
+  .animate-buttons-entrance,
   .stagger-children > *,
   .text-gradient-animated {
     animation: none !important;
@@ -297,8 +425,8 @@ a {
 
 .glass-card {
   background: hsl(var(--card) / 0.7);
-  backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border: 1px solid hsl(var(--border) / 0.5);
 }
 
@@ -314,6 +442,7 @@ a {
   background: linear-gradient(135deg, hsl(var(--primary) / 0.3), hsl(var(--accent) / 0.3), transparent 60%);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask-composite: exclude;
   pointer-events: none;
   opacity: 0;
@@ -345,6 +474,7 @@ a {
 }
 .session-chat-bubble-assistant {
   background: hsl(var(--card) / 0.8);
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   color: hsl(var(--foreground));
   border: 1px solid hsl(var(--border) / 0.5);
@@ -407,24 +537,4 @@ a {
 }
 .session-chat-hint {
   color: hsl(var(--muted-foreground));
-}
-
-@layer base {
-  .dark {
-    --background: 216 28% 5%;
-    --foreground: 220 14% 91%;
-    --card: 220 26% 8%;
-    --card-foreground: 220 14% 91%;
-    --primary: 160 64% 51%;
-    --primary-foreground: 210 25% 6%;
-    --secondary: 215 25% 13%;
-    --muted: 215 25% 13%;
-    --muted-foreground: 220 14% 56%;
-    --accent: 187 85% 53%;
-    --accent-foreground: 210 25% 6%;
-    --destructive: 0 62.8% 50%;
-    --border: 220 13% 15%;
-    --input: 220 13% 15%;
-    --ring: 160 64% 51%;
-  }
 }

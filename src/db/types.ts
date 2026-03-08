@@ -69,6 +69,28 @@ export type ChatMessageRecord = {
   createdAt: number;
 };
 
+export type RepoTagRecord = {
+  id: string;
+  name: string;
+  color: string | null;
+  createdAt: number;
+};
+
+export type RepoTagAssignmentRecord = {
+  repoId: number;
+  tagId: string;
+  createdAt: number;
+};
+
+export type SessionContextItemRecord = {
+  id: string;
+  sessionId: string;
+  repoId: number | null;
+  chunkId: string | null;
+  position: number;
+  createdAt: number;
+};
+
 export type StorageMode = "opfs" | "local-storage" | "memory";
 
 export type SearchResult = {

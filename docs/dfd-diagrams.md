@@ -16,8 +16,9 @@ Trust boundaries:
 ```mermaid
 flowchart LR
   subgraph TB1["TB1: User Device (Browser)"]
-    UI[UI: Landing + Usage]
+    UI[UI: Landing + App Shell]
     Auth[OAuth/PAT Handler]
+    Shell["Workspace Router + Command Palette"]
     Sync[Stars Sync Engine]
     Orchestrator[Embedding Orchestrator]
     Pool[Embedding Worker Pool]
@@ -52,6 +53,7 @@ flowchart LR
   end
 
   UI --> Auth
+  UI --> Shell
   Auth -->|Token| Sync
   Sync -->|Stars/README| GH
   Sync -->|Repo/README| DB
@@ -85,10 +87,10 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  User[User] --> UI2[UI: Search, Sessions, Settings]
+  User[User] --> UI2[UI: Setup, Recall, Library, Sessions, Settings]
 
   UI2 --> Auth2[OAuth/PAT]
-  Auth2 --> Token[Token in memory or encrypted store]
+  Auth2 --> Token[Token in memory plus auth-scoped local persistence keys]
 
   UI2 --> Sync2[Sync Manager]
   UI2 --> CapUI["Embedding Capability UI (diagnostics)"]

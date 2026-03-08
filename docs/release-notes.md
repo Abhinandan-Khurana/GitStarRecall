@@ -1,5 +1,119 @@
 # Release Notes
 
+## 2026-03-08 (GitHub Auth 401 Fix and Token Normalization)
+
+- Hardened GitHub auth token handling for both OAuth tokens and pasted PATs:
+  - shared token normalization now strips accidental `Bearer ` / `token ` prefixes, surrounding quotes, and extra whitespace before the token is stored or reused,
+  - reduces avoidable authorization failures when users paste tokens copied from shells, headers, or quoted env values.
+- Standardized GitHub API authorization behavior around normalized raw tokens and `Bearer` request headers so login/import flows consistently send the expected credential format.
+- Improved the GitHub 401 error guidance shown to users:
+  - the message now focuses on invalid, expired, revoked, or incorrectly pasted tokens,
+  - removes the misleading implication that extra GitHub scopes are the main fix for starred-repo access failures.
+
+## 2026-03-08 (Landing Hero Polish, Navbar Restore, and Motion Follow-ups)
+
+- Refined the landing hero after the initial parallax redesign with a more structured composition across desktop, tablet, and mobile breakpoints:
+  - desktop restores a more editorial hero layout with floating support cards around the main value proposition,
+  - tablet/mobile keep the same proof points in a denser stacked/grid composition instead of hiding them behind large-screen-only placement.
+- Restored the upgraded landing navbar from the UI revamp branch:
+  - the hero now uses the branded top bar with source access, theme toggle, and primary CTA,
+  - the navbar remains visually integrated with the shader-backed hero instead of falling back to the earlier simpler inline header.
+- Added and tuned richer hero motion:
+  - staggered entrance animations for headline, supporting copy, proof cards, and CTA row,
+  - cloud-like floating card motion and hover lift for the hero proof blocks.
+- Fixed landing hero motion regressions discovered during review:
+  - delayed entrance animations now use fill behavior that applies the hidden start state during the delay window, avoiding a visible flash before the fade/slide begins,
+  - continuous float motion now runs on a separate wrapper layer from entrance motion, so cards continue drifting after they enter instead of freezing,
+  - background/supporting hero cards keep their intended reduced-opacity hierarchy after the entrance animation completes.
+- Added small UX/accessibility/stability follow-ups around the landing refresh:
+  - improved responsiveness and spacing for the hero and workflow sections,
+  - added missing `aria-label` coverage for landing hero button actions,
+  - cleaned up hero component structure/types and fixed the JSX regression introduced during the refactor.
+
+## 2026-03-08 (Dead Code Cleanup and Dependency Prune)
+
+- Removed unused code paths that had no live in-repo reachability from the current app entrypoints:
+  - orphaned shadcn UI wrappers for avatar, breadcrumb, dropdown menu, skeleton, tabs, toggle, and toggle group,
+  - unused `AppStateRedirect` route helper that was no longer wired into routing,
+  - legacy `NativeEmbeddingClient` path and its isolated test, after Ollama/browser embedding paths became the only supported runtime backends.
+- Pruned now-unused package dependencies introduced only for those deleted UI wrappers:
+  - `@radix-ui/react-dropdown-menu`
+  - `@radix-ui/react-tabs`
+  - `@radix-ui/react-toggle`
+  - `@radix-ui/react-toggle-group`
+- Re-ran repository-wide reachability checks from `src/main.tsx`, then verified the cleaned tree with lint, tests, and production build.
+
+## 2026-03-08 (Landing Page Parallax Redesign and Public Auth Flow Refresh)
+
+- Rebuilt the public landing page into a parallax-first product narrative instead of a static two-column auth-first layout.
+- Added a shader-backed hero with layered motion and a lower auth entry point:
+  - `Get started` now scrolls to the lower `Connect your stars` section,
+  - `See the workspace flow` jumps to the product journey block,
+  - the landing page now keeps the main product promise and workflow explanation above the auth form.
+- Replaced the static `What you get after login` cards with an animated interactive walkthrough of:
+  - Home,
+  - Recall,
+  - Library,
+  - Sessions,
+  - Settings.
+- Added explicit trust copy on the landing/auth surface:
+  - GitHub OAuth is presented as a read-only path for reading public repositories,
+  - PAT is documented with the same read-only public repository intent.
+- Repositioned the auth experience so `Connect your stars` feels like the landing conclusion instead of competing with the hero.
+- Installed `@paper-design/shaders-react` for the landing shader background.
+- Attempted the requested shadcn Marshmallow theme install via:
+  - `pnpm dlx shadcn@latest add @ss-themes/marshmallow`
+- The remote registry required auth, so the shipped fallback uses a local Marshmallow-style token layer in `src/index.css` instead of the remote theme payload.
+
+## 2026-03-08 (Workspace Shell, Route Split, and Auth-Scoped Local State)
+
+- Reworked the authenticated app from a single overloaded `/app` page into a route-based workspace:
+  - `/app` is now a dedicated workspace home/launch surface,
+  - `/app/setup` for first-run indexing,
+  - `/app/recall` for search and chat,
+  - `/app/library` for repo browsing,
+  - `/app/sessions` for transcript/history review,
+  - `/app/settings` for sync, providers, privacy, and local data.
+- Added a persistent app shell with:
+  - workspace health summary,
+  - nav rail,
+  - keyboard shortcuts,
+  - command palette (`Cmd/Ctrl+K`),
+  - quick route switching (`G` then `R` / `L` / `S`).
+- Rebuilt the landing and auth callback flow to match the productized workspace:
+  - PAT fallback stays visible on the landing page,
+  - callback page now shows staged auth progress before redirecting into the app shell.
+- Added standalone `Library` and `Sessions` views so repo browsing and transcript review no longer compete with the main Recall surface.
+- Split setup/settings concerns out of the main Recall canvas:
+  - setup now guides import -> README fetch -> embedding generation,
+  - settings owns embedding runtime, provider defaults, developer retrieval tuning, privacy, and local data controls.
+- Extracted shared provider configuration UI into `ProviderSettingsForm` so chat/settings configuration paths stay aligned.
+- Hardened local-state isolation across identities:
+  - local SQLite/OPFS/localStorage database names are scoped by auth token hash,
+  - auth-scoped helpers now isolate chat/session continuity and embedding preference keys,
+  - added scope regression tests for auth helpers and DB naming.
+- Expanded local schema support for future workspace features:
+  - added `repo_tags`,
+  - added `repo_tag_assignments`,
+  - added `session_context_items`.
+
+## 2026-03-08 (Sync Status Semantics and Embedding Progress Simplification)
+
+- Replaced phase-string-driven sync progress inference with explicit runtime status fields.
+- Fixed first-sync copy so initial indexing no longer says `changed repositories`:
+  - first sync now uses labels like `Fetching READMEs for starred repositories` and `Chunking repositories`,
+  - incremental sync uses `new or updated` / `updated repositories` wording only when local state already exists.
+- Fixed chunking progress publication so chunking counts advance as chunk upserts complete, not after a later embedding window returns.
+- Kept staged overlap behavior, but changed the status bar to reflect live work correctly:
+  - once embeddings start, embedding becomes the primary active stage,
+  - unfinished chunking remains visible as secondary work instead of hijacking the main label.
+- Added explicit handling for windowed incremental embedding runs so the UI no longer treats the window cap as the total backlog.
+- Simplified active embedding UX after multiple follow-ups:
+  - active embedding generation now shows an indeterminate `Embedding in progress` loader,
+  - removed moving ETA/progress math from the embedding row,
+  - added a concise timing note for large libraries instead of unstable batch-based countdowns.
+- Added focused regression coverage for sync-stage derivation, first-sync labeling, overlap handling, and sync-status rendering.
+
 ## 2026-03-05 (Usage Settings UI Follow-up Fixes)
 
 - Completed the developer retrieval-tuning panel so all persisted knobs are editable in UI:
@@ -263,7 +377,6 @@
   - automatic fallback to browser path on batch failure
 - Added explicit user consent toggle for local embeddings in UI.
 - Added new tests:
-  - `src/embeddings/nativeClient.test.ts`
   - `src/db/client.embedding-queue.test.ts`
 
 ## 2026-02-23 (Chat History Isolation + Restore Race Fix)

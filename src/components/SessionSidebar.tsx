@@ -7,6 +7,7 @@ interface Session {
   title: string;
   results: unknown[];
   updatedAt: number;
+  query?: string;
 }
 
 interface SessionSidebarProps {
@@ -22,6 +23,20 @@ export function SessionSidebar({
   onSelectSession,
   onClearActive,
 }: SessionSidebarProps) {
+  const formatRelativeTime = (timestamp: number) => {
+    const deltaMs = Date.now() - timestamp;
+    const deltaMinutes = Math.max(1, Math.round(deltaMs / (1000 * 60)));
+    if (deltaMinutes < 60) {
+      return `${deltaMinutes}m ago`;
+    }
+    const deltaHours = Math.round(deltaMinutes / 60);
+    if (deltaHours < 24) {
+      return `${deltaHours}h ago`;
+    }
+    const deltaDays = Math.round(deltaHours / 24);
+    return `${deltaDays}d ago`;
+  };
+
   return (
     <aside
       className="flex w-full shrink-0 flex-col rounded-xl border border-border/50 bg-card/50 md:w-56"
@@ -75,12 +90,16 @@ export function SessionSidebar({
                     {isActive && (
                       <div className="h-4 w-0.5 shrink-0 rounded-full bg-primary" />
                     )}
-                    <span className="min-w-0 flex-1 truncate font-medium">
-                      {session.title}
-                    </span>
-                    <span className="shrink-0 text-[10px] text-muted-foreground">
-                      {session.results.length}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate font-medium">{session.title}</span>
+                        <span className="shrink-0 text-[10px] text-muted-foreground">{session.results.length}</span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                        <span className="min-w-0 truncate">{session.query?.trim() || "No prompt saved"}</span>
+                        <span className="shrink-0">{formatRelativeTime(session.updatedAt)}</span>
+                      </div>
+                    </div>
                   </button>
                 </li>
               );

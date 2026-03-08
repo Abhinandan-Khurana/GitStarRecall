@@ -106,31 +106,48 @@ Routing:
 
 ## 7) Authentication in App
 
+The public landing page now uses a parallax-first narrative flow:
+
+- `Get started` scrolls to the lower `Connect your stars` block.
+- `See the workspace flow` jumps to the landing workflow section.
+- The landing copy explicitly calls out the read-only access model for both OAuth and PAT.
+
 ## 7.1 OAuth (recommended)
 
-- Click GitHub login and complete OAuth flow.
+- Click `Get started` or continue directly from the lower OAuth card and complete the GitHub OAuth flow.
+- OAuth should be treated as a read-only access path for reading your public repositories.
 - Token is held in memory; not persisted as raw token storage.
 
 ## 7.2 PAT fallback
 
 - Paste raw token (without `Bearer ` prefix).
-- Ensure PAT scopes can read `/user/starred` and required repos.
+- Use a read-only repository token so GitStarRecall can read your public repositories.
+- Ensure PAT scopes can read `/user/starred` and the repositories you want indexed.
 
 ## 8) Daily Usage Flow
 
 1. Login via OAuth or PAT.
-2. Click `Fetch Stars` to sync/update stars and embeddings.
-3. Use search box to query existing local embeddings.
-4. Open or continue chat session.
-5. Ask follow-up questions with filters as needed.
+2. Open `/app` and let the workspace route you:
+   - `Setup` when repos/embeddings are missing
+   - `Recall` when the local index is ready
+3. In `Setup`, click `Fetch Stars` to sync/update stars and embeddings.
+4. In `Recall`, search existing local embeddings and continue the active session.
+5. Use `Library` to browse indexed repos and `Sessions` to inspect or resume prior threads.
+6. Use `Settings` for sync controls, embedding/runtime configuration, provider defaults, privacy, and local-data actions.
 
 Important:
 
 - Search does not auto-refresh stars.
 - Fetching latest stars is user-driven via `Fetch Stars`.
+- Keyboard navigation is built in:
+  - `Cmd/Ctrl+K` opens the command palette
+  - `Cmd/Ctrl+,` opens `Settings`
+  - `G` then `R`, `L`, or `S` jumps to `Recall`, `Library`, or `Sessions`
 - Sync status shows separate stage progress:
   - README fetch progress remains visible while READMEs are still being processed.
-  - Embedding stage shows an animated initializing bar first, then switches to numeric embedding progress when target counts are known.
+  - First sync uses neutral copy such as `Fetching READMEs for starred repositories` and `Chunking repositories`.
+  - When embedding generation becomes active, it is shown as the primary stage even if chunking is still finishing in the background.
+  - Active embedding generation now uses an indeterminate `Embedding in progress` loader plus a fixed timing note instead of batch-level ETA math.
 
 ## 9) LLM Modes
 
@@ -226,10 +243,12 @@ Primary local storage:
 
 - SQLite (sql.js) with OPFS when available.
 - Fallback local storage modes when persistent quota/backends fail.
+- The local database file/key is scoped per authenticated token hash, so different PAT/OAuth identities do not share repo indexes or embedding stores.
 
 Additional local persistence:
 
 - Chat backup in IndexedDB with localStorage fallback.
+- Auth-scoped settings for advanced retrieval mode, embedding preferences, and session continuity metadata.
 - Local runtime caches for model artifacts (WebLLM / embedding assets).
 
 Reset actions in UI:

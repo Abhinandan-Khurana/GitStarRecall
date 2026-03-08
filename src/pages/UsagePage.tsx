@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
+import { buildChatScopeKey, buildEmbeddingPreferenceScopeKey } from "../auth/authScope";
 import { createGitHubApiClient } from "../github/client";
 import type { GitHubStarredRepo, RepoReadmeRecord } from "../github/types";
 import { getLocalDatabase } from "../db/client";
@@ -35,6 +36,13 @@ import {
   type BrowserEmbeddingRecommendation,
 } from "../embeddings/browserCapability";
 import { buildSyncPlan, repoMetadataChanged } from "../sync/plan";
+import {
+  getChunkingPhaseLabel,
+  getChunkingProgressLabel,
+  getReadmePhaseLabel,
+  getReadmeProgressLabel,
+  type IndexingStatus,
+} from "../sync/status";
 import { sortChatMessages } from "../chat/order";
 import { captureLocalError, captureLocalWarn } from "../observability/localLog";
 import { SessionChat } from "../components/SessionChat";
@@ -43,6 +51,7 @@ import { SearchBar } from "../components/SearchBar";
 import { SyncStatusBar } from "../components/SyncStatusBar";
 import { OllamaConfigPanel } from "../components/OllamaConfigPanel";
 import { DeveloperModePanel, type RetrievalTuning } from "../components/DeveloperModePanel";
+import { ProviderSettingsForm } from "../components/ProviderSettingsForm";
 import { FilterBar } from "../components/FilterBar";
 import { RepoResultCard } from "../components/RepoResultCard";
 import { SessionSidebar } from "../components/SessionSidebar";
@@ -76,6 +85,7 @@ import {
 } from "../llm/webllm/capability";
 import { WebLLMProviderError } from "../llm/webllm/engine";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   Collapsible,
@@ -83,22 +93,6 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-
-type IndexingStatus = {
-  phase: string;
-  startedAt: number;
-  repoTotal: number;
-  readmesTarget: number;
-  readmesCompleted: number;
-  readmesMissing: number;
-  readmesFailed: number;
-  chunkTotal: number;
-  embeddingsCreated: number;
-  embeddingTarget: number;
-  duplicateEmbeddingHits: number;
-  /** Set when phase is "Sync complete" or "Indexing complete" */
-  elapsedSeconds?: number;
-};
 
 type ContextAvailabilityDebug = {
   totalResults: number;
@@ -321,6 +315,15 @@ function computeContextAvailabilityDebug(
   };
 }
 
+function safeParseStringArray(raw: string): string[] | null {
+  try {
+    const parsed = JSON.parse(raw) as string[];
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : null;
+  } catch {
+    return null;
+  }
+}
+
 const providerDefinitions = getProviderDefinitions();
 const webLLMEnabled = isWebLLMEnabled();
 const webLLMModels = getWebLLMSelectableModels();
@@ -436,7 +439,6 @@ function scoreRepoForEmbeddingPriority(repo: RepoRecord): number {
 
 const OLLAMA_EMBEDDING_CONSENT_KEY_PREFIX = "gitstarrecall.embedding.ollama.consent";
 const OLLAMA_EMBEDDING_PREF_KEY_PREFIX = "gitstarrecall.embedding.ollama.pref";
-const CHAT_SCOPE_PREFIX = "chat";
 const EMBEDDING_BACKEND_META_KEY = "embedding_active_backend";
 const EMBEDDING_MODEL_META_KEY = "embedding_active_model";
 const BROWSER_EMBEDDING_MODEL = DEFAULT_BROWSER_EMBEDDING_MODEL;
@@ -525,29 +527,6 @@ function resolveAutoModel(params: {
     return recommended;
   }
   return available[0] ?? recommended;
-}
-
-function hashTokenScope(raw: string): string {
-  let hash = 0;
-  for (let i = 0; i < raw.length; i += 1) {
-    hash = (hash << 5) - hash + raw.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
-
-function getChatScopeKey(accessToken: string | null): string | null {
-  if (!accessToken) {
-    return null;
-  }
-  return `${CHAT_SCOPE_PREFIX}:${hashTokenScope(accessToken)}`;
-}
-
-function getEmbeddingPreferenceScopeKey(accessToken: string | null): string {
-  if (!accessToken) {
-    return "anon";
-  }
-  return `token:${hashTokenScope(accessToken)}`;
 }
 
 function getOllamaConsentKey(scopeKey: string): string {
@@ -690,10 +669,17 @@ async function clearWebLLMRuntimeCaches(): Promise<void> {
   );
 }
 
-export default function UsagePage() {
+export type UsagePageView = "legacy" | "recall" | "settings" | "setup";
+
+type UsagePageProps = {
+  view?: UsagePageView;
+};
+
+export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const { accessToken, isAuthenticated, authMethod, loginWithPat, beginOAuthLogin, oauthConfig, logout } =
     useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [patToken, setPatToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [fetchingStars, setFetchingStars] = useState(false);
@@ -705,12 +691,15 @@ export default function UsagePage() {
   const [dbStorageMode, setDbStorageMode] = useState<string | null>(null);
   const [indexDetailsExpanded, setIndexDetailsExpanded] = useState(true);
   const [sessionsExpanded, setSessionsExpanded] = useState(true);
+  const [repoInventoryCount, setRepoInventoryCount] = useState(0);
+  const [storedEmbeddingCount, setStoredEmbeddingCount] = useState(0);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [searchProgress, setSearchProgress] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SearchSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [selectedContextChunkIdsBySessionId, setSelectedContextChunkIdsBySessionId] = useState<Record<string, string[]>>({});
   const [sessionMessagesById, setSessionMessagesById] = useState<Record<string, ChatMessageRecord[]>>({});
   const [historyLoadState, setHistoryLoadState] = useState<HistoryLoadState>("idle");
   const [historyLastRestoredAt, setHistoryLastRestoredAt] = useState<number | null>(null);
@@ -778,9 +767,9 @@ export default function UsagePage() {
   const restoreRequestTrackerRef = useRef(createRestoreRequestTracker());
   const webllmPreviousRecommendationRef = useRef<WebLLMRecommendation | null>(null);
   const previousIsAuthenticatedRef = useRef(isAuthenticated);
-  const chatScopeKey = useMemo(() => getChatScopeKey(accessToken), [accessToken]);
+  const chatScopeKey = useMemo(() => buildChatScopeKey(accessToken), [accessToken]);
   const embeddingPreferenceScopeKey = useMemo(
-    () => getEmbeddingPreferenceScopeKey(accessToken),
+    () => buildEmbeddingPreferenceScopeKey(accessToken),
     [accessToken],
   );
   const previousChatScopeKeyRef = useRef<string | null>(chatScopeKey);
@@ -798,7 +787,7 @@ export default function UsagePage() {
   }, [providerId]);
   const ollamaProviderDefinition = useMemo<LLMProviderDefinition | null>(() => {
     return providerDefinitions.find((provider) => provider.id === "ollama") ?? null;
-  }, [providerDefinitions]);
+  }, []);
   const ollamaEmbeddingModelOptions = useMemo(() => ollamaCatalog?.embedding ?? [], [ollamaCatalog]);
   const customEmbeddingModelWarning = useMemo(
     () => (ollamaModel.trim() ? getCustomModelWarning(ollamaModel) : null),
@@ -925,6 +914,7 @@ export default function UsagePage() {
   }, [ensureBrowserEmbeddingRecommendation]);
 
   const activeResults = useMemo(() => activeSession?.results ?? [], [activeSession]);
+  const workspaceReady = repoInventoryCount > 0 && storedEmbeddingCount > 0;
   const activeSessionMessages = useMemo(() => {
     if (!activeSessionId) {
       return [];
@@ -932,6 +922,48 @@ export default function UsagePage() {
 
     return sessionMessagesById[activeSessionId] ?? [];
   }, [activeSessionId, sessionMessagesById]);
+  const selectedContextChunkIds = useMemo(() => {
+    if (!activeSessionId) {
+      return [];
+    }
+    return selectedContextChunkIdsBySessionId[activeSessionId] ?? [];
+  }, [activeSessionId, selectedContextChunkIdsBySessionId]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setRepoInventoryCount(0);
+      setStoredEmbeddingCount(0);
+      return;
+    }
+
+    let cancelled = false;
+    void getLocalDatabase().then((database) => {
+      if (cancelled) {
+        return;
+      }
+
+      setRepoInventoryCount(database.getRepoCount());
+      setStoredEmbeddingCount(database.getEmbeddingCount());
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chatScopeKey, indexingStatus, isAuthenticated, starsSummary, sessions.length]);
+
+  useEffect(() => {
+    const requestedSessionId = searchParams.get("session");
+    if (!requestedSessionId) {
+      return;
+    }
+
+    if (!sessions.some((session) => session.id === requestedSessionId)) {
+      return;
+    }
+
+    setActiveSessionId(requestedSessionId);
+    setSessionMode("continue");
+  }, [searchParams, sessions]);
 
   const availableLanguages = useMemo(() => {
     return Array.from(
@@ -980,10 +1012,93 @@ export default function UsagePage() {
       return true;
     });
   }, [activeResults, languageFilter, topicFilter, updatedWithinDaysFilter]);
+  const selectedContextResults = useMemo(() => {
+    const selectedIds = new Set(selectedContextChunkIds);
+    return activeResults.filter((result) => selectedIds.has(result.chunkId));
+  }, [activeResults, selectedContextChunkIds]);
+
+  const resetResultFilters = useCallback(() => {
+    setLanguageFilter("all");
+    setTopicFilter("all");
+    setUpdatedWithinDaysFilter("all");
+  }, []);
+
+  const persistSessionContextSelection = useCallback(async (sessionId: string, chunkIds: string[]) => {
+    const database = await getLocalDatabase();
+    await database.upsertIndexMeta({
+      key: `session_context_ids:${sessionId}`,
+      value: JSON.stringify(chunkIds),
+      updatedAt: Date.now(),
+    });
+  }, []);
+
+  const updateSelectedContextForSession = useCallback((sessionId: string, nextChunkIds: string[]) => {
+    setSelectedContextChunkIdsBySessionId((previous) => {
+      const current = previous[sessionId] ?? [];
+      if (sameStringArray(current, nextChunkIds)) {
+        return previous;
+      }
+      return {
+        ...previous,
+        [sessionId]: nextChunkIds,
+      };
+    });
+    void persistSessionContextSelection(sessionId, nextChunkIds);
+  }, [persistSessionContextSelection]);
+
+  const toggleContextChunk = useCallback((chunkId: string) => {
+    if (!activeSessionId) {
+      return;
+    }
+    const selectedIds = new Set(selectedContextChunkIdsBySessionId[activeSessionId] ?? []);
+    if (selectedIds.has(chunkId)) {
+      selectedIds.delete(chunkId);
+    } else {
+      selectedIds.add(chunkId);
+    }
+    updateSelectedContextForSession(activeSessionId, activeResults
+      .map((result) => result.chunkId)
+      .filter((id) => selectedIds.has(id)));
+  }, [activeResults, activeSessionId, selectedContextChunkIdsBySessionId, updateSelectedContextForSession]);
+
+  useEffect(() => {
+    const requestedQuery = searchParams.get("query");
+    if (!requestedQuery) {
+      return;
+    }
+    setSearchQuery((previous) => previous || requestedQuery);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+
+    let cancelled = false;
+    void getLocalDatabase().then((database) => {
+      if (cancelled) {
+        return;
+      }
+      const stored = database.getIndexMetaValue(`session_context_ids:${activeSessionId}`);
+      const parsed = stored ? safeParseStringArray(stored) : null;
+      const activeChunkIds = activeResults.map((result) => result.chunkId);
+      const nextSelection = (parsed && parsed.length > 0 ? parsed : activeChunkIds.slice(0, 8))
+        .filter((chunkId) => activeChunkIds.includes(chunkId));
+      setSelectedContextChunkIdsBySessionId((previous) => ({
+        ...previous,
+        [activeSessionId]: nextSelection,
+      }));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeResults, activeSessionId]);
 
   const restoreHistory = useCallback(async () => {
     if (!chatScopeKey) {
       setSessions([]);
+      setSelectedContextChunkIdsBySessionId({});
       setSessionMessagesById({});
       setActiveSessionId(null);
       setSessionMode("new");
@@ -1582,10 +1697,17 @@ export default function UsagePage() {
 
     setIndexingStatus({
       phase: source === "manual" ? "Fetching starred repos" : "Refreshing stars before query",
+      primaryStage: "fetch-stars",
+      readmeActive: false,
+      chunkingActive: false,
+      embeddingActive: false,
+      embeddingWindowed: false,
       startedAt: Date.now(),
       repoTotal: 0,
       readmesTarget: 0,
       readmesCompleted: 0,
+      chunkingTarget: 0,
+      chunkingCompleted: 0,
       readmesMissing: 0,
       readmesFailed: 0,
       chunkTotal: 0,
@@ -1599,6 +1721,7 @@ export default function UsagePage() {
     const client = createGitHubApiClient({ accessToken });
     const existingStates = database.listRepoSyncState();
     const existingRepos = database.listRepos();
+    const isInitialSync = existingStates.length === 0 && existingRepos.length === 0;
     const existingById = new Map(existingStates.map((repo) => [repo.id, repo]));
     const existingReposById = new Map(existingRepos.map((repo) => [repo.id, repo]));
     const previousRepoIds = existingStates.map((repo) => repo.id);
@@ -1617,6 +1740,11 @@ export default function UsagePage() {
             ? {
               ...previous,
               phase: `Fetching starred repos (page ${progress.fetchedPages})`,
+              primaryStage: "fetch-stars",
+              readmeActive: false,
+              chunkingActive: false,
+              embeddingActive: false,
+              embeddingWindowed: false,
               repoTotal: progress.totalReposSoFar,
             }
             : previous,
@@ -1633,6 +1761,11 @@ export default function UsagePage() {
         ? {
           ...previous,
           phase: "Diffing repos with checksum state",
+          primaryStage: "diff",
+          readmeActive: false,
+          chunkingActive: false,
+          embeddingActive: false,
+          embeddingWindowed: false,
           repoTotal: starResult.repos.length,
         }
         : previous,
@@ -1674,16 +1807,26 @@ export default function UsagePage() {
       previous
         ? {
           ...previous,
-          phase: `Fetching READMEs for changed/new repos (${candidates.length})`,
+          phase: getReadmePhaseLabel(isInitialSync, candidates.length),
+          primaryStage: "readmes",
+          readmeActive: true,
+          chunkingActive: false,
+          embeddingActive: false,
+          embeddingWindowed: false,
           readmesTarget: candidates.length,
           readmesCompleted: 0,
+          chunkingTarget: candidates.length,
+          chunkingCompleted: 0,
           readmesMissing: 0,
           readmesFailed: 0,
         }
         : previous,
     );
 
-    const processReadmeBatch = async (batch: RepoReadmeRecord[]): Promise<void> => {
+    const processReadmeBatch = async (
+      batch: RepoReadmeRecord[],
+      completedReadmes: number,
+    ): Promise<void> => {
       if (batch.length === 0) {
         return;
       }
@@ -1740,12 +1883,17 @@ export default function UsagePage() {
       }
 
       if (changedForChunk.length > 0) {
-        setFetchPhase("Chunking changed repos…");
+        setFetchPhase(getChunkingProgressLabel(isInitialSync));
         setIndexingStatus((previous) =>
           previous
             ? {
                 ...previous,
-                phase: "Chunking changed repositories",
+                phase: getChunkingPhaseLabel(isInitialSync),
+                primaryStage: "chunking",
+                readmeActive: previous.readmesCompleted < previous.readmesTarget,
+                chunkingActive: true,
+                embeddingActive: false,
+                embeddingWindowed: false,
               }
             : previous,
         );
@@ -1757,6 +1905,19 @@ export default function UsagePage() {
         chunkUpsertLatencyTotalMs += performance.now() - chunkStart;
         chunkUpsertCount += 1;
       }
+
+      setIndexingStatus((previous) =>
+        previous
+          ? {
+              ...previous,
+              readmeActive: completedReadmes < previous.readmesTarget,
+              chunkingActive: completedReadmes < previous.chunkingTarget,
+              embeddingWindowed: previous.embeddingWindowed,
+              chunkTotal: database.getChunkCount(),
+              chunkingCompleted: Math.max(previous.chunkingCompleted, completedReadmes),
+            }
+          : previous,
+      );
 
       const now = Date.now();
       const shouldRunEmbeddingWindow =
@@ -1781,15 +1942,6 @@ export default function UsagePage() {
           embeddingWindowRunning = false;
         }
       }
-
-      setIndexingStatus((previous) =>
-        previous
-          ? {
-              ...previous,
-              chunkTotal: database.getChunkCount(),
-            }
-          : previous,
-      );
     };
 
     const readmeStageStartedAt = performance.now();
@@ -1807,16 +1959,14 @@ export default function UsagePage() {
               }
             : previous,
         );
-        setFetchPhase(`Fetching changed READMEs… ${progress.completed}/${progress.total}`);
+        setFetchPhase(getReadmeProgressLabel(isInitialSync, progress.completed, progress.total));
       },
       onBatch: usePipelineV2
         ? async (records, progress, stats) => {
-            await processReadmeBatch(records);
+            await processReadmeBatch(records, progress.completed);
             lastReadmeStats = stats;
             setFetchPhase(
-              `Fetching changed READMEs… ${progress.completed}/${progress.total} · p95 ${Math.round(
-                stats.p95LatencyMs,
-              )}ms`,
+              getReadmeProgressLabel(isInitialSync, progress.completed, progress.total, stats.p95LatencyMs),
             );
           }
         : undefined,
@@ -1824,7 +1974,7 @@ export default function UsagePage() {
     const readmeStageDurationMs = performance.now() - readmeStageStartedAt;
 
     if (!usePipelineV2) {
-      await processReadmeBatch(readmeResult.records);
+      await processReadmeBatch(readmeResult.records, readmeResult.records.length);
     }
     if (firstEmbeddingAvailableAt == null && database.getEmbeddingCount() > 0) {
       firstEmbeddingAvailableAt = Date.now();
@@ -1876,9 +2026,16 @@ export default function UsagePage() {
         ? {
           ...previous,
           phase: hasPendingEmbeddingChunks ? "Preparing embeddings for unindexed chunks" : "Sync complete",
+          primaryStage: hasPendingEmbeddingChunks ? "embedding-init" : "complete",
+          readmeActive: false,
+          chunkingActive: false,
+          embeddingActive: hasPendingEmbeddingChunks,
+          embeddingWindowed: false,
           repoTotal: starResult.repos.length,
           readmesTarget: candidates.length,
           readmesCompleted: candidates.length,
+          chunkingTarget: candidates.length,
+          chunkingCompleted: candidates.length,
           readmesMissing: readmeResult.missingCount,
           readmesFailed: readmeResult.failedCount,
           chunkTotal: localChunkCount,
@@ -1922,6 +2079,11 @@ export default function UsagePage() {
           ? {
             ...previous,
             phase: `Failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+            primaryStage: "failed",
+            readmeActive: false,
+            chunkingActive: false,
+            embeddingActive: false,
+            embeddingWindowed: false,
           }
           : previous,
       );
@@ -1982,7 +2144,12 @@ export default function UsagePage() {
         previous
           ? {
               ...previous,
-              phase: incrementalMode ? previous.phase : "Initializing embedding model",
+              phase: "Initializing embedding model",
+              primaryStage: "embedding-init",
+              readmeActive: incrementalMode ? previous.readmeActive : false,
+              chunkingActive: incrementalMode ? previous.chunkingActive : false,
+              embeddingActive: true,
+              embeddingWindowed: incrementalMode,
               embeddingsCreated: incrementalMode ? previous.embeddingsCreated : 0,
               embeddingTarget: incrementalMode ? previous.embeddingTarget : 0,
               duplicateEmbeddingHits: incrementalMode ? previous.duplicateEmbeddingHits : 0,
@@ -2179,6 +2346,11 @@ export default function UsagePage() {
             ? {
                 ...previous,
                 phase: "Generating embeddings",
+                primaryStage: "embedding",
+                readmeActive: false,
+                chunkingActive: false,
+                embeddingActive: true,
+                embeddingWindowed: false,
                 embeddingsCreated: 0,
                 embeddingTarget,
                 duplicateEmbeddingHits: 0,
@@ -2234,9 +2406,18 @@ export default function UsagePage() {
         const speed = processedCount / elapsedSeconds;
         const remaining = Math.max(embeddingTarget - processedCount, 0);
         const etaSeconds = speed > 0 ? Math.ceil(remaining / speed) : 0;
-        const queueDepth = Math.max(embeddingTarget - processedCount, 0);
+        const pendingEmbeddingCount = incrementalMode
+          ? database.getPendingEmbeddingChunkCount()
+          : remaining;
+        const queueDepth = Math.max(pendingEmbeddingCount, 0);
         const checkpointStatus = database.getEmbeddingCheckpointStatus();
         const poolStatus = activeEmbeddingPool.getStatus();
+        const totalPendingEmbeddingCount = incrementalMode
+          ? queueDepth
+          : remaining;
+        const displayEmbeddingTarget = incrementalMode
+          ? processedCount + totalPendingEmbeddingCount
+          : embeddingTarget;
         if (backendIdentity.kind === "browser") {
           backendIdentity = {
             kind: "browser",
@@ -2247,19 +2428,24 @@ export default function UsagePage() {
           };
         }
         peakQueueDepth = Math.max(peakQueueDepth, queueDepth);
+        setIndexingStatus((previous) =>
+          previous
+            ? {
+                ...previous,
+                phase: "Generating embeddings",
+                primaryStage: "embedding",
+                readmeActive: incrementalMode ? previous.readmeActive : false,
+                chunkingActive: incrementalMode ? previous.chunkingActive : false,
+                embeddingActive: true,
+                embeddingWindowed: incrementalMode,
+                embeddingsCreated: processedCount,
+                embeddingTarget: displayEmbeddingTarget,
+                duplicateEmbeddingHits: duplicateHits,
+              }
+            : previous,
+        );
         if (!incrementalMode) {
           setFetchPhase(`Generating embeddings… ${processedCount}/${embeddingTarget} completed`);
-          setIndexingStatus((previous) =>
-            previous
-              ? {
-                  ...previous,
-                  phase: "Generating embeddings",
-                  embeddingsCreated: processedCount,
-                  embeddingTarget,
-                  duplicateEmbeddingHits: duplicateHits,
-                }
-              : previous,
-          );
           setStarsSummary(
             `Indexing in progress: ${processedCount}/${embeddingTarget} embeddings ` +
               `(cache hits: ${duplicateHits}, ~${Math.max(0, etaSeconds)}s remaining).`,
@@ -2460,9 +2646,16 @@ export default function UsagePage() {
             ? {
                 ...previous,
                 phase: "Indexing complete",
+                primaryStage: "complete",
+                readmeActive: false,
+                chunkingActive: false,
+                embeddingActive: false,
+                embeddingWindowed: false,
                 repoTotal: finalRepoCount,
                 readmesCompleted: previous.readmesCompleted,
                 readmesTarget: previous.readmesTarget,
+                chunkingCompleted: previous.chunkingCompleted,
+                chunkingTarget: previous.chunkingTarget,
                 chunkTotal: finalChunkCount,
                 embeddingsCreated: finalEmbeddingCount,
                 embeddingTarget,
@@ -2784,12 +2977,15 @@ export default function UsagePage() {
 
       setActiveSessionId(targetSessionId);
       setSessionMode("continue");
-      setLanguageFilter("all");
-      setTopicFilter("all");
-      setUpdatedWithinDaysFilter("all");
+      resetResultFilters();
+      const defaultContextChunkIds = results.slice(0, 8).map((result) => result.chunkId);
+      setSelectedContextChunkIdsBySessionId((previous) => ({
+        ...previous,
+        [targetSessionId]: defaultContextChunkIds,
+      }));
       await database.upsertIndexMeta({
         key: `session_context_ids:${targetSessionId}`,
-        value: JSON.stringify(results.map((result) => result.chunkId)),
+        value: JSON.stringify(defaultContextChunkIds),
         updatedAt: now,
       });
     } catch (err) {
@@ -2802,6 +2998,11 @@ export default function UsagePage() {
           ? {
             ...previous,
             phase: `Failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+            primaryStage: "failed",
+            readmeActive: false,
+            chunkingActive: false,
+            embeddingActive: false,
+            embeddingWindowed: false,
           }
           : previous,
       );
@@ -2814,6 +3015,23 @@ export default function UsagePage() {
 
   const handleSearch = async () => {
     await executeSearch(searchQuery);
+  };
+
+  const handleSelectSession = (sessionId: string) => {
+    void getLocalDatabase().then((db) => {
+      setSessionMessagesById((previous) => ({
+        ...previous,
+        [sessionId]: sortChatMessages(db.listChatMessages(sessionId)),
+      }));
+    });
+    setActiveSessionId(sessionId);
+    setSessionMode("continue");
+  };
+
+  const handleClearActiveSession = () => {
+    setActiveSessionId(null);
+    setSessionMode("new");
+    resetResultFilters();
   };
 
   const handleRehydrateSession = async () => {
@@ -2925,7 +3143,7 @@ export default function UsagePage() {
       return;
     }
 
-    const snippets = filteredResults.slice(0, 8).map((result) => {
+    const snippets = selectedContextResults.map((result) => {
       return `${result.repoFullName}\n${result.text}`;
     });
 
@@ -2940,12 +3158,12 @@ export default function UsagePage() {
         debug.totalResults === 0
           ? `No context available. Active session has 0 retrieved results. session_id=${activeSession.id}. ` +
           "Run Search first to populate context."
-          : "No context available after filtering. " +
+          : "No context selected for chat. " +
           `session_id=${activeSession.id}; total_results=${debug.totalResults}; ` +
           `filtered_results=${debug.filteredResults}; ` +
           `filters={language:${languageFilter},topic:${topicFilter},updatedWithinDays:${updatedWithinDaysFilter}}; ` +
           `pass_counts={language:${debug.languagePassCount},topic:${debug.topicPassCount},recency:${debug.recencyPassCount},invalidUpdatedAt:${debug.invalidUpdatedAtCount}}. ` +
-          "Set filters to all or run a new search.";
+          "Select snippets from the result list or reset filters.";
       captureLocalError("llm_no_context_available", new Error(debugMessage));
       setLlmError(debugMessage);
       return;
@@ -3168,7 +3386,543 @@ export default function UsagePage() {
       )}
 
       {isAuthenticated ? (
-        <div className="space-y-5">
+        view === "setup" ? (
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+            <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
+              <CardHeader className="border-b border-border/60 pb-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-display text-xl font-semibold text-foreground">Build your local workspace</p>
+                    <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+                      Import your stars, fetch README content, and generate embeddings so Recall can work against a local index.
+                    </p>
+                  </div>
+                  <Badge variant={workspaceReady ? "secondary" : "outline"} className="rounded-md px-3 py-1">
+                    {workspaceReady ? "Ready" : indexingStatus ? indexingStatus.phase : "Setup"}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-5 pt-5">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Connected</p>
+                    <p className="mt-2 text-lg font-semibold text-foreground">{authMethod === "oauth" ? "GitHub OAuth" : "Personal token"}</p>
+                  </div>
+                  <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Indexed repos</p>
+                    <p className="mt-2 text-lg font-semibold text-foreground">{repoInventoryCount}</p>
+                  </div>
+                  <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Embeddings</p>
+                    <p className="mt-2 text-lg font-semibold text-foreground">{storedEmbeddingCount}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                  <p className="text-sm font-medium text-foreground">Recommended path</p>
+                  <ol className="mt-3 space-y-3 text-sm text-muted-foreground">
+                    <li className="rounded-md border border-border/50 bg-background/70 px-3 py-3">
+                      <span className="font-medium text-foreground">1. Import stars</span>
+                      <span className="mt-1 block">Pull your starred repos into the local database.</span>
+                      <span className="mt-2 block text-xs">
+                        {repoInventoryCount > 0 ? "Complete" : fetchingStars ? "In progress" : "Pending"}
+                      </span>
+                    </li>
+                    <li className="rounded-md border border-border/50 bg-background/70 px-3 py-3">
+                      <span className="font-medium text-foreground">2. Fetch READMEs</span>
+                      <span className="mt-1 block">Download repo documentation for search context.</span>
+                      <span className="mt-2 block text-xs">
+                        {indexingStatus?.readmesCompleted && indexingStatus.readmesCompleted > 0
+                          ? `${indexingStatus.readmesCompleted} fetched`
+                          : fetchingStars
+                            ? "In progress"
+                            : "Pending"}
+                      </span>
+                    </li>
+                    <li className="rounded-md border border-border/50 bg-background/70 px-3 py-3">
+                      <span className="font-medium text-foreground">3. Generate embeddings</span>
+                      <span className="mt-1 block">Build the semantic index used by Recall and chat context.</span>
+                      <span className="mt-2 block text-xs">
+                        {storedEmbeddingCount > 0
+                          ? `${storedEmbeddingCount} embeddings ready`
+                          : isRebuildingEmbeddings || indexingStatus?.embeddingTarget
+                            ? "In progress"
+                            : "Pending"}
+                      </span>
+                    </li>
+                  </ol>
+                </div>
+
+                <SyncStatusBar
+                  indexingStatus={indexingStatus}
+                  embeddingRunMetrics={embeddingRunMetrics}
+                  starsSummary={starsSummary}
+                  dbStorageMode={dbStorageMode}
+                  indexDetailsExpanded={indexDetailsExpanded}
+                  onToggleDetails={() => setIndexDetailsExpanded((expanded) => !expanded)}
+                  historyLoadState={historyLoadState}
+                  historyDataSource={historyDataSource}
+                  historyLastRestoredAt={historyLastRestoredAt}
+                  onRetryHistory={() => void restoreHistory()}
+                />
+
+                <div className="flex flex-wrap gap-3">
+                  <Button onClick={() => void handleFetchStars()} disabled={fetchingStars || isRebuildingEmbeddings} className="rounded-md">
+                    {fetchingStars ? "Syncing..." : workspaceReady ? "Run sync again" : "Start sync"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleRebuildEmbeddings(false)}
+                    disabled={fetchingStars || isRebuildingEmbeddings || repoInventoryCount === 0}
+                    className="rounded-md"
+                  >
+                    {isRebuildingEmbeddings ? "Rebuilding..." : "Rebuild embeddings"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => navigate("/app/recall")}
+                    disabled={!workspaceReady}
+                    className="rounded-md"
+                  >
+                    Continue to Recall
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="space-y-4">
+              <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
+                <CardHeader className="border-b border-border/60 pb-4">
+                  <p className="font-display text-lg font-semibold text-foreground">Local-first by default</p>
+                </CardHeader>
+                <CardContent className="space-y-3 pt-5 text-sm text-muted-foreground">
+                  <p>Your stars, README content, sessions, and embeddings stay in the browser-local database unless you explicitly use a remote provider.</p>
+                  <p>Use the recommended local path first. You can customize the embedding runtime later without blocking the first run.</p>
+                </CardContent>
+              </Card>
+
+              <Collapsible>
+                <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" className="w-full justify-between rounded-none px-6 py-4 text-left font-medium">
+                      <span>Customize indexing</span>
+                      <span className="text-xs text-muted-foreground">Advanced</span>
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <CardContent className="border-t border-border/60 pt-5">
+                      <OllamaConfigPanel
+                        allowOllamaEmbedding={allowOllamaEmbedding}
+                        onAllowOllamaChange={setAllowOllamaEmbedding}
+                        ollamaBaseUrl={ollamaBaseUrl}
+                        onBaseUrlChange={setOllamaBaseUrl}
+                        ollamaModel={ollamaModel}
+                        onModelChange={handleEmbeddingModelChange}
+                        embeddingModelOptions={ollamaEmbeddingModelOptions}
+                        embeddingModelStatus={ollamaCatalogStatus}
+                        embeddingModelError={ollamaCatalogError}
+                        customModelWarning={customEmbeddingModelWarning}
+                        browserEmbeddingRecommendation={browserEmbeddingRecommendation}
+                        onRefreshModels={() => {
+                          void refreshOllamaCatalog();
+                        }}
+                        ollamaConnectionStatus={ollamaConnectionStatus}
+                        ollamaConnectionMessage={ollamaConnectionMessage}
+                        onTestConnection={() => void handleTestOllamaConnection()}
+                      />
+                    </CardContent>
+                  </CollapsibleContent>
+                </Card>
+              </Collapsible>
+            </div>
+          </div>
+        ) : view === "settings" ? (
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
+            <div className="space-y-4">
+              <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
+                <CardHeader className="border-b border-border/60 pb-4">
+                  <p className="font-display text-lg font-semibold text-foreground">Sync and indexing</p>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-5">
+                  <SyncStatusBar
+                    indexingStatus={indexingStatus}
+                    embeddingRunMetrics={embeddingRunMetrics}
+                    starsSummary={starsSummary}
+                    dbStorageMode={dbStorageMode}
+                    indexDetailsExpanded={indexDetailsExpanded}
+                    onToggleDetails={() => setIndexDetailsExpanded((expanded) => !expanded)}
+                    historyLoadState={historyLoadState}
+                    historyDataSource={historyDataSource}
+                    historyLastRestoredAt={historyLastRestoredAt}
+                    onRetryHistory={() => void restoreHistory()}
+                  />
+                  <div className="flex flex-wrap gap-3">
+                    <Button onClick={() => void handleFetchStars()} disabled={fetchingStars} className="rounded-md">
+                      {fetchingStars ? "Syncing..." : "Run sync now"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleRebuildEmbeddings(false)}
+                      disabled={isRebuildingEmbeddings || repoInventoryCount === 0}
+                      className="rounded-md"
+                    >
+                      {isRebuildingEmbeddings ? "Rebuilding..." : "Rebuild embeddings"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
+                <CardHeader className="border-b border-border/60 pb-4">
+                  <p className="font-display text-lg font-semibold text-foreground">Embedding engine</p>
+                </CardHeader>
+                <CardContent className="pt-5">
+                  <OllamaConfigPanel
+                    allowOllamaEmbedding={allowOllamaEmbedding}
+                    onAllowOllamaChange={setAllowOllamaEmbedding}
+                    ollamaBaseUrl={ollamaBaseUrl}
+                    onBaseUrlChange={setOllamaBaseUrl}
+                    ollamaModel={ollamaModel}
+                    onModelChange={handleEmbeddingModelChange}
+                    embeddingModelOptions={ollamaEmbeddingModelOptions}
+                    embeddingModelStatus={ollamaCatalogStatus}
+                    embeddingModelError={ollamaCatalogError}
+                    customModelWarning={customEmbeddingModelWarning}
+                    browserEmbeddingRecommendation={browserEmbeddingRecommendation}
+                    onRefreshModels={() => {
+                      void refreshOllamaCatalog();
+                    }}
+                    ollamaConnectionStatus={ollamaConnectionStatus}
+                    ollamaConnectionMessage={ollamaConnectionMessage}
+                    onTestConnection={() => void handleTestOllamaConnection()}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
+                <CardHeader className="border-b border-border/60 pb-4">
+                  <p className="font-display text-lg font-semibold text-foreground">Developer and retrieval</p>
+                </CardHeader>
+                <CardContent className="pt-5">
+                  <DeveloperModePanel
+                    isSudoUser={isSudoUser}
+                    onSudoChange={setIsSudoUser}
+                    showAdvancedTuning={showAdvancedTuning}
+                    advancedTuningOpen={advancedTuningOpen}
+                    onAdvancedTuningOpenChange={setAdvancedTuningOpen}
+                    retrievalTuning={retrievalTuning}
+                    onUpdateRetrievalTuning={updateRetrievalTuning}
+                    onRebuildEmbeddings={() => void handleRebuildEmbeddings(true)}
+                    isRebuilding={isRebuildingEmbeddings}
+                  />
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="space-y-4">
+              <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
+                <CardHeader className="border-b border-border/60 pb-4">
+                  <p className="font-display text-lg font-semibold text-foreground">Chat provider defaults</p>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-5 text-sm text-muted-foreground">
+                  <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                    <p className="text-sm font-medium text-foreground">Default chat route</p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Configure provider, endpoint, model, and consent here. Recall now uses these defaults instead of hiding them inside the composer.
+                    </p>
+                  </div>
+                  <ProviderSettingsForm
+                    providerId={providerId}
+                    onProviderIdChange={(id) => handleProviderChange(id)}
+                    providerDefinitions={providerDefinitions}
+                    providerBaseUrl={providerBaseUrl}
+                    onProviderBaseUrlChange={setProviderBaseUrl}
+                    providerModel={providerModel}
+                    onProviderModelChange={handleProviderModelChange}
+                    providerApiKey={providerApiKey}
+                    onProviderApiKeyChange={setProviderApiKey}
+                    selectedProvider={selectedProvider}
+                    allowRemoteProvider={allowRemoteProvider}
+                    onAllowRemoteChange={setAllowRemoteProvider}
+                    allowLocalProvider={allowLocalProvider}
+                    onAllowLocalChange={setAllowLocalProvider}
+                    webllmModels={webLLMModels}
+                    ollamaModels={ollamaChatModelOptions}
+                    ollamaModelsStatus={ollamaCatalogStatus}
+                    ollamaModelsError={ollamaCatalogError}
+                    onRefreshOllamaModels={() => {
+                      void refreshOllamaCatalog();
+                    }}
+                  />
+                  <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Permissions</p>
+                    <p className="mt-2">Remote providers: <span className="font-medium text-foreground">{allowRemoteProvider ? "enabled" : "disabled"}</span></p>
+                    <p className="mt-1">Local providers: <span className="font-medium text-foreground">{allowLocalProvider ? "enabled" : "disabled"}</span></p>
+                    <p className="mt-1">
+                      WebLLM runtime: <span className="font-medium text-foreground">{webllmRuntimeState}</span>
+                      {webllmRuntimeState === "downloading"
+                        ? ` · ${Math.round(webllmDownloadProgress)}% downloaded`
+                        : ""}
+                      {webllmProgressText ? ` · ${webllmProgressText}` : ""}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
+                <CardHeader className="border-b border-border/60 pb-4">
+                  <p className="font-display text-lg font-semibold text-foreground">Account and local data</p>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-5">
+                  {authMethod === "pat" ? (
+                    <Alert>
+                      <AlertDescription>
+                        You are using a Personal Access Token. OAuth remains the recommended path for long-term use.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                      <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Storage mode</p>
+                      <p className="mt-2 text-sm font-semibold text-foreground">{dbStorageMode ?? "Unknown"}</p>
+                    </div>
+                    <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                      <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">History restore</p>
+                      <p className="mt-2 text-sm font-semibold text-foreground">{historyLoadState}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <Button variant="outline" className="rounded-md" onClick={logout}>
+                      {authMethod === "oauth" ? "Sign out of GitHub" : "Clear PAT session"}
+                    </Button>
+                    <Button variant="destructive" className="rounded-md" onClick={() => void handleClearLocalData()}>
+                      Delete local data
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        ) : view === "recall" ? (
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
+            <div className="space-y-4">
+              <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
+                <CardContent className="space-y-4 pt-6">
+                  <SearchBar
+                    query={searchQuery}
+                    onQueryChange={setSearchQuery}
+                    onSearch={() => void handleSearch()}
+                    isSearching={isSearching}
+                    onFetchStars={() => void handleFetchStars()}
+                    isFetching={fetchingStars}
+                    fetchPhase={fetchPhase}
+                    searchProgress={searchProgress}
+                  />
+                  <SyncStatusBar
+                    indexingStatus={indexingStatus}
+                    embeddingRunMetrics={embeddingRunMetrics}
+                    starsSummary={starsSummary}
+                    dbStorageMode={dbStorageMode}
+                    indexDetailsExpanded={indexDetailsExpanded}
+                    onToggleDetails={() => setIndexDetailsExpanded((expanded) => !expanded)}
+                    historyLoadState={historyLoadState}
+                    historyDataSource={historyDataSource}
+                    historyLastRestoredAt={historyLastRestoredAt}
+                    onRetryHistory={() => void restoreHistory()}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
+                <CardHeader className="border-b border-border/60 pb-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-display text-lg font-semibold text-foreground">
+                        {activeSession ? activeSession.title : "Recall results"}
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Search by memory, then inspect the strongest matches before sending chat context.
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className="rounded-md">
+                      {activeSession ? `${filteredResults.length} shown` : "No session"}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-5">
+                  {activeSession ? (
+                    <>
+                      {activeSession.results.length === 0 ? (
+                        <div className="rounded-md border border-border/60 bg-background/70 p-4 text-sm text-muted-foreground">
+                          This session has no results in memory. Re-run the search to refresh it.
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="mt-3 rounded-md"
+                            onClick={() => void handleRehydrateSession()}
+                          >
+                            Re-run search
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          <FilterBar
+                            sessionMode={sessionMode}
+                            onSessionModeChange={(mode) => setSessionMode(mode)}
+                            activeSessionId={activeSessionId}
+                            languageFilter={languageFilter}
+                            onLanguageChange={setLanguageFilter}
+                            topicFilter={topicFilter}
+                            onTopicChange={setTopicFilter}
+                            updatedWithinDaysFilter={updatedWithinDaysFilter}
+                            onUpdatedWithinDaysChange={setUpdatedWithinDaysFilter}
+                            availableLanguages={availableLanguages}
+                            availableTopics={availableTopics}
+                            filteredCount={filteredResults.length}
+                            totalCount={activeSession.results.length}
+                            onResetFilters={resetResultFilters}
+                          />
+                          <div className="max-h-[min(50vh,32rem)] space-y-2 overflow-auto rounded-md border border-border/60 bg-background/60 p-3">
+                            {filteredResults.map((result) => (
+                              <RepoResultCard
+                                key={result.chunkId}
+                                chunkId={result.chunkId}
+                                repoFullName={result.repoFullName}
+                                repoUrl={result.repoUrl}
+                                repoDescription={result.repoDescription}
+                                language={result.language}
+                                topics={result.topics}
+                                score={result.score}
+                                text={result.text}
+                                selected={selectedContextChunkIds.includes(result.chunkId)}
+                                onToggleSelect={toggleContextChunk}
+                              />
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <div className="rounded-md border border-dashed border-border/60 bg-background/60 p-8 text-center">
+                      <p className="font-display text-lg font-semibold text-foreground">Start with a memory, not a repo name</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Try: "browser-based vector database", "TypeScript auth starter", or "GraphQL security toolkit".
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="space-y-4">
+              <SessionSidebar
+                sessions={sessions}
+                activeSessionId={activeSessionId}
+                onSelectSession={handleSelectSession}
+                onClearActive={handleClearActiveSession}
+              />
+
+              <Card className="flex min-h-[32rem] flex-col border-border/60 bg-[var(--app-panel)] shadow-none">
+                <CardHeader className="border-b border-border/60 py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-display text-lg font-semibold text-foreground">Chat context</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Review and select the snippets that should be sent with your prompt.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="rounded-md">
+                      {selectedContextResults.length} selected
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="flex min-h-0 flex-1 flex-col pt-5">
+                  {activeSession ? (
+                    <>
+                      <div className="mb-4 rounded-md border border-border/60 bg-background/70 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-medium text-foreground">Selected context</p>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="rounded-md"
+                              onClick={() => activeSessionId ? updateSelectedContextForSession(activeSessionId, filteredResults.slice(0, 8).map((result) => result.chunkId)) : undefined}
+                            >
+                              Select top matches
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="rounded-md"
+                              onClick={() => activeSessionId ? updateSelectedContextForSession(activeSessionId, filteredResults.map((result) => result.chunkId)) : undefined}
+                            >
+                              Select filtered
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="rounded-md"
+                              onClick={() => activeSessionId ? updateSelectedContextForSession(activeSessionId, []) : undefined}
+                            >
+                              Clear
+                            </Button>
+                          </div>
+                        </div>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          {selectedContextResults.length > 0
+                            ? `${selectedContextResults.length} snippets will be included with your next prompt.`
+                            : "No context selected yet. Pick snippets from the result list before sending."}
+                        </p>
+                      </div>
+                      <SessionChat
+                        messages={activeSessionMessages}
+                        isGenerating={isGenerating}
+                        streamingContent={llmAnswer}
+                        prompt={llmPrompt}
+                        onPromptChange={setLlmPrompt}
+                        onSend={() => void handleGenerateAnswer()}
+                        onCancel={handleCancelGeneration}
+                        error={llmError}
+                        canSend={selectedContextResults.length > 0}
+                        noResultsHint={selectedContextResults.length === 0}
+                        messagesEndRef={messagesEndRef}
+                        providerId={providerId}
+                        providerBaseUrl={providerBaseUrl}
+                        providerModel={providerModel}
+                        providerApiKey={providerApiKey}
+                        onProviderIdChange={(id) => handleProviderChange(id)}
+                        onProviderBaseUrlChange={setProviderBaseUrl}
+                        onProviderModelChange={handleProviderModelChange}
+                        onProviderApiKeyChange={setProviderApiKey}
+                        selectedProvider={selectedProvider}
+                        providerDefinitions={providerDefinitions}
+                        allowRemoteProvider={allowRemoteProvider}
+                        allowLocalProvider={allowLocalProvider}
+                        onAllowRemoteChange={setAllowRemoteProvider}
+                        onAllowLocalChange={setAllowLocalProvider}
+                        webllmModels={webLLMModels}
+                        ollamaModels={ollamaChatModelOptions}
+                        ollamaModelsStatus={ollamaCatalogStatus}
+                        ollamaModelsError={ollamaCatalogError}
+                        onRefreshOllamaModels={() => {
+                          void refreshOllamaCatalog();
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <EmptyState type="no-session" />
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-5">
           {/* Search & Controls */}
           <div className="space-y-3">
             <SearchBar
@@ -3269,6 +4023,7 @@ export default function UsagePage() {
                     availableTopics={availableTopics}
                     filteredCount={filteredResults.length}
                     totalCount={activeSession.results.length}
+                    onResetFilters={resetResultFilters}
                   />
 
                   <div className="max-h-[min(50vh,24rem)] space-y-1.5 overflow-auto rounded-lg border border-border/30 bg-background/30 p-2">
@@ -3283,6 +4038,8 @@ export default function UsagePage() {
                         topics={result.topics}
                         score={result.score}
                         text={result.text}
+                        selected={selectedContextChunkIds.includes(result.chunkId)}
+                        onToggleSelect={toggleContextChunk}
                       />
                     ))}
                   </div>
@@ -3296,23 +4053,8 @@ export default function UsagePage() {
             <SessionSidebar
               sessions={sessions}
               activeSessionId={activeSessionId}
-              onSelectSession={(sessionId) => {
-                void getLocalDatabase().then((db) => {
-                  setSessionMessagesById((prev) => ({
-                    ...prev,
-                    [sessionId]: sortChatMessages(db.listChatMessages(sessionId)),
-                  }));
-                });
-                setActiveSessionId(sessionId);
-                setSessionMode("continue");
-              }}
-              onClearActive={() => {
-                setActiveSessionId(null);
-                setSessionMode("new");
-                setLanguageFilter("all");
-                setTopicFilter("all");
-                setUpdatedWithinDaysFilter("all");
-              }}
+              onSelectSession={handleSelectSession}
+              onClearActive={handleClearActiveSession}
             />
 
             {/* Main chat area */}
@@ -3322,11 +4064,14 @@ export default function UsagePage() {
                   <CardHeader className="py-3">
                     <p className="text-sm font-medium text-foreground">Chat</p>
                     <p className="text-[11px] text-muted-foreground">
-                      Top 8 filtered snippets are sent as context.
+                      Selected snippets are sent as context.
                     </p>
                     {providerId === "webllm" && (
                       <p className="text-[11px] text-muted-foreground">
                         WebLLM: {webllmRuntimeState}
+                        {webllmRuntimeState === "downloading"
+                          ? ` -- ${Math.round(webllmDownloadProgress)}% downloaded`
+                          : ""}
                         {webllmProgressText ? ` -- ${webllmProgressText}` : ""}
                       </p>
                     )}
@@ -3341,8 +4086,8 @@ export default function UsagePage() {
                       onSend={() => void handleGenerateAnswer()}
                       onCancel={handleCancelGeneration}
                       error={llmError}
-                      canSend={filteredResults.length > 0}
-                      noResultsHint={filteredResults.length === 0}
+                      canSend={selectedContextResults.length > 0}
+                      noResultsHint={selectedContextResults.length === 0}
                       messagesEndRef={messagesEndRef}
                       providerId={providerId}
                       providerBaseUrl={providerBaseUrl}
@@ -3418,6 +4163,7 @@ export default function UsagePage() {
             </Card>
           </Collapsible>
         </div>
+        )
       ) : (
         <LoginCard
           onOAuthLogin={() => void handleOAuth()}

@@ -15,6 +15,7 @@ In scope:
 - Browser embedding capability recommendation state (mobile/webgpu/cores/memory/perf probe)
 - Optional local Ollama embedding endpoint configuration (`localhost` only)
 - Developer advanced-mode (`sudo`) retrieval tuning state (scoped local persistence)
+- Auth-scoped browser persistence keys and per-identity local SQLite database files
 - Optional Browser WebLLM model runtime and downloaded model artifacts
 - Chat sessions and messages
 - User queries
@@ -87,6 +88,7 @@ Mitigations:
 - Browser WebLLM download is explicit opt-in; no GitHub token in request payloads.
 - Send only top-K snippets, not full repo content.
 - Token stored in memory or encrypted storage.
+- Scope local SQLite/localStorage persistence by auth token hash so one authenticated identity does not inherit another identity's indexed corpus.
 - Add “Clear all data” and “Clear token” actions.
 - Restrict debug logs to IDs/counts/timings; never log README plaintext by default.
 - Ollama embedding request payload must not include GitHub tokens or PAT values.
@@ -133,6 +135,7 @@ Mitigations:
 
 Mapped requirements:
 - Local-first storage: SQLite WASM + sqlite-vec.
+- Auth-scoped local persistence for SQLite and settings continuity.
 - OAuth PKCE and PAT fallback with warnings.
 - Explicit LLM opt-in.
 - CSP and README sanitization.
