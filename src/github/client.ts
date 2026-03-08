@@ -9,6 +9,7 @@ import type {
   RepoReadmeRecord,
 } from "./types";
 import { canonicalChecksumInput, sha256Hex } from "./checksum";
+import { normalizeGitHubToken } from "@/lib/normalizeGitHubToken";
 
 type Logger = {
   debug: (message: string, meta?: Record<string, unknown>) => void;
@@ -52,17 +53,6 @@ const API_BASE_URL = "https://api.github.com";
 const DEFAULT_PER_PAGE = 100;
 const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_README_CONCURRENCY = 6;
-
-function normalizeGitHubToken(rawToken: string): string {
-  let token = String(rawToken)
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^bearer\s+/i, "")
-    .replace(/^token\s+/i, "")
-    .replace(/^["']+|["']+$/g, "")
-    .trim();
-  return token;
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
