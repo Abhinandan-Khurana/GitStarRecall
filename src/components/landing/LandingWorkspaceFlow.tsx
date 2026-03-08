@@ -24,7 +24,7 @@ export function LandingWorkspaceFlow() {
   const { progress, reducedMotion } = useParallaxProgress({ start: 0.54, end: 0.84 });
 
   return (
-    <section id="workflow" className="px-4 py-24 sm:px-6 lg:px-8">
+    <section id="workflow" className="px-4 py-14 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1500px] rounded-[36px] border border-white/15 bg-white/40 p-6 shadow-[0_26px_90px_rgba(37,14,49,0.1)] backdrop-blur-2xl dark:bg-white/[0.04] sm:p-8 lg:p-10">
         <div className="grid gap-6 border-b border-white/12 pb-8 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)] lg:items-start">
           <div>

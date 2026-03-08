@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { BookOpen, Command, History, Home, LogOut, Menu, Moon, Search, Settings, Sparkles, Sun, Workflow } from "lucide-react";
+import { BookOpen, Command, History, Home, LogOut, Menu, Search, Settings, Sparkles, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ThemeToggleButton } from "@/components/ui/ThemeToggleButton";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { getLocalDatabase } from "@/db/client";
 import { useAuth } from "@/auth/useAuth";
-import { useTheme } from "@/features/theme/useTheme";
 import { CommandPalette } from "@/features/command/CommandPalette";
 import { detectClientShortcutPlatform, formatPrimaryModifierShortcut } from "@/lib/platformShortcuts";
 import { cn } from "@/lib/utils";
@@ -47,7 +47,6 @@ export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const { accessToken, logout } = useAuth();
-  const { resolvedTheme, toggleTheme } = useTheme();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [syncCenterOpen, setSyncCenterOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -248,10 +247,7 @@ export function AppShell() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" className="flex-1 rounded-md" onClick={toggleTheme}>
-                {resolvedTheme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                {resolvedTheme === "dark" ? "Light" : "Dark"}
-              </Button>
+              <ThemeToggleButton showLabel className="flex-1" />
               <Button variant="ghost" size="sm" className="rounded-md" onClick={logout}>
                 Logout
               </Button>
@@ -323,10 +319,7 @@ export function AppShell() {
                           <Command className="mr-2 h-4 w-4" />
                           Command palette
                         </Button>
-                        <Button variant="outline" className="justify-start rounded-md" onClick={toggleTheme}>
-                          {resolvedTheme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                          {resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
-                        </Button>
+                        <ThemeToggleButton showLabel longLabel className="w-full justify-start" />
                         <Button variant="ghost" className="justify-start rounded-md" onClick={logout}>
                           <LogOut className="mr-2 h-4 w-4" />
                           Logout
@@ -349,9 +342,7 @@ export function AppShell() {
                   <Command className="mr-2 h-4 w-4" />
                   Search
                 </Button>
-                <Button variant="outline" size="icon" className="rounded-md lg:hidden" onClick={toggleTheme}>
-                  {resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                </Button>
+                <ThemeToggleButton className="lg:hidden" />
               </div>
             </div>
           </header>

@@ -185,6 +185,14 @@ a {
   50% { transform: translateY(-6px); }
 }
 
+/* Hero cards: gentle float after entrance, staggered so they don't move in sync */
+.animate-float-card-a {
+  animation: float 3s ease-in-out 0.6s infinite;
+}
+.animate-float-card-b {
+  animation: float 3.2s ease-in-out 1s infinite;
+}
+
 .animate-fade-in-up {
   animation: fade-in-up 0.5s ease-out forwards;
 }
@@ -266,6 +274,8 @@ a {
   .animate-slide-in-right,
   .animate-scale-in,
   .animate-float,
+  .animate-float-card-a,
+  .animate-float-card-b,
   .stagger-children > *,
   .text-gradient-animated {
     animation: none !important;

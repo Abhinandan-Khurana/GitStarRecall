@@ -32,7 +32,7 @@ export function LandingConnectSection({
   const flyInClass = reducedMotion ? "" : "opacity-0 animate-slide-up";
 
   return (
-    <section id="connect" ref={connectRef} className="px-4 pb-24 pt-10 sm:px-6 lg:px-8">
+    <section id="connect" ref={connectRef} className="px-4 pb-24 pt-14 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1500px] space-y-6">
         <div className="max-w-3xl">
           <Badge variant="outline" className="rounded-full border-white/25 bg-white/25 px-3 py-1">

@@ -95,7 +95,7 @@ export function LandingValueRail() {
   const previewAnimationStyle = reducedMotion ? undefined : { animationDelay: "80ms" };
 
   return (
-    <section className="relative px-4 py-20 sm:px-6 lg:px-8">
+    <section className="relative px-4 py-14 sm:px-6 lg:px-8">
       <div className="mx-auto grid max-w-[1500px] gap-8 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] xl:items-center">
         <div style={{ transform: `translateY(${previewOffset}px)` }}>
           <div
