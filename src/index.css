@@ -267,19 +267,19 @@ a {
 }
 
 .animate-headline-entrance {
-  animation: headline-entrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: headline-entrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .animate-supporting-entrance {
-  animation: supporting-entrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: supporting-entrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .animate-float-entrance {
-  animation: float-entrance 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: float-entrance 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .animate-buttons-entrance {
-  animation: buttons-entrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: buttons-entrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .animate-fade-in-up {

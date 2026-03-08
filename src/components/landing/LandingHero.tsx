@@ -79,14 +79,16 @@ export function LandingHero({
             <div className="relative mx-auto min-h-[760px] max-w-[1500px]">
               {/* Left card - positioned to avoid center content */}
               <div className="absolute left-[1%] top-[8%] w-[13.5rem] z-10" style={reducedMotion ? undefined : { transform: `translateY(${chipOffsetY}px)` }}>
-                <div className={`${cardEnterClass} ${floatCardClassA}`} style={reducedMotion ? undefined : { animationDelay: "400ms" }}>
-                  <HeroCard title="Recall moment" isBackground className={hoverLiftClass}>
-                    <p className="mt-4 text-[1.05rem] font-semibold leading-8 text-foreground">"TypeScript auth starter with clear boundaries"</p>
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      <span className="rounded-full border border-white/18 bg-white/10 px-3 py-1 text-xs text-foreground/75">Read stars by memory</span>
-                      <span className="rounded-full border border-white/18 bg-white/10 px-3 py-1 text-xs text-foreground/75">Explicit context</span>
-                    </div>
-                  </HeroCard>
+                <div className={floatCardClassA} style={reducedMotion ? undefined : { animationDelay: "1100ms" }}>
+                  <div className={cardEnterClass} style={reducedMotion ? undefined : { animationDelay: "400ms" }}>
+                    <HeroCard title="Recall moment" isBackground className={hoverLiftClass}>
+                      <p className="mt-4 text-[1.05rem] font-semibold leading-8 text-foreground">"TypeScript auth starter with clear boundaries"</p>
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        <span className="rounded-full border border-white/18 bg-white/10 px-3 py-1 text-xs text-foreground/75">Read stars by memory</span>
+                        <span className="rounded-full border border-white/18 bg-white/10 px-3 py-1 text-xs text-foreground/75">Explicit context</span>
+                      </div>
+                    </HeroCard>
+                  </div>
                 </div>
               </div>
 
@@ -105,19 +107,21 @@ export function LandingHero({
 
               {/* Right card - positioned to avoid center content */}
               <div className="absolute right-[1%] top-[12%] w-[18.5rem] z-10" style={reducedMotion ? undefined : { transform: `translateY(${heroOffsetY}px)` }}>
-                <div className={`${cardEnterClass} ${floatCardClassB}`} style={reducedMotion ? undefined : { animationDelay: "500ms" }}>
-                  <HeroCard title="Workspace preview" isBackground className={hoverLiftClass}>
-                    <div className="absolute right-5 top-5">
-                      <Github className="h-4 w-4 text-foreground/55" />
-                    </div>
-                    <div className="mt-4 grid gap-3">
-                      {PREVIEW_ITEMS.map((item, index) => (
-                        <div key={item} className={`rounded-2xl border border-white/15 px-4 py-3 ${index === 1 ? "bg-primary/14" : "bg-white/10"}`}>
-                          <p className="text-sm font-medium text-foreground">{item}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </HeroCard>
+                <div className={floatCardClassB} style={reducedMotion ? undefined : { animationDelay: "1200ms" }}>
+                  <div className={cardEnterClass} style={reducedMotion ? undefined : { animationDelay: "500ms" }}>
+                    <HeroCard title="Workspace preview" isBackground className={hoverLiftClass}>
+                      <div className="absolute right-5 top-5">
+                        <Github className="h-4 w-4 text-foreground/55" />
+                      </div>
+                      <div className="mt-4 grid gap-3">
+                        {PREVIEW_ITEMS.map((item, index) => (
+                          <div key={item} className={`rounded-2xl border border-white/15 px-4 py-3 ${index === 1 ? "bg-primary/14" : "bg-white/10"}`}>
+                            <p className="text-sm font-medium text-foreground">{item}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </HeroCard>
+                  </div>
                 </div>
               </div>
 
@@ -174,51 +178,57 @@ export function LandingHero({
 
             <div className="relative z-10 mt-12 grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,0.76fr)_minmax(0,1.1fr)_minmax(0,0.9fr)]">
               <div style={reducedMotion ? undefined : { transform: `translateY(${chipOffsetY}px)` }}>
-                <div className={`h-full ${cardEnterClass} ${floatCardClassA}`} style={reducedMotion ? undefined : { animationDelay: "400ms" }}>
-                  <HeroCard title="Recall moment" isBackground className={`${hoverLiftClass} h-full`}>
-                    <p className="mt-4 text-xl font-semibold leading-8 text-foreground">"TypeScript auth starter with clean boundaries"</p>
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      <span className="rounded-full border border-white/18 bg-white/10 px-3 py-1 text-xs text-foreground/75">Read stars by memory</span>
-                      <span className="rounded-full border border-white/18 bg-white/10 px-3 py-1 text-xs text-foreground/75">Explicit context</span>
-                    </div>
-                  </HeroCard>
+                <div className={`h-full ${floatCardClassA}`} style={reducedMotion ? undefined : { animationDelay: "1100ms" }}>
+                  <div className={`h-full ${cardEnterClass}`} style={reducedMotion ? undefined : { animationDelay: "400ms" }}>
+                    <HeroCard title="Recall moment" isBackground className={`${hoverLiftClass} h-full`}>
+                      <p className="mt-4 text-xl font-semibold leading-8 text-foreground">"TypeScript auth starter with clean boundaries"</p>
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        <span className="rounded-full border border-white/18 bg-white/10 px-3 py-1 text-xs text-foreground/75">Read stars by memory</span>
+                        <span className="rounded-full border border-white/18 bg-white/10 px-3 py-1 text-xs text-foreground/75">Explicit context</span>
+                      </div>
+                    </HeroCard>
+                  </div>
                 </div>
               </div>
 
               <div className="md:col-span-2 xl:col-span-1" style={reducedMotion ? undefined : { transform: `translateY(${heroOffsetY * 0.28}px)` }}>
-                <div className={`h-full ${cardEnterClass} ${floatCardClassC}`} style={reducedMotion ? undefined : { animationDelay: "500ms" }}>
-                  <HeroCard title="Read-only GitHub access" isBackground className={`${hoverLiftClass} h-full`}>
-                    <div className="mt-4 flex items-start gap-4">
-                      <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary/20 text-primary">
-                        <Lock className="h-5 w-5" />
+                <div className={`h-full ${floatCardClassC}`} style={reducedMotion ? undefined : { animationDelay: "1200ms" }}>
+                  <div className={`h-full ${cardEnterClass}`} style={reducedMotion ? undefined : { animationDelay: "500ms" }}>
+                    <HeroCard title="Read-only GitHub access" isBackground className={`${hoverLiftClass} h-full`}>
+                      <div className="mt-4 flex items-start gap-4">
+                        <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary/20 text-primary">
+                          <Lock className="h-5 w-5" />
+                        </div>
+                        <p className="text-base leading-7 text-foreground/78">
+                          OAuth and PAT only need read-only repo access to import your starred public and private repositories. GitStarRecall never asks for write access.
+                        </p>
                       </div>
-                      <p className="text-base leading-7 text-foreground/78">
-                        OAuth and PAT only need read-only repo access to import your starred public and private repositories. GitStarRecall never asks for write access.
-                      </p>
-                    </div>
-                    <div className="mt-5 flex flex-wrap gap-2 text-xs text-foreground/72">
-                      <span className="rounded-full border border-white/18 bg-white/12 px-3 py-1">OAuth</span>
-                      <span className="rounded-full border border-white/18 bg-white/12 px-3 py-1">PAT</span>
-                      <span className="rounded-full border border-white/18 bg-white/12 px-3 py-1">No write scope</span>
-                    </div>
-                  </HeroCard>
+                      <div className="mt-5 flex flex-wrap gap-2 text-xs text-foreground/72">
+                        <span className="rounded-full border border-white/18 bg-white/12 px-3 py-1">OAuth</span>
+                        <span className="rounded-full border border-white/18 bg-white/12 px-3 py-1">PAT</span>
+                        <span className="rounded-full border border-white/18 bg-white/12 px-3 py-1">No write scope</span>
+                      </div>
+                    </HeroCard>
+                  </div>
                 </div>
               </div>
 
               <div className="md:col-span-2 xl:col-span-1" style={reducedMotion ? undefined : { transform: `translateY(${heroOffsetY}px)` }}>
-                <div className={`h-full ${cardEnterClass} ${floatCardClassB}`} style={reducedMotion ? undefined : { animationDelay: "600ms" }}>
-                  <HeroCard title="Workspace preview" isBackground className={`${hoverLiftClass} h-full`}>
-                    <div className="absolute right-5 top-5">
-                      <Github className="h-4 w-4 text-foreground/55" />
-                    </div>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                      {PREVIEW_ITEMS.map((item, index) => (
-                        <div key={item} className={`rounded-2xl border border-white/15 px-4 py-3 ${index === 1 ? "bg-primary/14" : "bg-white/10"}`}>
-                          <p className="text-sm font-medium text-foreground">{item}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </HeroCard>
+                <div className={`h-full ${floatCardClassB}`} style={reducedMotion ? undefined : { animationDelay: "1300ms" }}>
+                  <div className={`h-full ${cardEnterClass}`} style={reducedMotion ? undefined : { animationDelay: "600ms" }}>
+                    <HeroCard title="Workspace preview" isBackground className={`${hoverLiftClass} h-full`}>
+                      <div className="absolute right-5 top-5">
+                        <Github className="h-4 w-4 text-foreground/55" />
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                        {PREVIEW_ITEMS.map((item, index) => (
+                          <div key={item} className={`rounded-2xl border border-white/15 px-4 py-3 ${index === 1 ? "bg-primary/14" : "bg-white/10"}`}>
+                            <p className="text-sm font-medium text-foreground">{item}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </HeroCard>
+                  </div>
                 </div>
               </div>
             </div>
