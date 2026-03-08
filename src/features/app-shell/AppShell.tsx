@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { BookOpen, Command, History, Home, LogOut, Menu, Moon, Search, Settings, Sparkles, Sun, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -131,10 +131,9 @@ export function AppShell() {
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <div className="mx-auto flex min-h-screen max-w-[1600px]">
         <aside className="hidden w-64 shrink-0 border-r border-border/60 bg-[var(--app-panel)] px-5 py-6 lg:flex lg:flex-col">
-          <button
-            type="button"
-            className="flex min-w-0 items-center gap-3 rounded-md px-2 py-2 text-left"
-            onClick={() => navigate("/app")}
+          <Link
+            to="/"
+            className="flex min-w-0 items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-background/70"
           >
             <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
               <Sparkles className="h-4 w-4" />
@@ -143,7 +142,7 @@ export function AppShell() {
               <p className="font-display text-base font-semibold">GitStarRecall</p>
               <p className="truncate text-xs text-muted-foreground">Local memory for GitHub stars</p>
             </div>
-          </button>
+          </Link>
 
           <Button
             variant="outline"
@@ -263,10 +262,10 @@ export function AppShell() {
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-20 border-b border-border/60 bg-[var(--app-bg)]/95 backdrop-blur">
             <div className="flex items-center justify-between gap-4 px-4 py-4 sm:px-6">
-              <div className="min-w-0">
+              <Link to="/" className="min-w-0 transition-opacity hover:opacity-80">
                 <p className="font-display text-xl font-semibold">{getTitle(location.pathname)}</p>
                 <p className="truncate text-sm text-muted-foreground">{getDescription(location.pathname)}</p>
-              </div>
+              </Link>
               <div className="flex items-center gap-2">
                 <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
                   <SheetTrigger asChild>
