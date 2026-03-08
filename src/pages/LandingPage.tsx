@@ -96,6 +96,7 @@ export default function LandingPage() {
         onPatTokenChange={setPatToken}
         onPatSubmit={handlePatSubmit}
         authError={authError}
+        reducedMotion={reducedMotion}
       />
 
       <footer className="px-4 pb-14 sm:px-6 lg:px-8">

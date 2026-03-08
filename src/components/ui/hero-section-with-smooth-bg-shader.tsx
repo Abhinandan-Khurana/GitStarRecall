@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { MeshGradient } from "@paper-design/shaders-react";
 import { useEffect, useState } from "react";
 
@@ -21,6 +22,8 @@ interface HeroSectionProps {
   fontFamily?: string;
   fontWeight?: number;
   reducedMotion?: boolean;
+  renderContent?: boolean;
+  children?: ReactNode;
 }
 
 export function HeroSection({
@@ -43,6 +46,8 @@ export function HeroSection({
   fontFamily = "var(--font-display)",
   fontWeight = 600,
   reducedMotion = false,
+  renderContent = true,
+  children,
 }: HeroSectionProps) {
   const [dimensions, setDimensions] = useState({ width: 1920, height: 1080 });
   const [mounted, setMounted] = useState(false);
@@ -81,27 +86,30 @@ export function HeroSection({
       </div>
 
       <div className={`relative z-10 mx-auto w-full px-6 ${maxWidth}`}>
-        <div className="text-center">
-          <p className="mb-5 text-sm font-medium uppercase tracking-[0.35em] text-primary/70">{highlightText}</p>
-          <h1
-            className={`mb-6 text-balance text-4xl font-semibold leading-[0.95] text-foreground sm:text-5xl md:text-6xl lg:text-7xl xl:text-[5.5rem] ${titleClassName}`}
-            style={{ fontFamily, fontWeight }}
-          >
-            {title}
-          </h1>
-          <p className={`mx-auto mb-10 max-w-2xl text-pretty text-lg leading-relaxed text-foreground/75 sm:text-xl ${descriptionClassName}`}>
-            {description}
-          </p>
-          {buttonText ? (
-            <button
-              type="button"
-              onClick={onButtonClick}
-              className={`rounded-full border border-border/70 bg-foreground px-6 py-4 text-sm font-medium text-background transition duration-300 hover:scale-[1.01] hover:bg-foreground/90 sm:px-8 ${buttonClassName}`}
+        {renderContent ? (
+          <div className="text-center">
+            <p className="mb-5 text-sm font-medium uppercase tracking-[0.35em] text-primary/70">{highlightText}</p>
+            <h1
+              className={`mb-6 text-balance text-4xl font-semibold leading-[0.95] text-foreground sm:text-5xl md:text-6xl lg:text-7xl xl:text-[5.5rem] ${titleClassName}`}
+              style={{ fontFamily, fontWeight }}
             >
-              {buttonText}
-            </button>
-          ) : null}
-        </div>
+              {title}
+            </h1>
+            <p className={`mx-auto mb-10 max-w-2xl text-pretty text-lg leading-relaxed text-foreground/75 sm:text-xl ${descriptionClassName}`}>
+              {description}
+            </p>
+            {buttonText ? (
+              <button
+                type="button"
+                onClick={onButtonClick}
+                className={`rounded-full border border-border/70 bg-foreground px-6 py-4 text-sm font-medium text-background transition duration-300 hover:scale-[1.01] hover:bg-foreground/90 sm:px-8 ${buttonClassName}`}
+              >
+                {buttonText}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {children}
       </div>
     </section>
   );
