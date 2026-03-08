@@ -53,9 +53,9 @@ function HeroCard({
 export function LandingHero({
   onScrollToConnect,
   onScrollToFlow,
-  onOpenSource: _onOpenSource,
-  isAuthenticated: _isAuthenticated,
-  onNavCtaClick: _onNavCtaClick,
+  onOpenSource,
+  isAuthenticated,
+  onNavCtaClick,
   reducedMotion,
   shaderColors,
   heroOffsetY,
@@ -68,9 +68,29 @@ export function LandingHero({
   const hoverLiftClass = reducedMotion ? "" : "transition-transform duration-500 hover:-translate-y-2 hover:scale-[1.01]";
   const floatCardClassA = reducedMotion ? "" : "animate-float-card-a";
   const floatCardClassB = reducedMotion ? "" : "animate-float-card-b";
+  const floatCardClassC = reducedMotion ? "" : "animate-float-card-c";
 
   return (
     <section className="relative min-h-screen overflow-hidden">
+      {/* Navbar */}
+      <nav className="fixed inset-x-0 top-0 z-50 flex items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+        <div className="flex items-center gap-2">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/12 text-primary font-semibold">
+            G
+          </div>
+          <p className="hidden text-sm font-semibold text-foreground sm:block">GitStarRecall</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" className="text-sm text-foreground/75 hover:text-foreground" onClick={onOpenSource}>
+            GitHub
+          </Button>
+          <Button size="sm" className="rounded-full px-4" onClick={onNavCtaClick}>
+            {isAuthenticated ? "Open app" : "Get started"}
+          </Button>
+        </div>
+      </nav>
+      
+      <section className="relative min-h-screen overflow-hidden">
       <HeroSection reducedMotion={reducedMotion} colors={shaderColors} className="min-h-screen items-start justify-start" maxWidth="max-w-[1500px]" renderContent={false}>
         <div className="relative z-20 mx-auto flex min-h-screen w-full flex-col justify-center pb-12 pt-24 sm:pt-28 lg:pt-32">
           <div className="hidden xl:block">
@@ -126,16 +146,16 @@ export function LandingHero({
               </div>
 
               {/* Bottom card - spans width but positions below center content */}
-              <div className="absolute inset-x-0 bottom-0 z-20 grid items-end gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.75fr)]">
+              <div className="absolute inset-x-0 bottom-0 z-20 grid items-end gap-4 px-6 pb-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.75fr)]">
                 <HeroCard
                   title="Read-only GitHub access"
                   isBackground
                   className={`${cardEnterClass} ${hoverLiftClass} min-h-[9.5rem]`}
                   style={reducedMotion ? undefined : { animationDelay: "600ms" }}
                 >
-                  <div className="mt-4 flex max-w-xl items-start gap-3">
-                    <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl bg-white/10 text-foreground/80">
-                      <Lock className="h-4 w-4" />
+                  <div className="mt-4 flex max-w-xl items-start gap-4">
+                    <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary/20 text-primary">
+                      <Lock className="h-5 w-5" />
                     </div>
                     <p className="text-sm leading-7 text-foreground/78">
                       GitHub OAuth uses read-only access so GitStarRecall can read your public repositories. Personal Access Tokens should use the same read-only repository scope for reading public repositories.
@@ -143,7 +163,7 @@ export function LandingHero({
                   </div>
                 </HeroCard>
 
-                <div className={`flex items-center justify-end gap-3 pb-1 ${buttonsEnterClass}`} style={reducedMotion ? undefined : { animationDelay: "650ms" }}>
+                <div className={`flex flex-col items-end gap-3 ${buttonsEnterClass}`} style={reducedMotion ? undefined : { animationDelay: "650ms" }}>
                   <Button size="lg" className="rounded-full px-6 shadow-[0_18px_50px_rgba(184,83,138,0.3)]" onClick={onScrollToConnect}>
                     Get started
                     <ArrowRight className="ml-2 h-4 w-4" />
@@ -199,12 +219,12 @@ export function LandingHero({
                 <HeroCard
                   title="Read-only GitHub access"
                   isBackground
-                  className={`${cardEnterClass} ${hoverLiftClass} h-full`}
+                  className={`${cardEnterClass} ${hoverLiftClass} ${floatCardClassC} h-full`}
                   style={reducedMotion ? undefined : { animationDelay: "500ms" }}
                 >
-                  <div className="mt-4 flex items-start gap-3">
-                    <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl bg-white/10 text-foreground/80">
-                      <Lock className="h-4 w-4" />
+                  <div className="mt-4 flex items-start gap-4">
+                    <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary/20 text-primary">
+                      <Lock className="h-5 w-5" />
                     </div>
                     <p className="text-base leading-7 text-foreground/78">
                       OAuth and PAT only need read-only repo access to import your starred public and private repositories. GitStarRecall never asks for write access.

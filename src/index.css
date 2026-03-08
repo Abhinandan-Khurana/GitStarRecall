@@ -180,6 +180,31 @@ a {
   100% { transform: translateX(200%); }
 }
 
+/* Cloud-like floating animation with motion drift */
+@keyframes float-cloud-a {
+  0% { transform: translateY(0px) translateX(0px); }
+  25% { transform: translateY(-8px) translateX(2px); }
+  50% { transform: translateY(-12px) translateX(-3px); }
+  75% { transform: translateY(-6px) translateX(1px); }
+  100% { transform: translateY(0px) translateX(0px); }
+}
+
+@keyframes float-cloud-b {
+  0% { transform: translateY(0px) translateX(0px); }
+  25% { transform: translateY(-10px) translateX(-2px); }
+  50% { transform: translateY(-14px) translateX(3px); }
+  75% { transform: translateY(-7px) translateX(-1px); }
+  100% { transform: translateY(0px) translateX(0px); }
+}
+
+@keyframes float-cloud-c {
+  0% { transform: translateY(0px) translateX(0px); }
+  25% { transform: translateY(-6px) translateX(3px); }
+  50% { transform: translateY(-10px) translateX(-2px); }
+  75% { transform: translateY(-5px) translateX(2px); }
+  100% { transform: translateY(0px) translateX(0px); }
+}
+
 @keyframes float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-6px); }
@@ -230,12 +255,15 @@ a {
   }
 }
 
-/* Hero cards: gentle float after entrance, staggered so they don't move in sync */
+/* Hero cards: cloud-like float after entrance, each with unique drift pattern */
 .animate-float-card-a {
-  animation: float 3s ease-in-out 0.6s infinite;
+  animation: float-cloud-a 4.5s ease-in-out 0.6s infinite;
 }
 .animate-float-card-b {
-  animation: float 3.2s ease-in-out 1s infinite;
+  animation: float-cloud-b 5s ease-in-out 0.8s infinite;
+}
+.animate-float-card-c {
+  animation: float-cloud-c 4.8s ease-in-out 0.5s infinite;
 }
 
 .animate-headline-entrance {
@@ -337,6 +365,7 @@ a {
   .animate-float,
   .animate-float-card-a,
   .animate-float-card-b,
+  .animate-float-card-c,
   .animate-headline-entrance,
   .animate-supporting-entrance,
   .animate-float-entrance,
