@@ -75,6 +75,8 @@ export default function LandingPage() {
         onScrollToConnect={scrollToConnect}
         onScrollToFlow={scrollToFlow}
         onOpenSource={openSource}
+        isAuthenticated={isAuthenticated}
+        onNavCtaClick={isAuthenticated ? () => navigate("/app") : scrollToConnect}
         reducedMotion={reducedMotion}
         shaderColors={heroShaderColors}
         heroOffsetY={reducedMotion ? 0 : progress * 70}

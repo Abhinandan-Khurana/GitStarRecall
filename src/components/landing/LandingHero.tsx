@@ -1,13 +1,16 @@
 import type { CSSProperties, ReactNode } from "react";
-import { ArrowDown, ArrowRight, Github, Lock, Moon, Sparkles, Sun } from "lucide-react";
+import { ArrowDown, ArrowRight, Github, Lock, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ThemeToggleButton } from "@/components/ui/ThemeToggleButton";
 import { HeroSection } from "@/components/ui/hero-section-with-smooth-bg-shader";
-import { useTheme } from "@/features/theme/useTheme";
 
 type LandingHeroProps = {
   onScrollToConnect: () => void;
   onScrollToFlow: () => void;
   onOpenSource: () => void;
+  /** When true, navbar CTA is "Open app" and goes to /app; otherwise "Get started" scrolls to connect */
+  isAuthenticated: boolean;
+  onNavCtaClick: () => void;
   reducedMotion: boolean;
   shaderColors: string[];
   heroOffsetY: number;
@@ -47,25 +50,28 @@ export function LandingHero({
   onScrollToConnect,
   onScrollToFlow,
   onOpenSource,
+  isAuthenticated,
+  onNavCtaClick,
   reducedMotion,
   shaderColors,
   heroOffsetY,
   chipOffsetY,
 }: LandingHeroProps) {
-  const { resolvedTheme, toggleTheme } = useTheme();
   const flyInClass = reducedMotion ? "" : "opacity-0 animate-slide-up";
   const hoverLiftClass = reducedMotion ? "" : "transition-transform duration-500 hover:-translate-y-2 hover:scale-[1.01]";
+  const floatCardClassA = reducedMotion ? "" : "animate-float-card-a";
+  const floatCardClassB = reducedMotion ? "" : "animate-float-card-b";
 
   return (
     <section className="relative min-h-screen overflow-hidden">
       <HeroSection reducedMotion={reducedMotion} colors={shaderColors} className="min-h-screen items-start justify-start" maxWidth="max-w-[1500px]" renderContent={false}>
-        <div className="relative z-20 mx-auto flex min-h-screen w-full flex-col justify-center pb-16 pt-28 sm:pt-32 lg:pt-36">
+        <div className="relative z-20 mx-auto flex min-h-screen w-full flex-col justify-center pb-12 pt-24 sm:pt-28 lg:pt-32">
           <div className="hidden xl:block">
             <div className="relative mx-auto min-h-[760px] max-w-[1500px]">
               <div className="absolute left-[2%] top-[18%] w-[14rem]" style={reducedMotion ? undefined : { transform: `translateY(${chipOffsetY}px)` }}>
                 <HeroCard
                   title="Recall moment"
-                  className={`${flyInClass} ${hoverLiftClass}`}
+                  className={`${flyInClass} ${hoverLiftClass} ${floatCardClassA}`}
                   style={reducedMotion ? undefined : { animationDelay: "100ms" }}
                 >
                   <p className="mt-4 text-[1.05rem] font-semibold leading-8 text-foreground">“TypeScript auth starter with clear boundaries”</p>
@@ -89,7 +95,7 @@ export function LandingHero({
               <div className="absolute right-[2%] top-[24%] w-[18.5rem]" style={reducedMotion ? undefined : { transform: `translateY(${heroOffsetY}px)` }}>
                 <HeroCard
                   title="Workspace preview"
-                  className={`${flyInClass} ${hoverLiftClass}`}
+                  className={`${flyInClass} ${hoverLiftClass} ${floatCardClassB}`}
                   style={reducedMotion ? undefined : { animationDelay: "180ms" }}
                 >
                   <div className="absolute right-5 top-5">
@@ -161,7 +167,7 @@ export function LandingHero({
               <div style={reducedMotion ? undefined : { transform: `translateY(${chipOffsetY}px)` }}>
                 <HeroCard
                   title="Recall moment"
-                  className={`${flyInClass} ${hoverLiftClass} h-full`}
+                  className={`${flyInClass} ${hoverLiftClass} ${floatCardClassA} h-full`}
                   style={reducedMotion ? undefined : { animationDelay: "100ms" }}
                 >
                   <p className="mt-4 text-xl font-semibold leading-8 text-foreground">“TypeScript auth starter with clean boundaries”</p>
@@ -197,7 +203,7 @@ export function LandingHero({
               <div className="md:col-span-2 xl:col-span-1" style={reducedMotion ? undefined : { transform: `translateY(${heroOffsetY}px)` }}>
                 <HeroCard
                   title="Workspace preview"
-                  className={`${flyInClass} ${hoverLiftClass} h-full`}
+                  className={`${flyInClass} ${hoverLiftClass} ${floatCardClassB} h-full`}
                   style={reducedMotion ? undefined : { animationDelay: "240ms" }}
                 >
                   <div className="absolute right-5 top-5">
@@ -217,8 +223,8 @@ export function LandingHero({
         </div>
       </HeroSection>
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 mx-auto max-w-[1500px] px-4 sm:px-6 lg:px-8">
-        <div className="pointer-events-auto flex items-center justify-between border-b border-white/20 py-6 backdrop-blur-md">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-50 mx-auto max-w-[1500px] px-4 sm:px-6 lg:px-8">
+        <div className="pointer-events-auto flex items-center justify-between border-b border-white/20 py-4 backdrop-blur-md">
           <button type="button" className="flex items-center gap-3 text-left" onClick={onScrollToFlow}>
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-white/12 text-primary shadow-[0_18px_60px_rgba(22,12,35,0.12)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
               <Sparkles className="h-5 w-5" />
@@ -230,12 +236,18 @@ export function LandingHero({
           </button>
 
           <div className="flex items-center gap-2">
-            <Button variant="outline" className="rounded-full border-white/25 bg-white/10 backdrop-blur-md" onClick={onOpenSource}>
-              View source
+            <Button
+              size="sm"
+              className="rounded-full border-white/25 bg-white/14 px-4 text-foreground shadow-[0_18px_50px_rgba(184,83,138,0.25)] backdrop-blur-md hover:bg-white/20 hover:text-foreground dark:bg-white/10 dark:hover:bg-white/15"
+              onClick={onNavCtaClick}
+            >
+              {isAuthenticated ? "Open app" : "Get started"}
+              <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
-            <Button variant="outline" size="icon" className="rounded-full border-white/25 bg-white/10 backdrop-blur-md" onClick={toggleTheme}>
-              {resolvedTheme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            <Button variant="outline" size="icon" className="rounded-full border-white/25 bg-white/10 backdrop-blur-md" onClick={onOpenSource} aria-label="View source">
+              <Github className="h-4 w-4" />
             </Button>
+            <ThemeToggleButton />
           </div>
         </div>
       </div>
