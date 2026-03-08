@@ -71,6 +71,7 @@ export default function LandingPage() {
 
   return (
     <LandingParallaxScene className="min-h-screen">
+      {/* Navigation is rendered inside LandingHero component */}
       <LandingHero
         onScrollToConnect={scrollToConnect}
         onScrollToFlow={scrollToFlow}
