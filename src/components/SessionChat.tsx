@@ -175,7 +175,7 @@ function ModelSettingsPopover({
       <Button
         type="button"
         variant="ghost"
-        className="session-chat-addon-trigger h-8 rounded-full px-2 text-xs font-medium"
+        className="session-chat-addon-trigger h-8 cursor-default rounded-full px-2 text-xs font-medium hover:bg-transparent hover:text-foreground"
       >
         {selectedProvider.label}
       </Button>
