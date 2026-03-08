@@ -9,6 +9,7 @@ import type {
   RepoReadmeRecord,
 } from "./types";
 import { canonicalChecksumInput, sha256Hex } from "./checksum";
+import { normalizeGitHubToken } from "@/lib/normalizeGitHubToken";
 
 type Logger = {
   debug: (message: string, meta?: Record<string, unknown>) => void;
@@ -52,14 +53,6 @@ const API_BASE_URL = "https://api.github.com";
 const DEFAULT_PER_PAGE = 100;
 const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_README_CONCURRENCY = 6;
-
-function normalizeGitHubToken(rawToken: string): string {
-  let token = rawToken.trim();
-  token = token.replace(/^bearer\s+/i, "");
-  token = token.replace(/^token\s+/i, "");
-  token = token.replace(/^['"]+|['"]+$/g, "").trim();
-  return token;
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -262,7 +255,7 @@ async function requestWithBackoff(args: {
 
     if (response.status === 401) {
       throw new Error(
-        "GitHub authorization failed (401). Use raw token only (no 'Bearer ' prefix) and ensure scopes allow /user/starred.",
+        "GitHub authorization failed (401). Check: token is a raw PAT or OAuth token (no 'Bearer ' prefix when pasting); token is not expired or revoked (see github.com/settings/tokens).",
       );
     }
 

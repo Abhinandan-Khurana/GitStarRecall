@@ -14,14 +14,7 @@ import { AuthContext } from "./auth-context";
 import type { AuthContextValue, AuthMethod, OAuthCallbackInput } from "./auth-types";
 import { setLocalDatabaseScope } from "@/db/client";
 import { clearSettings } from "@/lib/settings";
-
-function normalizeTokenInput(raw: string): string {
-  let token = raw.trim();
-  token = token.replace(/^bearer\s+/i, "");
-  token = token.replace(/^token\s+/i, "");
-  token = token.replace(/^['"]+|['"]+$/g, "").trim();
-  return token;
-}
+import { normalizeGitHubToken } from "@/lib/normalizeGitHubToken";
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -48,14 +41,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
       state: input.state,
     });
 
-    const normalizedToken = normalizeTokenInput(token);
+    const normalizedToken = normalizeGitHubToken(token);
     setLocalDatabaseScope(buildAuthStorageScope(normalizedToken));
     setAccessToken(normalizedToken);
     setAuthMethod("oauth");
   }, []);
 
   const loginWithPat = useCallback((token: string) => {
-    const trimmed = normalizeTokenInput(token);
+    const trimmed = normalizeGitHubToken(token);
 
     if (!trimmed) {
       throw new Error("GitHub token is required");
