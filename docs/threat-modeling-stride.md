@@ -32,6 +32,7 @@ Out of scope:
 Threats:
 - Attacker impersonates user in the browser (session spoofing).
 - Malicious site tricks user into pasting PAT into a fake UI.
+- User pastes a header-form or quoted token value and auth flow misinterprets it, leading to avoidable 401s and unsafe retry behavior.
 - Malicious local endpoint impersonates trusted local runtime.
 - Unintended model artifact host access when Browser WebLLM is enabled.
 
@@ -39,6 +40,7 @@ Mitigations:
 - Use OAuth PKCE and avoid tokens in URL.
 - Clear separation between landing and login flow.
 - Add warning banner when PAT is used; recommend OAuth.
+- Normalize OAuth/PAT token input before use (strip `Bearer ` / `token ` prefixes, quotes, and extra whitespace).
 - Use strict Content Security Policy (CSP).
 - Require explicit opt-in for local endpoints and show endpoint origin clearly.
 - Enforce localhost-only allowlist for Ollama embedding service base URL.
@@ -82,14 +84,16 @@ Threats:
 - Tokens leaked through logs or URL parameters.
 - Local DB accessed by other scripts via XSS.
 - Overly verbose debug logs expose private chunk text.
+- Local reset leaves browser-cached model/runtime artifacts behind after the user expects a full wipe.
 
 Mitigations:
 - External LLM off by default, explicit opt-in.
 - Browser WebLLM download is explicit opt-in; no GitHub token in request payloads.
 - Send only top-K snippets, not full repo content.
-- Token stored in memory or encrypted storage.
+- Keep GitHub tokens in memory only; provider/API-key settings may use scoped local storage with optional encryption support when configured.
 - Scope local SQLite/localStorage persistence by auth token hash so one authenticated identity does not inherit another identity's indexed corpus.
 - Add “Clear all data” and “Clear token” actions.
+- Clear browser cache entries used for WebLLM/model artifacts during `Delete local data`.
 - Restrict debug logs to IDs/counts/timings; never log README plaintext by default.
 - Ollama embedding request payload must not include GitHub tokens or PAT values.
 
@@ -120,6 +124,7 @@ Threats:
 - Browser model runtime unsupported/failing causes repeated initialization attempts.
 - Capability probe misclassification can force unnecessarily weak local model selection on strong desktops.
 - Unsafe advanced retrieval tuning can degrade quality/latency if accidentally enabled.
+- Misleading auth troubleshooting guidance nudges users toward creating broader-scope tokens when the real issue is token validity or formatting.
 
 Mitigations:
 - Use minimal GitHub scopes or fine-grained PAT.
@@ -128,6 +133,7 @@ Mitigations:
 - Add deterministic fallback chain when WebLLM fails to avoid repeated hard-fail loops.
 - Use tolerant recommendation heuristics for missing browser capability hints (e.g., Safari/macOS memory hints), plus threshold anti-flap behavior.
 - Keep advanced tuning behind explicit developer checkbox + warning banner and bounded setting ranges.
+- Focus 401 guidance on invalid, expired, revoked, or incorrectly pasted tokens before recommending broader-scope credential changes.
 
 ---
 
@@ -136,6 +142,7 @@ Mitigations:
 Mapped requirements:
 - Local-first storage: SQLite WASM + sqlite-vec.
 - Auth-scoped local persistence for SQLite and settings continuity.
+- Shared GitHub token normalization before in-memory storage/use.
 - OAuth PKCE and PAT fallback with warnings.
 - Explicit LLM opt-in.
 - CSP and README sanitization.
@@ -143,6 +150,7 @@ Mapped requirements:
 - Worker-pool and batch-size guardrails.
 - Backend fallback policy (`webgpu` -> `wasm`) with telemetry.
 - Capability-based browser embedding model recommendation with mobile-safe fallback.
+- Full local reset includes chat-backup and runtime-cache cleanup.
 
 ---
 
@@ -180,6 +188,7 @@ Mapped requirements:
 - Clear toggle for remote/local LLM usage
 - “Clear all data” and “Clear token” actions
 - Visible disclosure when data is sent externally
+- Local data reset also clears WebLLM/model runtime caches where supported
 
 ### 5.6 Risk Assessment
 - Low risk for users who keep LLMs off (local-only)
@@ -192,6 +201,7 @@ Mapped requirements:
 ## 6) Recommended Tests
 - Simulate XSS in README rendering.
 - Token leakage scanning (no tokens in logs).
+- Token normalization coverage for `Bearer ` / `token ` / quoted GitHub token pastes.
 - CORS failure handling for local LLMs.
 - Diff sync correctness (removals + updates).
 - Worker pool pressure tests (queue growth, memory behavior).
@@ -223,3 +233,26 @@ Mitigations:
 - Enforce strict query/index dimension compatibility checks.
 - Show explicit warning for custom model path.
 - Keep diagnostics text-free by default (IDs, counts, dimensions, scores only).
+
+---
+
+## 8) Auth Input + Reset Threat Delta (2026-03-09)
+
+New/changed components:
+
+- Shared `normalizeGitHubToken` helper for OAuth callback tokens and pasted PATs.
+- GitHub API requests standardized on normalized raw tokens plus `Authorization: Bearer <token>`.
+- Public auth/login surfaces now describe OAuth and PAT as read-only access paths for starred public/private repositories when authorized.
+- Local data deletion clears scoped DB state, chat backups, and browser cache entries used for WebLLM/model artifacts.
+
+Threat notes:
+
+- Misformatted pasted tokens should not trigger avoidable auth failure loops or push users toward broader-scope replacement tokens.
+- A user-requested local wipe should also remove cached model artifacts so the residual on-device footprint matches UI expectations.
+
+Mitigations:
+
+- Strip header-style prefixes, quotes, and extra whitespace before using GitHub tokens.
+- Keep raw GitHub tokens in memory only and derive scoped local keys from hashed token identifiers rather than persisting the raw value.
+- Keep 401 remediation focused on token validity/formatting issues before scope expansion.
+- Clear browser runtime/model caches during local data reset.

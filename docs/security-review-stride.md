@@ -61,6 +61,17 @@ Security posture notes:
 - Preserved token handling in React memory only; the new scope keys derive from a one-way hash helper rather than storing raw tokens in browser persistence.
 - Added scope regression tests for auth helper keys and database naming to reduce cross-identity local-data bleed risk.
 
+## 2026-03-09 Update (GitHub Auth Normalization + Reset Semantics)
+
+- Added shared GitHub token normalization for both OAuth callback tokens and pasted PATs:
+  - strips accidental `Bearer ` / `token ` prefixes,
+  - trims surrounding quotes,
+  - collapses extra whitespace before in-memory use.
+- Standardized GitHub API authorization around normalized raw tokens plus `Authorization: Bearer <token>` request headers.
+- Updated 401 guidance to focus on invalid, expired, revoked, or incorrectly pasted tokens instead of implying extra scopes are usually required.
+- Public auth/login copy now consistently frames OAuth and PAT as read-only access paths for starred public and private repositories when the authorized token can read them.
+- `Delete local data` now clears scoped database state, chat backup state, and browser cache entries associated with WebLLM/model runtime artifacts.
+
 ---
 
 ## 1) S – Spoofing
@@ -69,7 +80,8 @@ Security posture notes:
 |------------|--------|-----------------|
 | OAuth PKCE; avoid tokens in URL | **Done** | `src/auth/githubOAuth.ts`: `buildGitHubAuthorizeUrl` uses `code_challenge` (S256) and `code_verifier` in sessionStorage; token is obtained via `exchangeOAuthCode` (server-side exchange). Callback uses only `code` and `state` from URL; token never in URL. |
 | Clear separation public vs authenticated surfaces | **Done** | Public `LandingPage` remains at `/`, `AuthCallbackPage` remains at `/auth/callback`, and authenticated views now live behind `AppShell` routes (`/app/setup`, `/app/recall`, `/app/library`, `/app/sessions`, `/app/settings`). Auth token state remains in React memory; OAuth PKCE verifier/state use `sessionStorage` only for the OAuth handshake. |
-| Warning banner when PAT is used; recommend OAuth | **Done** | Auth method is shown in the sessions collapsible (`authMethod`: "oauth" / "pat") and there is **explicit warning** when user is logged in with PAT (e.g. “You’re using a PAT. Prefer OAuth for better security.”).
+| Normalize pasted OAuth/PAT input before use | **Done** | `src/lib/normalizeGitHubToken.ts` strips header-style prefixes, surrounding quotes, and extra whitespace. `src/auth/AuthContext.tsx` applies it before storing the token in React state or deriving auth-scoped local keys. |
+| Warning banner when PAT is used; recommend OAuth | **Done** | Auth method is shown in the workspace account panel (`authMethod`: `oauth` / `pat`) and PAT sessions render an explicit warning with a GitHub OAuth action. Public landing/login copy also frames OAuth as the preferred path and PAT as a manual fallback. |
 | Strict CSP | **Done** | See Tampering / CSP below. |
 | Explicit opt-in for local endpoints; show endpoint origin | **Done** | `allowLocalProvider` is off by default; user must enable local providers in SessionChat model settings. Browser WebLLM additionally requires consent modal before first model download. |
 
@@ -99,10 +111,10 @@ Security posture notes:
 | Mitigation | Status | Evidence / Gap |
 |------------|--------|-----------------|
 | Store audit metadata locally | **Done** | Last sync and indexing state are reflected in UI (e.g. `indexingStatus`, `starsSummary`, sync phase). LLM usage is gated by `allowRemoteProvider` / `allowLocalProvider` (opt-in). |
-| “Data sent” notice when remote LLMs enabled | **Gap** | Remote/Local are explicit checkboxes; sending is blocked until consent. There is **no persistent notice** when remote is enabled such as “Data will be sent to the configured remote provider.” |
+| “Data sent” notice when remote LLMs enabled | **Done** | `src/components/SessionChat.tsx` renders a visible composer-adjacent notice when `allowRemoteProvider` is enabled: data is sent to the remote provider when the user sends a message. |
 | Embedding run metadata | **Done** | `UsagePage` stores and displays embedding run metadata: backend, pool size, downshift, batch count, latency, queue depth, etc. |
 
-**Recommendation:** When `allowRemoteProvider` is true, show a short, visible notice near the chat composer (e.g. “Data is sent to the remote provider when you send a message”) so users have a clear “data sent” disclosure.
+No material repudiation gaps identified beyond keeping local audit/status metadata aligned with future provider surfaces.
 
 ---
 
@@ -112,15 +124,14 @@ Security posture notes:
 |------------|--------|-----------------|
 | External LLM off by default; explicit opt-in | **Done** | `allowRemoteProvider` and `allowLocalProvider` default to `false` in `UsagePage.tsx`; sending requires enabling the matching checkbox. |
 | Send only top-K snippets to LLM | **Done** | `src/llm/providers.ts`: `TOP_K_LIMIT = 8`; `buildContextBlock` uses `snippets.slice(0, TOP_K_LIMIT)`. `UsagePage` passes `filteredResults.slice(0, 8)`. |
-| Token in memory or encrypted storage | **Done** | `AuthContext` keeps the raw GitHub token in React state only; no token value is written to `localStorage` or SQLite. New auth-scope helpers derive one-way hashed scope keys for local persistence isolation. |
-| Chat backup remains local-only and wipeable | **Done** | Chat sessions/messages are backed up client-side (`src/db/chatBackup.ts`) using IndexedDB with localStorage fallback. No token is written to backup. `clearAllData` clears scoped OPFS/localStorage DB bytes and chat backup copy (`clearChatBackup`). |
+| Token in memory or scoped key derivation only | **Done** | `AuthContext` keeps the raw GitHub token in React state only; no token value is written to `localStorage` or SQLite. Auth-scope helpers derive deterministic hashed scope strings for local namespacing so raw tokens are not used as persisted keys. |
+| Chat backup and runtime caches remain local-only and wipeable | **Done** | Chat sessions/messages are backed up client-side (`src/db/chatBackup.ts`) using IndexedDB with localStorage fallback. No token is written to backup. `handleClearLocalData` clears scoped OPFS/localStorage DB bytes, chat backup copy, and browser cache entries used for WebLLM/model artifacts. |
 | “Clear all data” and “Clear token” | **Done** | UsagePage: “Clear token” (logout) and “Delete local data” (`handleClearLocalData` → `database.clearAllData()`). |
-| Restrict debug logs (IDs/counts/timings; no README plaintext) | **Mostly done** | GitHub client logger (DEV-only) logs page/count/total/remaining, repo `full_name`, status, and README **length** only – not token or README content. **Gap:** `UsagePage.tsx` uses `console.error("Embedding generation failed", err)` and `console.error("Search failed", err)`; if any error ever includes token or user content in its message, it could leak. |
+| Restrict debug logs (IDs/counts/timings; no README plaintext) | **Mostly done** | GitHub client logger (DEV-only) logs page/count/total/remaining, repo `full_name`, status, and README **length** only – not token or README content. `UsagePage.tsx` now logs full error objects only in `import.meta.env.DEV`; production console output and local observability keep message-only payloads. **Residual:** sensitive material must still never be embedded into error messages themselves. |
 
 **Recommendations:**
 
-- Avoid logging full `err` objects in production; log only `err.message` or a stable error code, and ensure error constructors never include tokens or README text.
-- Optionally gate these `console.error` calls to `import.meta.env.DEV` so production builds don’t log stack/details.
+- Keep error constructors and thrown messages free of tokens, README text, or prompt content because local/prod observability now records message strings by design.
 
 ---
 
@@ -158,8 +169,8 @@ No material gaps identified for DoS mitigations.
 |--------|--------|-------------------|
 | **S** Spoofing | Aligned | PAT warning banner; recommend OAuth when PAT is used. |
 | **T** Tampering | Aligned | Document CSP (`unsafe-eval`); ensure CSP when not using Vite; optional embedding reconciliation. |
-| **R** Repudiation | Mostly aligned | Add explicit “data sent” notice when remote LLM is enabled. |
-| **I** Information Disclosure | Mostly aligned | Restrict/sanitize `console.error` in production; avoid logging full error objects. |
+| **R** Repudiation | Aligned | Keep disclosure/audit copy aligned as new provider surfaces are added. |
+| **I** Information Disclosure | Mostly aligned | Keep sensitive material out of error messages because local/prod logging persists message text. |
 | **D** Denial of Service | Aligned | — |
 | **E** Elevation of Privilege | Aligned | Document OAuth scope; recommend fine-grained PAT where applicable. |
 
@@ -167,10 +178,9 @@ No material gaps identified for DoS mitigations.
 
 ## 8) Recommended Next Steps (Priority)
 
-1. **High:** When `allowRemoteProvider` is true, show a clear “data sent to remote provider” notice in the chat UI.
-2. **Medium:** Replace or narrow `console.error(..., err)` so production logs never receive full error objects (log message/code only, and ensure no token/content in messages).
-3. **Medium:** Document CSP (and `unsafe-eval`) and ensure CSP is applied in all deployment modes (e.g. static host).
-4. **Low:** Add embedding reconciliation (e.g. chunks_pending + embeddings_created) for integrity; optional “data sent” audit line for local LLM if desired.
-5. **Low:** Document OAuth scopes and fine-grained PAT guidance for users who use PAT.
+1. **Medium:** Document CSP (and `unsafe-eval`) and ensure CSP is applied in all deployment modes (e.g. static host).
+2. **Medium:** Add embedding reconciliation (e.g. `chunks_pending + embeddings_created`) for integrity.
+3. **Low:** Document OAuth scopes and fine-grained PAT guidance for users who use PAT.
+4. **Low:** Keep error-message construction free of sensitive content because production/local observability stores message-only diagnostics.
 
 This review is based on the codebase and [threat-modeling-stride.md](./threat-modeling-stride.md) as of the review date. Re-do after significant auth, LLM, or storage changes.

@@ -115,13 +115,13 @@ The public landing page now uses a parallax-first narrative flow:
 ## 7.1 OAuth (recommended)
 
 - Click `Get started` or continue directly from the lower OAuth card and complete the GitHub OAuth flow.
-- OAuth should be treated as a read-only access path for reading your public repositories.
+- OAuth should be treated as a read-only access path for reading the public and private repositories that the authorized account/token can access.
 - Token is held in memory; not persisted as raw token storage.
 
 ## 7.2 PAT fallback
 
-- Paste raw token (without `Bearer ` prefix).
-- Use a read-only repository token so GitStarRecall can read your public repositories.
+- Paste the token directly. Header-style prefixes such as `Bearer ` / `token `, surrounding quotes, and extra whitespace are normalized automatically before use.
+- Use a token with read access to `/user/starred` and the public/private repositories you want indexed.
 - Ensure PAT scopes can read `/user/starred` and the repositories you want indexed.
 
 ## 8) Daily Usage Flow
@@ -255,13 +255,15 @@ Reset actions in UI:
 
 - `Clear token`
 - `Delete local data`
+- `Delete local data` also clears browser cache entries used for WebLLM/model artifacts when the browser cache API is available.
 
 ## 12) Troubleshooting
 
 ## 12.1 PAT 401 / auth errors
 
-- Use raw token only.
-- Verify scopes and repository access.
+- The app normalizes common pasted wrappers (`Bearer `, `token `, surrounding quotes, whitespace), but the underlying token still must be valid.
+- Most 401s come from invalid, expired, revoked, or incorrectly pasted tokens rather than missing extra scopes.
+- Verify the token can read `/user/starred` and any repositories you expect to import.
 
 ## 12.2 OAuth callback 404
 
@@ -327,7 +329,7 @@ Reset actions in UI:
 ## 14) Related Docs
 
 - `README.md` (overview)
-- `docs/release-notes.md`
+- `docs/changelogs.md`
 - `docs/embedding-acceleration-plan.md`
 - `docs/tech-stack-architecture-security-prd.md`
 - `docs/threat-modeling-stride.md`
