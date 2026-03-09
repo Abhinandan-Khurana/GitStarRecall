@@ -279,6 +279,33 @@ describe("llm provider settings", () => {
     expect(localStorage.getItem(scopeStorageKey(scopeIdentity))).toBeNull();
   });
 
+  it("fails loudly and preserves the legacy record when the env secret is missing for encrypted migration", async () => {
+    vi.stubEnv("VITE_LLM_SETTINGS_ENCRYPTION_KEY", "");
+    const legacyKey = hashStorageKey(legacyToken);
+    const apiKeyEncrypted = await encryptApiKey(legacyToken, "test-secret", "sk-legacy");
+    localStorage.setItem(
+      legacyKey,
+      JSON.stringify({
+        providerId: "openai-compatible",
+        baseUrl: "https://api.openai.com",
+        model: "gpt-4o-mini",
+        apiKeyEncrypted,
+        allowRemoteProvider: true,
+        allowLocalProvider: false,
+        webllmConsent: false,
+        webllmPreferredModel: "",
+        webllmLastRecommendedModel: "",
+      }),
+    );
+
+    await expect(migrateLegacySettingsScope(legacyToken, scopeIdentity)).rejects.toThrow(
+      /Legacy encrypted API key cannot be migrated without VITE_LLM_SETTINGS_ENCRYPTION_KEY/,
+    );
+
+    expect(localStorage.getItem(legacyKey)).not.toBeNull();
+    expect(localStorage.getItem(scopeStorageKey(scopeIdentity))).toBeNull();
+  });
+
   it("re-encrypts migrated legacy API keys for the stable scope", async () => {
     vi.stubEnv("VITE_LLM_SETTINGS_ENCRYPTION_KEY", "test-secret");
     const legacyKey = hashStorageKey(legacyToken);

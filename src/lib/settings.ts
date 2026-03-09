@@ -309,19 +309,22 @@ export async function migrateLegacySettingsScope(
     }
 
     let nextValue = legacyValue;
-    const envSecret = getEncryptionKeyEnv();
-    if (envSecret && typeof crypto !== "undefined" && crypto.subtle) {
-      const parsed = JSON.parse(legacyValue) as unknown;
-      if (isValidStoredShape(parsed) && typeof parsed.apiKeyEncrypted === "string") {
-        const legacyCryptoKey = await deriveKey(legacyToken, envSecret);
-        const apiKey = await decrypt(parsed.apiKeyEncrypted, legacyCryptoKey);
-        const nextCryptoKey = await deriveKey(scopeIdentity, envSecret);
-        const apiKeyEncrypted = await encrypt(apiKey, nextCryptoKey);
-        nextValue = JSON.stringify({
-          ...parsed,
-          apiKeyEncrypted,
-        });
+    const parsed = JSON.parse(legacyValue) as unknown;
+    if (isValidStoredShape(parsed) && typeof parsed.apiKeyEncrypted === "string") {
+      const envSecret = getEncryptionKeyEnv();
+      if (!envSecret || typeof crypto === "undefined" || !crypto.subtle) {
+        throw new Error(
+          "Legacy encrypted API key cannot be migrated without VITE_LLM_SETTINGS_ENCRYPTION_KEY and Web Crypto support",
+        );
       }
+      const legacyCryptoKey = await deriveKey(legacyToken, envSecret);
+      const apiKey = await decrypt(parsed.apiKeyEncrypted, legacyCryptoKey);
+      const nextCryptoKey = await deriveKey(scopeIdentity, envSecret);
+      const apiKeyEncrypted = await encrypt(apiKey, nextCryptoKey);
+      nextValue = JSON.stringify({
+        ...parsed,
+        apiKeyEncrypted,
+      });
     }
 
     persistScopedSettingsValue(scopeIdentity, nextValue);

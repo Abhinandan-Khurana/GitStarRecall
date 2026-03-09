@@ -2394,6 +2394,22 @@ export async function migrateLocalDatabaseScope(args: {
   fromChatScopeKey?: string | null;
   toChatScopeKey?: string | null;
 }): Promise<boolean> {
+  async function clearLegacyScopeSnapshot(scopeKey: string): Promise<void> {
+    await clearOpfsFile(scopeKey);
+    clearLocalStorageBytes(scopeKey);
+    dbPromiseByScope.delete(scopeKey);
+  }
+
+  function isUnreadableLegacySnapshotError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    return (
+      message.includes("file is not a database") ||
+      message.includes("not a database") ||
+      message.includes("database disk image is malformed") ||
+      message.includes("malformed")
+    );
+  }
+
   const fromScopeKey = normalizeDatabaseScopeKey(args.fromScopeKey);
   const toScopeKey = normalizeDatabaseScopeKey(args.toScopeKey);
 
@@ -2403,9 +2419,7 @@ export async function migrateLocalDatabaseScope(args: {
 
   const existingTarget = await readPersistedScopeSnapshot(toScopeKey);
   if (existingTarget) {
-    await clearOpfsFile(fromScopeKey);
-    clearLocalStorageBytes(fromScopeKey);
-    dbPromiseByScope.delete(fromScopeKey);
+    await clearLegacyScopeSnapshot(fromScopeKey);
     return false;
   }
 
@@ -2426,14 +2440,16 @@ export async function migrateLocalDatabaseScope(args: {
       database.close();
     }
   } catch (error) {
+    if (isUnreadableLegacySnapshotError(error)) {
+      await clearLegacyScopeSnapshot(fromScopeKey);
+      return false;
+    }
     throw new Error(
       `Failed to migrate local database scope from ${fromScopeKey} to ${toScopeKey}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
-  await clearOpfsFile(fromScopeKey);
-  clearLocalStorageBytes(fromScopeKey);
-  dbPromiseByScope.delete(fromScopeKey);
+  await clearLegacyScopeSnapshot(fromScopeKey);
   dbPromiseByScope.delete(toScopeKey);
   return true;
 }

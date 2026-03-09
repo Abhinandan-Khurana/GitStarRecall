@@ -292,20 +292,19 @@ describe("database scope naming", () => {
     expect(localStorage.getItem(getScopedDatabaseStorageKey(nextScope))).not.toBeNull();
   });
 
-  it("propagates invalid legacy snapshot failures instead of falling through", async () => {
+  it("clears unreadable legacy snapshots and allows migration to fall through", async () => {
     const legacyScope = "token:broken";
     const nextScope = "auth:github:42";
 
     localStorage.setItem(getScopedDatabaseStorageKey(legacyScope), encodeBase64(new Uint8Array([1, 2, 3])));
 
-    await expect(
-      migrateLocalDatabaseScope({
-        fromScopeKey: legacyScope,
-        toScopeKey: nextScope,
-      }),
-    ).rejects.toThrow(/Failed to migrate local database scope/);
+    const migrated = await migrateLocalDatabaseScope({
+      fromScopeKey: legacyScope,
+      toScopeKey: nextScope,
+    });
 
-    expect(localStorage.getItem(getScopedDatabaseStorageKey(legacyScope))).not.toBeNull();
+    expect(migrated).toBe(false);
+    expect(localStorage.getItem(getScopedDatabaseStorageKey(legacyScope))).toBeNull();
     expect(localStorage.getItem(getScopedDatabaseStorageKey(nextScope))).toBeNull();
   });
 
