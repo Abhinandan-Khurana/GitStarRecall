@@ -223,63 +223,7 @@ Mitigation:
 
 ---
 
-## 5) Step-by-Step Execution Plan (One Task at a Time)
-
-## Task A - Instrumentation Baseline
-- Add timing metrics:
-  - per-batch embed latency
-  - embeddings/sec
-  - DB checkpoint time
-  - queue depth
-- Persist to in-memory debug state and optional local log.
-
-Exit criteria:
-- One indexing run emits complete timing stats and backend identity.
-
-## Task B - Batch Worker API
-- Implement `embedBatch` worker request/response contracts.
-- Add tests for ordering and per-item error handling.
-
-Exit criteria:
-- Same embedding correctness as single-item mode, faster throughput in benchmark.
-
-## Task C - Checkpoint Writer
-- Add checkpoint policy config and periodic flush.
-- Ensure final flush on completion + page hide.
-
-Exit criteria:
-- Persist calls reduced significantly without data integrity regressions.
-
-## Task D - Worker Pool Scheduler
-- Implement bounded queue and 2-worker pool.
-- Add adaptive downshift to 1 on memory pressure/errors.
-
-Exit criteria:
-- Stable indexing on large corpus with no UI freeze and no deadlocks.
-
-## Task E - WebGPU Selector + Fallback
-- Add backend probe and explicit fallback.
-- Add UI status + diagnostics.
-
-Exit criteria:
-- Works on WebGPU-capable systems; clean fallback on unsupported systems.
-
-## Task F - Cross-Platform Validation
-- Run manual benchmark matrix across:
-  - Windows browser
-  - macOS browser
-  - Linux browser
-- Optional local runtime checks:
-  - CUDA path (Windows/Linux with NVIDIA)
-  - Metal path (macOS Apple Silicon)
-  - CPU fallback
-
-Exit criteria:
-- Compatibility matrix validated and documented with pass/fail notes.
-
----
-
-## 6) Security and Privacy Impacts
+## 5) Security and Privacy Impacts
 
 New considerations:
 - More workers means larger in-memory footprint of private README-derived text.
@@ -294,7 +238,7 @@ Required controls:
 
 ---
 
-## 7) Testing and Benchmark Plan
+## 6) Testing and Benchmark Plan
 
 Automated:
 - Unit tests for:
@@ -322,7 +266,7 @@ Acceptance target:
 
 ---
 
-## 8) Config Defaults (Recommended)
+## 7) Config Defaults (Recommended)
 
 - `embedding.batch.min = 8`
 - `embedding.batch.target = 16`
@@ -334,52 +278,3 @@ Acceptance target:
 - `db.checkpoint.everyMs = 3000`
 
 All config should be overrideable for diagnostics in development.
-
----
-
-## 9) Rollout Strategy
-
-Stage 1:
-- Ship instrumentation only (no behavior change).
-
-Stage 2:
-- Enable micro-batching + checkpointing by default.
-
-Stage 3:
-- Enable worker pool behind feature flag, then make default after stability.
-
-Stage 4:
-- Enable WebGPU backend preference with runtime fallback and kill switch.
-
-Rollback plan:
-- Feature flags for each stage allow immediate fallback to baseline behavior.
-
----
-
-## 10) Task F Validation Log (Current System: macOS)
-
-Task F scope requested in this run:
-- Complete validation for current macOS system.
-- Leave Windows/Linux manual validation for follow-up.
-
-### 10.1 Validation Setup (macOS)
-
-- Runtime mode: browser-only local embedding (`@huggingface/transformers` in worker).
-- Backend policy: `VITE_EMBEDDING_BACKEND_PREFERRED=webgpu` (with automatic wasm fallback).
-- Worker scheduling: pooled micro-batch dispatch (`VITE_EMBEDDING_POOL_SIZE=2`, `VITE_EMBEDDING_WORKER_BATCH_SIZE=8`).
-
-### 10.2 macOS Results
-
-| Check | Result | Notes |
-|---|---|---|
-| Type/lint | Pass | `npm run lint` |
-| Unit tests | Pass | `npm run test` |
-| Production build | Pass | `npm run build` |
-| Backend diagnostics visible | Pass | UI telemetry shows selected backend and fallback reason when applicable |
-| Worker micro-batch dispatch active | Pass | `WorkerPool` now sends grouped texts per worker call; unit test asserts call-count reduction |
-
-### 10.3 Remaining Manual Matrix (User to run)
-
-- Windows browser validation: pending.
-- Linux browser validation: pending.
-- Optional local runtime CUDA/Metal checks: pending (not part of pure browser baseline).

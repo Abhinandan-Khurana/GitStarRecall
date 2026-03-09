@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://deepwiki.com/Abhinandan-Khurana/GitStarRecall"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
   <a href="./docs/Usage.md"><img alt="Usage Guide" src="https://img.shields.io/badge/docs-Usage_Guide-0ea5e9"></a>
-  <a href="./docs/release-notes.md"><img alt="Release Notes" src="https://img.shields.io/badge/docs-Release_Notes-1d4ed8"></a>
+  <a href="./docs/changelogs.md"><img alt="Changelogs" src="https://img.shields.io/badge/docs-Changelogs-1d4ed8"></a>
   <a href="./CODE_OF_CONDUCT.md"><img alt="Code of Conduct" src="https://img.shields.io/badge/community-Code_of_Conduct-15803d"></a>
   <a href="./SECURITY.md"><img alt="Security Policy" src="https://img.shields.io/badge/security-Policy-166534"></a>
   <a href="./docs/security-review-stride.md"><img alt="Security Review" src="https://img.shields.io/badge/security-STRIDE_Reviewed-059669"></a>
@@ -22,14 +22,18 @@
 ### Ask it like this
 
 - "I starred a GraphQL security testing repo months ago, what was it?"
-- "Show me TypeScript auth projects with clean architecture vibes."
-- "Recommend the best-fit repos from my stars for my use case."
+- "TypeScript auth starter with clear boundaries."
+
+***TIP: add specific details for better results.***
+
+### LLM chat
+- "Recommend the best-fit repos for my use case."
 
 > **This project exists because starred repos are great until your brain says, "I know what it does, but not what it is called."**
 
 ### Keywords
 
-`github stars search` · `semantic search` · `local-first rag` · `browser embeddings` · `webllm` · `ollama` · `privacy-focused ai` · `vector search`
+`github stars search` · `semantic search` · `local-first rag` · `browser embeddings` · `webllm` · `ollama` · `privacy-focused ai` · `vector search` · `MMR`
 
 ---
 
@@ -47,7 +51,7 @@ GitStarRecall solves this by:
 - Optionally generating an LLM answer from the top local matches.
 
 Full usage instructions:
-- `docs/Usage.md`
+- [Usage Docs](./docs/Usage.md)
 
 ---
 
@@ -77,15 +81,15 @@ What can go remote (opt-in only):
 Built-in security posture:
 - Strict CSP with explicit allowlist.
 - OAuth code exchange via backend endpoint to avoid exposing client secret.
-- Public landing now spells out that OAuth and PAT are both read-only paths for reading public repositories.
+- Public landing now spells out that OAuth and PAT are both read-only paths for reading authorized public/private repositories.
 - PAT fallback supported for power users who want a manual access path.
 - Local data delete flow for cleanup/reset.
 - Threat-model-driven docs in `docs/`.
 
 Read more:
-- `docs/tech-stack-architecture-security-prd.md`
-- `docs/threat-modeling-stride.md`
-- `docs/dfd-diagrams.md`
+- [Architecture and PRD](./docs/tech-stack-architecture-security-prd.md)
+- [STRIDE Review](./docs/threat-modeling-stride.md)
+- [DFD diagram](./docs/dfd-diagrams.md)
 
 ---
 
@@ -95,7 +99,7 @@ Read more:
   - shader-backed background,
   - animated post-login workspace walkthrough,
   - lower `Connect your stars` section reached from `Get started`,
-  - explicit OAuth/PAT read-only access messaging for public repositories.
+  - explicit OAuth/PAT read-only access messaging for authorized public/private repositories.
 - GitHub OAuth and PAT authentication paths.
 - Route-based workspace with dedicated `Setup`, `Recall`, `Library`, `Sessions`, and `Settings` surfaces.
 - Persistent app shell with workspace health, keyboard navigation, and command palette (`Cmd/Ctrl+K`).
@@ -128,7 +132,7 @@ flowchart LR
     D --> D1[Browser Capability Test]
     D1 -->|strong desktop + WebGPU| E[Browser Embeddings: embeddinggemma]
     D1 -->|mobile / weak / no-WebGPU| E2[Browser Embeddings: Xenova/all-MiniLM-L6-v2]
-    D --> G[Ollama Embeddings: qwen3-embedding:4b / qwen3-embedding:0.6b / mxbai-embed-large (opt-in)]
+    D --> G[Ollama Embeddings: qwen3-embedding:4b / qwen3-embedding:0.6b / mxbai-embed-large :opt-in]
     C --> Q[Search Pipeline v2]
     Q --> Q1[Dense Retrieval fetchK]
     Q1 --> Q2[Dense Confidence Check]
@@ -161,7 +165,7 @@ Notes:
 
 - Node.js 20+
 - pnpm 9+
-- A GitHub OAuth app (recommended) or GitHub PAT with read-only repository access for reading public repositories
+- A GitHub OAuth app (recommended) or GitHub PAT with read access to the repositories you want to import
 
 ### Install
 
@@ -214,21 +218,20 @@ For full setup, auth, deployment, runtime modes, tuning, and troubleshooting:
 
 ## Product Docs
 
-- `CODE_OF_CONDUCT.md`
-- `SECURITY.md`
-- `docs/Usage.md`
-- `docs/codex-claude-build-guide.md`
-- `docs/embedding-acceleration-plan.md`
-- `docs/tech-stack-architecture-security-prd.md`
-- `docs/threat-modeling-stride.md`
-- `docs/security-review-stride.md`
-- `docs/release-notes.md`
+- [CODE OF CONDUCT](./CODE_OF_CONDUCT.md)
+- [SECURITY](./SECURITY.md)
+- [Usage](./docs/Usage.md)
+- [Embedding Acceleration Plan](./docs/embedding-acceleration-plan.md)
+- [Architecture and PRD](./docs/tech-stack-architecture-security-prd.md)
+- [Threat Modelling doc using STRIDE](./docs/threat-modeling-stride.md)
+- [STRIDE Review](./docs/threat-modeling-stride.md)
+- [Changelogs](./docs/changelogs.md)
 
 ---
 
 ## Contributing
 
-Please read `CONTRIBUTING.md` before opening a PR.
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
 
 We prioritize:
 - security correctness,
