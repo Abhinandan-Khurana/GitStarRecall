@@ -71,6 +71,8 @@ Security posture notes:
 - Updated 401 guidance to focus on invalid, expired, revoked, or incorrectly pasted tokens instead of implying extra scopes are usually required.
 - Public auth/login copy now consistently frames OAuth and PAT as read-only access paths for starred public and private repositories when the authorized token can read them.
 - `Delete local data` now clears scoped database state, chat backup state, and browser cache entries associated with WebLLM/model runtime artifacts.
+- Legacy encrypted provider API-key migration now fails closed if `VITE_LLM_SETTINGS_ENCRYPTION_KEY` or Web Crypto support is unavailable, preserving the old record instead of silently orphaning ciphertext under the new account scope.
+- Unreadable legacy token-scoped DB snapshots are now discarded during one-time scope migration so historical corruption does not permanently block future logins.
 
 ---
 

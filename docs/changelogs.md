@@ -1,5 +1,14 @@
 # Changelogs
 
+## 2026-03-09 (Migration Recovery Edge Cases)
+
+- Hardened the stable-scope migration paths for two low-frequency but high-impact recovery cases.
+- Encrypted provider settings migration now fails closed:
+  - if a legacy token-scoped settings record contains an encrypted API key but `VITE_LLM_SETTINGS_ENCRYPTION_KEY` or Web Crypto support is unavailable, the app now preserves the legacy record and surfaces the migration failure instead of silently copying unusable ciphertext into the new account scope.
+- Legacy DB migration now recovers from unreadable historical snapshots:
+  - if a legacy token-scoped SQLite snapshot is unreadable during one-time migration, the app now discards only that unreadable legacy copy and continues login with a fresh stable account scope instead of permanently blocking future logins.
+- Updated `docs/Usage.md`, `docs/security-review-stride.md`, and `docs/threat-modeling-stride.md` to document the env-secret requirement for encrypted provider-key migration and the unreadable-legacy-snapshot recovery path.
+
 ## 2026-03-09 (Persistence Hardening Follow-up)
 
 - Closed review-discovered persistence gaps in the new GitHub-account-scoped storage model.
@@ -14,7 +23,7 @@
 - Hardened local DB scope migration:
   - migration now compares persisted snapshot freshness before preferring OPFS vs local-storage copies,
   - stale legacy snapshots are cleaned up even when the stable target already exists,
-  - migration failures now surface as blocking errors instead of silently opening a fresh empty scope.
+  - non-recoverable migration failures still surface as blocking errors instead of silently opening a fresh empty scope.
 - Updated `docs/Usage.md`, `docs/security-review-stride.md`, `docs/threat-modeling-stride.md`, and `docs/tech-stack-architecture-security-prd.md` to match the shipped logout and local-data semantics.
 
 ## 2026-03-09 (Auth Persistence Across OAuth/PAT Re-login)

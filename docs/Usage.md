@@ -65,7 +65,7 @@ These must match your GitHub OAuth app settings exactly.
 - `VITE_EMBEDDING_BACKEND_PREFERRED=webgpu|wasm`
 - `VITE_README_BATCH_PIPELINE_V2=1` enables staged README pipeline.
 - `VITE_OLLAMA_BASE_URL`, `VITE_OLLAMA_TIMEOUT_MS`
-- `VITE_LLM_SETTINGS_ENCRYPTION_KEY` for encrypted provider API key storage.
+- `VITE_LLM_SETTINGS_ENCRYPTION_KEY` for encrypted provider API key storage. Keep this stable across deployments if users already have encrypted provider API keys stored locally; removing it prevents decrypt/re-encrypt migration of those saved keys.
 
 ## 5) GitHub OAuth Setup
 
@@ -252,6 +252,7 @@ Additional local persistence:
 - Chat backup in IndexedDB with localStorage fallback.
 - Account-scoped settings for advanced retrieval mode, embedding preferences, and session continuity metadata.
 - Local runtime caches for model artifacts (WebLLM / embedding assets).
+- If a legacy token-scoped DB snapshot is unreadable during one-time migration, the app discards that unreadable legacy copy and continues with a fresh account-scoped database instead of permanently blocking login.
 
 Reset actions in UI:
 

@@ -91,6 +91,7 @@ Mitigations:
 - Browser WebLLM download is explicit opt-in; no GitHub token in request payloads.
 - Send only top-K snippets, not full repo content.
 - Keep GitHub tokens in memory only; provider/API-key settings may use scoped local storage with optional encryption support when configured.
+- Fail closed if encrypted provider settings cannot be safely re-encrypted during legacy-scope migration; preserve the legacy record instead of silently copying ciphertext to the wrong key scope.
 - Scope local SQLite/localStorage persistence by stable GitHub account identity so one authenticated identity does not inherit another identity's indexed corpus, while OAuth/PAT rotation for the same account keeps the same workspace.
 - Add “Clear all data” and “Clear token” actions.
 - Keep “Clear token” limited to signing out; reserve destructive local-data deletion for “Delete local data”.
@@ -116,6 +117,7 @@ Mitigations:
 - Deterministic fallback from `webgpu` to `wasm`.
 - Preload pending chunk queue once per run to avoid repeated hot-loop DB scans.
 - Buffer embedding writes to reduce checkpoint overhead and main-thread contention.
+- Discard unreadable legacy token-scoped DB snapshots during one-time scope migration so corrupt historical data does not permanently block login.
 
 ### E - Elevation of Privilege
 Threats:
