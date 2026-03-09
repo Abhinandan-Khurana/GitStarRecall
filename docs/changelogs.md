@@ -1,4 +1,21 @@
-# Release Notes
+# Changelogs
+
+## 2026-03-09 (`release-notes.md` renamed to `changelogs.md`)
+
+- Renamed the project changelog document from `docs/release-notes.md` to `docs/changelogs.md`.
+- Future documentation updates and release-history entries should now target `docs/changelogs.md`.
+
+## 2026-03-09 (Security STRIDE / Threat Model Refresh)
+
+- Refreshed the security STRIDE review and threat model docs against the current code and the latest auth/security release deltas:
+  - added GitHub token-normalization coverage for OAuth and PAT flows,
+  - documented the corrected 401 guidance around invalid/expired/revoked or incorrectly pasted tokens,
+  - recorded the shipped remote-provider disclosure and local-data reset semantics, including WebLLM/model cache cleanup.
+- Aligned related user-facing docs with the current auth behavior:
+  - `docs/Usage.md` now explains PAT wrapper normalization and current 401 troubleshooting guidance,
+  - `README.md` now describes OAuth/PAT as read-only access paths for authorized public/private repositories.
+
+## 2026-03-09 (SessionChat provider label button fix)
 
 - SessionChat model-settings trigger button: replaced the ghost `<Button>` used as the provider label with a plain `<span>`, so the label no longer renders as an interactive control or shows a ghost-button hover highlight.
 

@@ -150,7 +150,7 @@ Likely docs to touch:
 - `docs/dfd-diagrams.md`
 - `docs/threat-modeling-stride.md`
 - `docs/security-review-stride.md`
-- `docs/release-notes.md`
+- `docs/changelogs.md`
 - `README.md` architecture Mermaid snapshot
 
 ---
