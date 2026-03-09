@@ -12,6 +12,8 @@
   <a href="https://deepwiki.com/Abhinandan-Khurana/GitStarRecall"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
   <a href="./docs/Usage.md"><img alt="Usage Guide" src="https://img.shields.io/badge/docs-Usage_Guide-0ea5e9"></a>
   <a href="./docs/release-notes.md"><img alt="Release Notes" src="https://img.shields.io/badge/docs-Release_Notes-1d4ed8"></a>
+  <a href="./CODE_OF_CONDUCT.md"><img alt="Code of Conduct" src="https://img.shields.io/badge/community-Code_of_Conduct-15803d"></a>
+  <a href="./SECURITY.md"><img alt="Security Policy" src="https://img.shields.io/badge/security-Policy-166534"></a>
   <a href="./docs/security-review-stride.md"><img alt="Security Review" src="https://img.shields.io/badge/security-STRIDE_Reviewed-059669"></a>
 </p>
 
@@ -212,6 +214,8 @@ For full setup, auth, deployment, runtime modes, tuning, and troubleshooting:
 
 ## Product Docs
 
+- `CODE_OF_CONDUCT.md`
+- `SECURITY.md`
 - `docs/Usage.md`
 - `docs/codex-claude-build-guide.md`
 - `docs/embedding-acceleration-plan.md`

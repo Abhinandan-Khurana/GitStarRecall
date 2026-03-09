@@ -3,6 +3,9 @@
 Thanks for contributing.  
 This project is local-first, security-focused, and performance-oriented.
 
+By participating, you agree to follow the project's [Code of Conduct](./CODE_OF_CONDUCT.md).
+Security disclosures must follow the project's [Security Policy](./SECURITY.md).
+
 If a proposed change improves UX but weakens security or privacy defaults, it should not be merged as-is.
 
 ---
@@ -20,6 +23,8 @@ If a proposed change improves UX but weakens security or privacy defaults, it sh
 ## Before You Start
 
 Read these first:
+- `CODE_OF_CONDUCT.md`
+- `SECURITY.md`
 - `docs/Usage.md`
 - `docs/tech-stack-architecture-security-prd.md`
 - `docs/threat-modeling-stride.md`
@@ -150,9 +155,11 @@ Likely docs to touch:
 
 ---
 
-## PR Template (Recommended)
+## PR Template
 
-Copy this into your PR description:
+GitHub now preloads the repository PR template automatically. Keep those sections filled in for any non-trivial change.
+
+Current template structure:
 
 ```md
 ## Summary
@@ -178,6 +185,10 @@ Copy this into your PR description:
 ## Docs Updated
 - [ ] Yes
 - [ ] Not needed (reason)
+
+## Threat / Data-Flow Notes
+- [ ] Not applicable
+- [ ] Included in this PR description
 ```
 
 ---
@@ -185,7 +196,7 @@ Copy this into your PR description:
 ## Reporting Security Issues
 
 Do not open public exploit details in regular issues.
-Use GitHub Security Advisories / private disclosure path for sensitive reports.
+Follow `SECURITY.md` and use the private disclosure path for sensitive reports.
 
 Include:
 - attack preconditions,

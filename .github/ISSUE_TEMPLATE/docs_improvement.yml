@@ -1,0 +1,37 @@
+name: Documentation improvement
+description: Report missing, confusing, or outdated project documentation.
+title: "[Docs]: "
+labels:
+  - documentation
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and did not find a duplicate docs request.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Documentation problem
+      description: What is unclear, missing, or incorrect?
+      placeholder: Describe the gap.
+    validations:
+      required: true
+  - type: input
+    id: location
+    attributes:
+      label: Affected file or page
+      description: Link the doc page or name the file if you know it.
+      placeholder: README.md, docs/Usage.md, CONTRIBUTING.md, etc.
+    validations:
+      required: false
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement
+      description: What change would make the docs more useful?
+      placeholder: Proposed wording, missing steps, screenshots, examples, or structure updates.
+    validations:
+      required: true

@@ -1,0 +1,85 @@
+name: Bug report
+description: Report a reproducible defect in GitStarRecall.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug report.
+
+        If this is a security vulnerability or could expose secrets, private repository content, or authentication data, do not continue here. Follow the private reporting instructions in `SECURITY.md` instead.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I confirmed this is not a private security disclosure.
+          required: true
+        - label: I reproduced this on the latest code or latest available release.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the bug in one or two sentences.
+      placeholder: What broke?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps needed to trigger the issue.
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include app version or commit, browser, OS, auth mode, and any relevant runtime settings.
+      placeholder: |
+        Commit/version:
+        Browser:
+        OS:
+        Auth mode:
+        Embedding/generation mode:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant console output, network errors, or UI screenshots.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Explain how often this happens and how severe it is for real usage.
+      placeholder: Who is affected, and how badly?
+    validations:
+      required: false
