@@ -20,6 +20,7 @@ import type {
 
 const DB_NAME_PREFIX = "gitstarrecall";
 const LOCAL_STORAGE_KEY_PREFIX = "gitstarrecall.sqlite.base64";
+const LOCAL_STORAGE_UPDATED_AT_KEY_PREFIX = "gitstarrecall.sqlite.updated-at";
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_EMBEDDINGS = 256;
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_MS = 3000;
 
@@ -77,6 +78,10 @@ export function getScopedDatabaseStorageKey(scopeKey: string): string {
   return `${LOCAL_STORAGE_KEY_PREFIX}.${normalizeDatabaseScopeKey(scopeKey)}`;
 }
 
+function getScopedDatabaseUpdatedAtStorageKey(scopeKey: string): string {
+  return `${LOCAL_STORAGE_UPDATED_AT_KEY_PREFIX}.${normalizeDatabaseScopeKey(scopeKey)}`;
+}
+
 async function loadBytesFromOpfs(scopeKey: string): Promise<Uint8Array | null> {
   if (!isOpfsSupported()) {
     return null;
@@ -88,6 +93,21 @@ async function loadBytesFromOpfs(scopeKey: string): Promise<Uint8Array | null> {
     const file = await handle.getFile();
     const arrayBuffer = await file.arrayBuffer();
     return new Uint8Array(arrayBuffer);
+  } catch {
+    return null;
+  }
+}
+
+async function getOpfsLastModified(scopeKey: string): Promise<number | null> {
+  if (!isOpfsSupported()) {
+    return null;
+  }
+
+  try {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle(getScopedDatabaseFileName(scopeKey));
+    const file = await handle.getFile();
+    return Number.isFinite(file.lastModified) ? file.lastModified : null;
   } catch {
     return null;
   }
@@ -143,12 +163,27 @@ function loadBytesFromLocalStorage(scopeKey: string): Uint8Array | null {
   }
 }
 
+function loadLocalStorageUpdatedAt(scopeKey: string): number | null {
+  if (typeof localStorage === "undefined") {
+    return null;
+  }
+
+  const raw = localStorage.getItem(getScopedDatabaseUpdatedAtStorageKey(scopeKey));
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function writeBytesToLocalStorage(bytes: Uint8Array, scopeKey: string): void {
   if (typeof localStorage === "undefined") {
     return;
   }
 
   localStorage.setItem(getScopedDatabaseStorageKey(scopeKey), toBase64(bytes));
+  localStorage.setItem(getScopedDatabaseUpdatedAtStorageKey(scopeKey), String(Date.now()));
 }
 
 function clearLocalStorageBytes(scopeKey: string): void {
@@ -157,31 +192,95 @@ function clearLocalStorageBytes(scopeKey: string): void {
   }
 
   localStorage.removeItem(getScopedDatabaseStorageKey(scopeKey));
+  localStorage.removeItem(getScopedDatabaseUpdatedAtStorageKey(scopeKey));
 }
 
 type PersistedScopeSnapshot = {
   bytes: Uint8Array;
   storageMode: Extract<StorageMode, "opfs" | "local-storage">;
+  modifiedAt: number | null;
 };
+
+function readSingleNumericResult(database: Database, query: string): number | null {
+  try {
+    const result = database.exec(query);
+    if (result.length === 0 || result[0].values.length === 0) {
+      return null;
+    }
+
+    const value = Number(result[0].values[0]?.[0] ?? NaN);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function computeSnapshotFreshness(bytes: Uint8Array): Promise<number | null> {
+  try {
+    const sql = await getSql();
+    const database = new sql.Database(bytes);
+    try {
+      const candidates = [
+        readSingleNumericResult(database, "SELECT MAX(updated_at) FROM chat_sessions;"),
+        readSingleNumericResult(database, "SELECT MAX(created_at) FROM chat_messages;"),
+        readSingleNumericResult(database, "SELECT MAX(updated_at) FROM index_meta;"),
+        readSingleNumericResult(database, "SELECT MAX(last_synced_at) FROM repos;"),
+      ].filter((value): value is number => value !== null);
+
+      return candidates.length > 0 ? Math.max(...candidates) : null;
+    } finally {
+      database.close();
+    }
+  } catch {
+    return null;
+  }
+}
 
 async function readPersistedScopeSnapshot(scopeKey: string): Promise<PersistedScopeSnapshot | null> {
   const opfsBytes = await loadBytesFromOpfs(scopeKey);
-  if (opfsBytes) {
-    return {
-      bytes: opfsBytes,
-      storageMode: "opfs",
-    };
-  }
-
   const localBytes = loadBytesFromLocalStorage(scopeKey);
-  if (localBytes) {
-    return {
+  const opfsSnapshot = opfsBytes
+    ? {
+      bytes: opfsBytes,
+      storageMode: "opfs" as const,
+      modifiedAt: await getOpfsLastModified(scopeKey),
+    }
+    : null;
+  const localSnapshot = localBytes
+    ? {
       bytes: localBytes,
-      storageMode: "local-storage",
-    };
+      storageMode: "local-storage" as const,
+      modifiedAt: loadLocalStorageUpdatedAt(scopeKey),
+    }
+    : null;
+
+  if (!opfsSnapshot) {
+    return localSnapshot;
   }
 
-  return null;
+  if (!localSnapshot) {
+    return opfsSnapshot;
+  }
+
+  const [opfsFreshness, localFreshness] = await Promise.all([
+    computeSnapshotFreshness(opfsSnapshot.bytes),
+    computeSnapshotFreshness(localSnapshot.bytes),
+  ]);
+
+  if (opfsFreshness !== null || localFreshness !== null) {
+    if ((localFreshness ?? Number.NEGATIVE_INFINITY) > (opfsFreshness ?? Number.NEGATIVE_INFINITY)) {
+      return localSnapshot;
+    }
+    if ((opfsFreshness ?? Number.NEGATIVE_INFINITY) > (localFreshness ?? Number.NEGATIVE_INFINITY)) {
+      return opfsSnapshot;
+    }
+  }
+
+  if ((localSnapshot.modifiedAt ?? Number.NEGATIVE_INFINITY) > (opfsSnapshot.modifiedAt ?? Number.NEGATIVE_INFINITY)) {
+    return localSnapshot;
+  }
+
+  return opfsSnapshot;
 }
 
 async function writePersistedScopeSnapshot(
@@ -2304,6 +2403,9 @@ export async function migrateLocalDatabaseScope(args: {
 
   const existingTarget = await readPersistedScopeSnapshot(toScopeKey);
   if (existingTarget) {
+    await clearOpfsFile(fromScopeKey);
+    clearLocalStorageBytes(fromScopeKey);
+    dbPromiseByScope.delete(fromScopeKey);
     return false;
   }
 
@@ -2323,8 +2425,10 @@ export async function migrateLocalDatabaseScope(args: {
     } finally {
       database.close();
     }
-  } catch {
-    return false;
+  } catch (error) {
+    throw new Error(
+      `Failed to migrate local database scope from ${fromScopeKey} to ${toScopeKey}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   await clearOpfsFile(fromScopeKey);
@@ -2372,39 +2476,24 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
         return localDb;
       };
 
-      const opfsBytes = await loadBytesFromOpfs(scopeKey);
-
-      if (opfsBytes) {
+      const persistedSnapshot = await readPersistedScopeSnapshot(scopeKey);
+      if (persistedSnapshot) {
         try {
-          const db = new sql.Database(opfsBytes);
+          const db = new sql.Database(persistedSnapshot.bytes);
           runSchema(db);
           return new LocalDatabase({
             sql,
             db,
-            storageMode: "opfs",
+            storageMode: persistedSnapshot.storageMode,
             scopeKey,
             embeddingCheckpointPolicy,
           });
         } catch {
-          await clearOpfsFile(scopeKey);
-          return createFreshDatabase();
-        }
-      }
-
-      const localBytes = loadBytesFromLocalStorage(scopeKey);
-      if (localBytes) {
-        try {
-          const db = new sql.Database(localBytes);
-          runSchema(db);
-          return new LocalDatabase({
-            sql,
-            db,
-            storageMode: "local-storage",
-            scopeKey,
-            embeddingCheckpointPolicy,
-          });
-        } catch {
-          clearLocalStorageBytes(scopeKey);
+          if (persistedSnapshot.storageMode === "opfs") {
+            await clearOpfsFile(scopeKey);
+          } else {
+            clearLocalStorageBytes(scopeKey);
+          }
           return createFreshDatabase();
         }
       }

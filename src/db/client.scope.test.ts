@@ -1,5 +1,5 @@
 import initSqlJs, { type SqlJsStatic } from "sql.js";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   LocalDatabase,
   getLocalDatabase,
@@ -40,6 +40,99 @@ class MemoryStorage implements Storage {
 
 let SQL: SqlJsStatic;
 let originalLocalStorage: Storage | undefined;
+let originalNavigator: Navigator | undefined;
+
+class MemoryOpfsRoot {
+  private files = new Map<string, { bytes: Uint8Array; lastModified: number }>();
+
+  async getFileHandle(name: string, options?: { create?: boolean }) {
+    const existing = this.files.get(name);
+    if (existing) {
+      return new MemoryOpfsFileHandle(existing);
+    }
+    if (options?.create) {
+      const created = { bytes: new Uint8Array(), lastModified: Date.now() };
+      this.files.set(name, created);
+      return new MemoryOpfsFileHandle(created);
+    }
+    throw new Error("File not found");
+  }
+
+  async removeEntry(name: string): Promise<void> {
+    this.files.delete(name);
+  }
+}
+
+class MemoryOpfsFileHandle {
+  constructor(private readonly state: { bytes: Uint8Array; lastModified: number }) {}
+
+  async getFile() {
+    return {
+      arrayBuffer: async () => {
+        const buffer = new ArrayBuffer(this.state.bytes.byteLength);
+        new Uint8Array(buffer).set(this.state.bytes);
+        return buffer;
+      },
+      lastModified: this.state.lastModified,
+    };
+  }
+
+  async createWritable() {
+    let nextBytes = this.state.bytes;
+    return {
+      write: async (value: ArrayBuffer | Uint8Array) => {
+        nextBytes = value instanceof Uint8Array ? new Uint8Array(value) : new Uint8Array(value);
+      },
+      close: async () => {
+        this.state.bytes = nextBytes;
+        this.state.lastModified = Date.now();
+      },
+    };
+  }
+}
+
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
+async function seedRepoDatabase(args: {
+  scopeKey: string;
+  storageMode: "opfs" | "local-storage";
+  repoId: number;
+  lastSyncedAt: number;
+}): Promise<void> {
+  const rawDb = new SQL.Database();
+  runSchema(rawDb);
+  const database = new LocalDatabase({
+    sql: SQL,
+    db: rawDb,
+    storageMode: args.storageMode,
+    scopeKey: args.scopeKey,
+  });
+
+  await database.upsertRepos([
+    {
+      id: args.repoId,
+      fullName: `owner/repo-${args.repoId}`,
+      name: `repo-${args.repoId}`,
+      description: null,
+      topics: [],
+      language: "TypeScript",
+      htmlUrl: `https://github.com/owner/repo-${args.repoId}`,
+      stars: 1,
+      forks: 0,
+      updatedAt: "2026-03-09T00:00:00Z",
+      readmeUrl: null,
+      readmeText: `repo ${args.repoId}`,
+      checksum: `checksum-${args.repoId}`,
+      lastSyncedAt: args.lastSyncedAt,
+    },
+  ]);
+}
 
 beforeAll(async () => {
   SQL = await initSqlJs({
@@ -49,6 +142,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   originalLocalStorage = globalThis.localStorage;
+  originalNavigator = globalThis.navigator;
   Object.defineProperty(globalThis, "localStorage", {
     value: new MemoryStorage(),
     configurable: true,
@@ -62,6 +156,14 @@ afterEach(() => {
   } else {
     Object.defineProperty(globalThis, "localStorage", {
       value: originalLocalStorage,
+      configurable: true,
+    });
+  }
+  if (originalNavigator === undefined) {
+    delete (globalThis as { navigator?: Navigator }).navigator;
+  } else {
+    Object.defineProperty(globalThis, "navigator", {
+      value: originalNavigator,
       configurable: true,
     });
   }
@@ -171,5 +273,74 @@ describe("database scope naming", () => {
     expect(migratedDb.getIndexMetaValue(`session_context_ids:${nextChatScope}:session-1`)).toBe(
       JSON.stringify(["chunk-1"]),
     );
+  });
+
+  it("cleans up the legacy snapshot when the stable target already exists", async () => {
+    const legacyScope = "token:legacy";
+    const nextScope = "auth:github:42";
+
+    localStorage.setItem(getScopedDatabaseStorageKey(legacyScope), encodeBase64(new Uint8Array([1, 2, 3])));
+    localStorage.setItem(getScopedDatabaseStorageKey(nextScope), encodeBase64(new Uint8Array([4, 5, 6])));
+
+    const migrated = await migrateLocalDatabaseScope({
+      fromScopeKey: legacyScope,
+      toScopeKey: nextScope,
+    });
+
+    expect(migrated).toBe(false);
+    expect(localStorage.getItem(getScopedDatabaseStorageKey(legacyScope))).toBeNull();
+    expect(localStorage.getItem(getScopedDatabaseStorageKey(nextScope))).not.toBeNull();
+  });
+
+  it("propagates invalid legacy snapshot failures instead of falling through", async () => {
+    const legacyScope = "token:broken";
+    const nextScope = "auth:github:42";
+
+    localStorage.setItem(getScopedDatabaseStorageKey(legacyScope), encodeBase64(new Uint8Array([1, 2, 3])));
+
+    await expect(
+      migrateLocalDatabaseScope({
+        fromScopeKey: legacyScope,
+        toScopeKey: nextScope,
+      }),
+    ).rejects.toThrow(/Failed to migrate local database scope/);
+
+    expect(localStorage.getItem(getScopedDatabaseStorageKey(legacyScope))).not.toBeNull();
+    expect(localStorage.getItem(getScopedDatabaseStorageKey(nextScope))).toBeNull();
+  });
+
+  it("prefers the fresher local-storage snapshot when OPFS contains an older copy", async () => {
+    const sourceScope = "auth:github:freshness";
+    const opfsRoot = new MemoryOpfsRoot();
+    const nowSpy = vi.spyOn(Date, "now");
+    Object.defineProperty(globalThis, "navigator", {
+      value: {
+        storage: {
+          getDirectory: async () => opfsRoot,
+        },
+      },
+      configurable: true,
+    });
+
+    nowSpy.mockReturnValue(1_000);
+    await seedRepoDatabase({
+      scopeKey: sourceScope,
+      storageMode: "opfs",
+      repoId: 1,
+      lastSyncedAt: 1_000,
+    });
+    nowSpy.mockReturnValue(2_000);
+    await seedRepoDatabase({
+      scopeKey: sourceScope,
+      storageMode: "local-storage",
+      repoId: 2,
+      lastSyncedAt: 2_000,
+    });
+
+    setLocalDatabaseScope(sourceScope);
+    const database = await getLocalDatabase();
+
+    expect(database.listRepos().map((repo) => repo.id)).toEqual([2]);
+    nowSpy.mockRestore();
   });
 });
