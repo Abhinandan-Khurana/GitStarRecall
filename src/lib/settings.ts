@@ -309,7 +309,13 @@ export async function migrateLegacySettingsScope(
     }
 
     let nextValue = legacyValue;
-    const parsed = JSON.parse(legacyValue) as unknown;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(legacyValue) as unknown;
+    } catch {
+      localStorage.removeItem(legacyKey);
+      return;
+    }
     if (isValidStoredShape(parsed) && typeof parsed.apiKeyEncrypted === "string") {
       const envSecret = getEncryptionKeyEnv();
       if (!envSecret || typeof crypto === "undefined" || !crypto.subtle) {

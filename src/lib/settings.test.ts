@@ -187,6 +187,16 @@ describe("llm provider settings", () => {
     expect(loadSettings(scopeIdentity)?.providerId).toBe("ollama");
   });
 
+  it("discards malformed legacy records instead of blocking future logins", async () => {
+    const legacyKey = hashStorageKey(legacyToken);
+    localStorage.setItem(legacyKey, "{not-json");
+
+    await expect(migrateLegacySettingsScope(legacyToken, scopeIdentity)).resolves.toBeUndefined();
+
+    expect(localStorage.getItem(legacyKey)).toBeNull();
+    expect(localStorage.getItem(scopeStorageKey(scopeIdentity))).toBeNull();
+  });
+
   it("treats encrypted records as configured in sync loads", async () => {
     vi.stubEnv("VITE_LLM_SETTINGS_ENCRYPTION_KEY", "test-secret");
     const key = scopeStorageKey(scopeIdentity);
