@@ -159,6 +159,57 @@ function clearLocalStorageBytes(scopeKey: string): void {
   localStorage.removeItem(getScopedDatabaseStorageKey(scopeKey));
 }
 
+type PersistedScopeSnapshot = {
+  bytes: Uint8Array;
+  storageMode: Extract<StorageMode, "opfs" | "local-storage">;
+};
+
+async function readPersistedScopeSnapshot(scopeKey: string): Promise<PersistedScopeSnapshot | null> {
+  const opfsBytes = await loadBytesFromOpfs(scopeKey);
+  if (opfsBytes) {
+    return {
+      bytes: opfsBytes,
+      storageMode: "opfs",
+    };
+  }
+
+  const localBytes = loadBytesFromLocalStorage(scopeKey);
+  if (localBytes) {
+    return {
+      bytes: localBytes,
+      storageMode: "local-storage",
+    };
+  }
+
+  return null;
+}
+
+async function writePersistedScopeSnapshot(
+  bytes: Uint8Array,
+  scopeKey: string,
+  preferredStorageMode: Extract<StorageMode, "opfs" | "local-storage">,
+): Promise<Extract<StorageMode, "opfs" | "local-storage">> {
+  if (preferredStorageMode === "opfs") {
+    const opfsWritten = await writeBytesToOpfs(bytes, scopeKey);
+    if (opfsWritten) {
+      clearLocalStorageBytes(scopeKey);
+      return "opfs";
+    }
+  }
+
+  try {
+    writeBytesToLocalStorage(bytes, scopeKey);
+    return "local-storage";
+  } catch {
+    const opfsWritten = await writeBytesToOpfs(bytes, scopeKey);
+    if (opfsWritten) {
+      clearLocalStorageBytes(scopeKey);
+      return "opfs";
+    }
+    throw new Error(`Unable to persist local database for scope ${scopeKey}`);
+  }
+}
+
 function normalizePositiveInt(value: unknown, fallback: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -576,6 +627,72 @@ function normalizeTimestamp(value: unknown, fallback: number): number {
 
 function toSqlStringLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
+}
+
+function rewriteScopedChatSessionIds(
+  database: Database,
+  fromChatScopeKey: string | null | undefined,
+  toChatScopeKey: string | null | undefined,
+): void {
+  const fromScope = String(fromChatScopeKey ?? "").trim();
+  const toScope = String(toChatScopeKey ?? "").trim();
+  if (!fromScope || !toScope || fromScope === toScope) {
+    return;
+  }
+
+  const fromPrefix = `${fromScope}:`;
+  const rows = database.exec(
+    `SELECT id FROM chat_sessions WHERE id LIKE ${toSqlStringLiteral(`${fromPrefix}%`)};`,
+  );
+  if (rows.length === 0 || rows[0].values.length === 0) {
+    return;
+  }
+
+  const sessionIdPairs = rows[0].values
+    .map((row) => String(row[0] ?? ""))
+    .filter((value) => value.startsWith(fromPrefix))
+    .map((oldSessionId) => ({
+      oldSessionId,
+      newSessionId: `${toScope}:${oldSessionId.slice(fromPrefix.length)}`,
+    }));
+
+  if (sessionIdPairs.length === 0) {
+    return;
+  }
+
+  database.run("PRAGMA foreign_keys = OFF;");
+  try {
+    database.run("BEGIN");
+    for (const { oldSessionId, newSessionId } of sessionIdPairs) {
+      const oldIdLiteral = toSqlStringLiteral(oldSessionId);
+      const newIdLiteral = toSqlStringLiteral(newSessionId);
+      database.run(
+        `UPDATE chat_messages SET session_id = ${newIdLiteral} WHERE session_id = ${oldIdLiteral};`,
+      );
+      if (tableExists(database, "session_context_items")) {
+        database.run(
+          `UPDATE session_context_items SET session_id = ${newIdLiteral} WHERE session_id = ${oldIdLiteral};`,
+        );
+      }
+      database.run(`UPDATE chat_sessions SET id = ${newIdLiteral} WHERE id = ${oldIdLiteral};`);
+
+      const oldMetaKey = `session_context_ids:${oldSessionId}`;
+      const newMetaKey = `session_context_ids:${newSessionId}`;
+      database.run(
+        `UPDATE index_meta SET key = ${toSqlStringLiteral(newMetaKey)} WHERE key = ${toSqlStringLiteral(oldMetaKey)};`,
+      );
+    }
+    database.run("COMMIT");
+  } catch (error) {
+    try {
+      database.run("ROLLBACK");
+    } catch {
+      // noop: best-effort rollback after migration failure
+    }
+    throw error;
+  } finally {
+    database.run("PRAGMA foreign_keys = ON;");
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -2170,6 +2287,51 @@ export class LocalDatabase {
     await clearChatBackup();
     await this.persist();
   }
+}
+
+export async function migrateLocalDatabaseScope(args: {
+  fromScopeKey: string;
+  toScopeKey: string;
+  fromChatScopeKey?: string | null;
+  toChatScopeKey?: string | null;
+}): Promise<boolean> {
+  const fromScopeKey = normalizeDatabaseScopeKey(args.fromScopeKey);
+  const toScopeKey = normalizeDatabaseScopeKey(args.toScopeKey);
+
+  if (fromScopeKey === toScopeKey) {
+    return false;
+  }
+
+  const existingTarget = await readPersistedScopeSnapshot(toScopeKey);
+  if (existingTarget) {
+    return false;
+  }
+
+  const sourceSnapshot = await readPersistedScopeSnapshot(fromScopeKey);
+  if (!sourceSnapshot) {
+    return false;
+  }
+
+  try {
+    const sql = await getSql();
+    const database = new sql.Database(sourceSnapshot.bytes);
+    try {
+      runSchema(database);
+      rewriteScopedChatSessionIds(database, args.fromChatScopeKey, args.toChatScopeKey);
+      const migratedBytes = database.export();
+      await writePersistedScopeSnapshot(migratedBytes, toScopeKey, sourceSnapshot.storageMode);
+    } finally {
+      database.close();
+    }
+  } catch {
+    return false;
+  }
+
+  await clearOpfsFile(fromScopeKey);
+  clearLocalStorageBytes(fromScopeKey);
+  dbPromiseByScope.delete(fromScopeKey);
+  dbPromiseByScope.delete(toScopeKey);
+  return true;
 }
 
 export function setLocalDatabaseScope(scopeKey: string): void {

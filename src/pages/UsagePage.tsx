@@ -676,7 +676,7 @@ type UsagePageProps = {
 };
 
 export default function UsagePage({ view = "legacy" }: UsagePageProps) {
-  const { accessToken, isAuthenticated, authMethod, loginWithPat, beginOAuthLogin, oauthConfig, logout } =
+  const { accessToken, authScopeIdentity, isAuthenticated, authMethod, loginWithPat, beginOAuthLogin, oauthConfig, logout } =
     useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -767,10 +767,10 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const restoreRequestTrackerRef = useRef(createRestoreRequestTracker());
   const webllmPreviousRecommendationRef = useRef<WebLLMRecommendation | null>(null);
   const previousIsAuthenticatedRef = useRef(isAuthenticated);
-  const chatScopeKey = useMemo(() => buildChatScopeKey(accessToken), [accessToken]);
+  const chatScopeKey = useMemo(() => buildChatScopeKey(authScopeIdentity), [authScopeIdentity]);
   const embeddingPreferenceScopeKey = useMemo(
-    () => buildEmbeddingPreferenceScopeKey(accessToken),
-    [accessToken],
+    () => buildEmbeddingPreferenceScopeKey(authScopeIdentity),
+    [authScopeIdentity],
   );
   const previousChatScopeKeyRef = useRef<string | null>(chatScopeKey);
 
@@ -1301,8 +1301,8 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
   // Load saved provider settings when user logs in (sync for plaintext, async for encrypted)
   useEffect(() => {
-    if (!accessToken) return;
-    const sync = loadSettings(accessToken);
+    if (!authScopeIdentity) return;
+    const sync = loadSettings(authScopeIdentity);
     if (sync) {
       const savedProviderId =
         !webLLMEnabled && sync.providerId === "webllm" ? "openai-compatible" : sync.providerId;
@@ -1329,7 +1329,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       return;
     }
     let cancelled = false;
-    loadSettingsAsync(accessToken).then((saved) => {
+    loadSettingsAsync(authScopeIdentity).then((saved) => {
       if (cancelled || !saved) return;
       const savedProviderId =
         !webLLMEnabled && saved.providerId === "webllm" ? "openai-compatible" : saved.providerId;
@@ -1357,12 +1357,12 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     return () => {
       cancelled = true;
     };
-  }, [accessToken]);
+  }, [authScopeIdentity]);
 
   // Save provider settings when they change
   useEffect(() => {
-    if (accessToken) {
-      saveSettings(accessToken, {
+    if (authScopeIdentity) {
+      saveSettings(authScopeIdentity, {
         providerId,
         baseUrl: providerBaseUrl,
         model: providerModel,
@@ -1376,7 +1376,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       });
     }
   }, [
-    accessToken,
+    authScopeIdentity,
     providerId,
     providerBaseUrl,
     providerModel,
@@ -1636,11 +1636,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     setLlmError(null);
   };
 
-  const handlePatLogin = (event: { preventDefault(): void }) => {
+  const handlePatLogin = async (event: { preventDefault(): void }) => {
     event.preventDefault();
 
     try {
-      loginWithPat(patToken);
+      await loginWithPat(patToken);
       setError(null);
       navigate("/app", { replace: true });
     } catch (err) {

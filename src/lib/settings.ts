@@ -16,10 +16,18 @@ export type LLMProviderSettings = {
 const STORAGE_KEY_PREFIX = "gitstarrecall.llm.settings.";
 const GCM_IV_LENGTH = 12;
 
-function getStorageKey(token: string): string {
-  // Use a hash of the token to avoid storing sensitive data in plain text
-  const hash = token.split("").reduce((acc, char) => ((acc << 5) - acc) + char.charCodeAt(0), 0);
-  return `${STORAGE_KEY_PREFIX}${Math.abs(hash)}`;
+function hashScopeValue(raw: string): string {
+  return Math.abs(
+    raw.split("").reduce((acc, char) => ((acc << 5) - acc) + char.charCodeAt(0), 0),
+  ).toString();
+}
+
+function getStorageKey(scopeIdentity: string): string {
+  return `${STORAGE_KEY_PREFIX}${hashScopeValue(scopeIdentity)}`;
+}
+
+function getLegacyTokenStorageKey(token: string): string {
+  return `${STORAGE_KEY_PREFIX}${hashScopeValue(token)}`;
 }
 
 function getEncryptionKeyEnv(): string {
@@ -82,11 +90,11 @@ function isValidStoredShape(parsed: unknown): parsed is StoredSettings {
   );
 }
 
-export function loadSettings(token: string | null): LLMProviderSettings | null {
-  if (!token) return null;
+export function loadSettings(scopeIdentity: string | null): LLMProviderSettings | null {
+  if (!scopeIdentity) return null;
 
   try {
-    const key = getStorageKey(token);
+    const key = getStorageKey(scopeIdentity);
     const stored = localStorage.getItem(key);
     if (!stored) return null;
 
@@ -122,11 +130,11 @@ export function loadSettings(token: string | null): LLMProviderSettings | null {
   }
 }
 
-export async function loadSettingsAsync(token: string | null): Promise<LLMProviderSettings | null> {
-  if (!token) return null;
+export async function loadSettingsAsync(scopeIdentity: string | null): Promise<LLMProviderSettings | null> {
+  if (!scopeIdentity) return null;
 
   try {
-    const key = getStorageKey(token);
+    const key = getStorageKey(scopeIdentity);
     const stored = localStorage.getItem(key);
     if (!stored) return null;
 
@@ -152,7 +160,7 @@ export async function loadSettingsAsync(token: string | null): Promise<LLMProvid
       const envSecret = getEncryptionKeyEnv();
       if (!envSecret) return { ...base, apiKey: "" };
       try {
-        const cryptoKey = await deriveKey(token, envSecret);
+        const cryptoKey = await deriveKey(scopeIdentity, envSecret);
         const apiKey = await decrypt(parsed.apiKeyEncrypted as string, cryptoKey);
         return { ...base, apiKey };
       } catch {
@@ -170,8 +178,8 @@ export async function loadSettingsAsync(token: string | null): Promise<LLMProvid
   }
 }
 
-export function saveSettings(token: string | null, settings: LLMProviderSettings): void {
-  if (!token) return;
+export function saveSettings(scopeIdentity: string | null, settings: LLMProviderSettings): void {
+  if (!scopeIdentity) return;
 
   const envSecret = getEncryptionKeyEnv();
   const hasApiKey = Boolean(settings.apiKey && settings.apiKey.trim());
@@ -189,11 +197,11 @@ export function saveSettings(token: string | null, settings: LLMProviderSettings
   };
 
   if (hasApiKey && envSecret && typeof crypto !== "undefined" && crypto.subtle) {
-    deriveKey(token, envSecret)
+    deriveKey(scopeIdentity, envSecret)
       .then((cryptoKey) => encrypt(settings.apiKey.trim(), cryptoKey))
       .then((apiKeyEncrypted) => {
         try {
-          const key = getStorageKey(token);
+          const key = getStorageKey(scopeIdentity);
           localStorage.setItem(key, JSON.stringify({ ...toStore, apiKeyEncrypted }));
         } catch {
           console.warn("Failed to save LLM settings to localStorage");
@@ -201,7 +209,7 @@ export function saveSettings(token: string | null, settings: LLMProviderSettings
       })
       .catch(() => {
         try {
-          const key = getStorageKey(token);
+          const key = getStorageKey(scopeIdentity);
           localStorage.setItem(key, JSON.stringify({ ...toStore }));
         } catch {
           console.warn("Failed to save LLM settings to localStorage");
@@ -211,7 +219,7 @@ export function saveSettings(token: string | null, settings: LLMProviderSettings
   }
 
   try {
-    const key = getStorageKey(token);
+    const key = getStorageKey(scopeIdentity);
     if (!hasApiKey) {
       localStorage.setItem(key, JSON.stringify({ ...toStore, apiKey: "" }));
     } else {
@@ -222,13 +230,58 @@ export function saveSettings(token: string | null, settings: LLMProviderSettings
   }
 }
 
-export function clearSettings(token: string | null): void {
-  if (!token) return;
+export function clearSettings(scopeIdentity: string | null): void {
+  if (!scopeIdentity) return;
 
   try {
-    const key = getStorageKey(token);
+    const key = getStorageKey(scopeIdentity);
     localStorage.removeItem(key);
   } catch {
     // Ignore errors
+  }
+}
+
+export async function migrateLegacySettingsScope(
+  legacyToken: string | null,
+  scopeIdentity: string | null,
+): Promise<void> {
+  if (!legacyToken || !scopeIdentity || typeof localStorage === "undefined") {
+    return;
+  }
+
+  try {
+    const legacyKey = getLegacyTokenStorageKey(legacyToken);
+    const nextKey = getStorageKey(scopeIdentity);
+    const legacyValue = localStorage.getItem(legacyKey);
+    if (!legacyValue) {
+      return;
+    }
+
+    if (!localStorage.getItem(nextKey)) {
+      let nextValue = legacyValue;
+      const envSecret = getEncryptionKeyEnv();
+      if (envSecret && typeof crypto !== "undefined" && crypto.subtle) {
+        try {
+          const parsed = JSON.parse(legacyValue) as unknown;
+          if (isValidStoredShape(parsed) && typeof parsed.apiKeyEncrypted === "string") {
+            const legacyCryptoKey = await deriveKey(legacyToken, envSecret);
+            const apiKey = await decrypt(parsed.apiKeyEncrypted, legacyCryptoKey);
+            const nextCryptoKey = await deriveKey(scopeIdentity, envSecret);
+            const apiKeyEncrypted = await encrypt(apiKey, nextCryptoKey);
+            nextValue = JSON.stringify({
+              ...parsed,
+              apiKeyEncrypted,
+            });
+          }
+        } catch {
+          nextValue = legacyValue;
+        }
+      }
+
+      localStorage.setItem(nextKey, nextValue);
+    }
+    localStorage.removeItem(legacyKey);
+  } catch {
+    console.warn("Failed to migrate legacy LLM settings scope");
   }
 }
