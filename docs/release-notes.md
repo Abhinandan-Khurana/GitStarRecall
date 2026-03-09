@@ -1,9 +1,6 @@
 # Release Notes
 
-## 2026-03-09 (SessionChat Button Hover Polish)
-
-- SessionChat model-settings trigger button: improved hover behavior so the control reads as a label/trigger rather than a standard action button:
-  - added `cursor-default`, `hover:bg-transparent`, and `hover:text-foreground` so hover state no longer uses the default ghost-button highlight.
+- SessionChat model-settings trigger button: replaced the ghost `<Button>` used as the provider label with a plain `<span>`, so the label no longer renders as an interactive control or shows a ghost-button hover highlight.
 
 ## 2026-03-08 (GitHub Auth 401 Fix and Token Normalization)
 
