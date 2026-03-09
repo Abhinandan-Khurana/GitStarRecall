@@ -1,5 +1,7 @@
 # Release Notes
 
+- SessionChat model-settings trigger button: replaced the ghost `<Button>` used as the provider label with a plain `<span>`, so the label no longer renders as an interactive control or shows a ghost-button hover highlight.
+
 ## 2026-03-08 (GitHub Auth 401 Fix and Token Normalization)
 
 - Hardened GitHub auth token handling for both OAuth tokens and pasted PATs:
