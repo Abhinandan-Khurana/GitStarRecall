@@ -15,7 +15,7 @@ In scope:
 - Browser embedding capability recommendation state (mobile/webgpu/cores/memory/perf probe)
 - Optional local Ollama embedding endpoint configuration (`localhost` only)
 - Developer advanced-mode (`sudo`) retrieval tuning state (scoped local persistence)
-- Auth-scoped browser persistence keys and per-identity local SQLite database files
+- GitHub-account-scoped browser persistence keys and per-identity local SQLite database files
 - Optional Browser WebLLM model runtime and downloaded model artifacts
 - Chat sessions and messages
 - User queries
@@ -141,7 +141,7 @@ Mitigations:
 
 Mapped requirements:
 - Local-first storage: SQLite WASM + sqlite-vec.
-- Auth-scoped local persistence for SQLite and settings continuity.
+- GitHub-account-scoped local persistence for SQLite and settings continuity.
 - Shared GitHub token normalization before in-memory storage/use.
 - OAuth PKCE and PAT fallback with warnings.
 - Explicit LLM opt-in.
@@ -253,6 +253,6 @@ Threat notes:
 Mitigations:
 
 - Strip header-style prefixes, quotes, and extra whitespace before using GitHub tokens.
-- Keep raw GitHub tokens in memory only and derive scoped local keys from hashed token identifiers rather than persisting the raw value.
+- Keep raw GitHub tokens in memory only and derive scoped local keys from the authenticated GitHub account identity rather than persisting the raw value or tying persistence to rotating credentials.
 - Keep 401 remediation focused on token validity/formatting issues before scope expansion.
 - Clear browser runtime/model caches during local data reset.

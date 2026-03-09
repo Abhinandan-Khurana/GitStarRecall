@@ -54,11 +54,11 @@ Security posture notes:
 
 - Reworked the authenticated product into a route-based shell (`/app/setup`, `/app/recall`, `/app/library`, `/app/sessions`, `/app/settings`) while preserving the public landing page and OAuth callback surface.
 - Added a command palette and keyboard route switching, improving operator ergonomics without widening data exposure.
-- Scoped browser-local database files/keys by auth token hash:
+- Scoped browser-local database files/keys by stable GitHub account identity:
   - OPFS filenames,
   - localStorage SQLite fallbacks,
-  - auth-scoped continuity/settings keys.
-- Preserved token handling in React memory only; the new scope keys derive from a one-way hash helper rather than storing raw tokens in browser persistence.
+  - account-scoped continuity/settings keys.
+- Preserved token handling in React memory only; browser persistence scope is derived from the authenticated GitHub user rather than the current credential string, so raw tokens are not stored and token rotation does not strand local data.
 - Added scope regression tests for auth helper keys and database naming to reduce cross-identity local-data bleed risk.
 
 ## 2026-03-09 Update (GitHub Auth Normalization + Reset Semantics)
@@ -80,7 +80,7 @@ Security posture notes:
 |------------|--------|-----------------|
 | OAuth PKCE; avoid tokens in URL | **Done** | `src/auth/githubOAuth.ts`: `buildGitHubAuthorizeUrl` uses `code_challenge` (S256) and `code_verifier` in sessionStorage; token is obtained via `exchangeOAuthCode` (server-side exchange). Callback uses only `code` and `state` from URL; token never in URL. |
 | Clear separation public vs authenticated surfaces | **Done** | Public `LandingPage` remains at `/`, `AuthCallbackPage` remains at `/auth/callback`, and authenticated views now live behind `AppShell` routes (`/app/setup`, `/app/recall`, `/app/library`, `/app/sessions`, `/app/settings`). Auth token state remains in React memory; OAuth PKCE verifier/state use `sessionStorage` only for the OAuth handshake. |
-| Normalize pasted OAuth/PAT input before use | **Done** | `src/lib/normalizeGitHubToken.ts` strips header-style prefixes, surrounding quotes, and extra whitespace. `src/auth/AuthContext.tsx` applies it before storing the token in React state or deriving auth-scoped local keys. |
+| Normalize pasted OAuth/PAT input before use | **Done** | `src/lib/normalizeGitHubToken.ts` strips header-style prefixes, surrounding quotes, and extra whitespace. `src/auth/AuthContext.tsx` applies it before storing the token in React state, then resolves the authenticated GitHub user before deriving account-scoped local keys. |
 | Warning banner when PAT is used; recommend OAuth | **Done** | Auth method is shown in the workspace account panel (`authMethod`: `oauth` / `pat`) and PAT sessions render an explicit warning with a GitHub OAuth action. Public landing/login copy also frames OAuth as the preferred path and PAT as a manual fallback. |
 | Strict CSP | **Done** | See Tampering / CSP below. |
 | Explicit opt-in for local endpoints; show endpoint origin | **Done** | `allowLocalProvider` is off by default; user must enable local providers in SessionChat model settings. Browser WebLLM additionally requires consent modal before first model download. |
@@ -124,7 +124,7 @@ No material repudiation gaps identified beyond keeping local audit/status metada
 |------------|--------|-----------------|
 | External LLM off by default; explicit opt-in | **Done** | `allowRemoteProvider` and `allowLocalProvider` default to `false` in `UsagePage.tsx`; sending requires enabling the matching checkbox. |
 | Send only top-K snippets to LLM | **Done** | `src/llm/providers.ts`: `TOP_K_LIMIT = 8`; `buildContextBlock` uses `snippets.slice(0, TOP_K_LIMIT)`. `UsagePage` passes `filteredResults.slice(0, 8)`. |
-| Token in memory or scoped key derivation only | **Done** | `AuthContext` keeps the raw GitHub token in React state only; no token value is written to `localStorage` or SQLite. Auth-scope helpers derive deterministic hashed scope strings for local namespacing so raw tokens are not used as persisted keys. |
+| Token in memory or scoped key derivation only | **Done** | `AuthContext` keeps the raw GitHub token in React state only; no token value is written to `localStorage` or SQLite. Local namespacing is derived from the authenticated GitHub account identity instead of the raw token, so token rotation does not change the persisted scope. |
 | Chat backup and runtime caches remain local-only and wipeable | **Done** | Chat sessions/messages are backed up client-side (`src/db/chatBackup.ts`) using IndexedDB with localStorage fallback. No token is written to backup. `handleClearLocalData` clears scoped OPFS/localStorage DB bytes, chat backup copy, and browser cache entries used for WebLLM/model artifacts. |
 | “Clear all data” and “Clear token” | **Done** | UsagePage: “Clear token” (logout) and “Delete local data” (`handleClearLocalData` → `database.clearAllData()`). |
 | Restrict debug logs (IDs/counts/timings; no README plaintext) | **Mostly done** | GitHub client logger (DEV-only) logs page/count/total/remaining, repo `full_name`, status, and README **length** only – not token or README content. `UsagePage.tsx` now logs full error objects only in `import.meta.env.DEV`; production console output and local observability keep message-only payloads. **Residual:** sensitive material must still never be embedded into error messages themselves. |

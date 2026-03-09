@@ -117,12 +117,14 @@ The public landing page now uses a parallax-first narrative flow:
 - Click `Get started` or continue directly from the lower OAuth card and complete the GitHub OAuth flow.
 - OAuth should be treated as a read-only access path for reading the public and private repositories that the authorized account/token can access.
 - Token is held in memory; not persisted as raw token storage.
+- Browser-local data scope is derived from the authenticated GitHub account, so re-login with a refreshed OAuth token keeps the same local workspace.
 
 ## 7.2 PAT fallback
 
 - Paste the token directly. Header-style prefixes such as `Bearer ` / `token `, surrounding quotes, and extra whitespace are normalized automatically before use.
 - Use a token with read access to `/user/starred` and the public/private repositories you want indexed.
 - Ensure PAT scopes can read `/user/starred` and the repositories you want indexed.
+- Browser-local data scope is derived from the authenticated GitHub account, so re-entering a different PAT for the same account keeps the same local workspace.
 
 ## 8) Daily Usage Flow
 
@@ -243,12 +245,12 @@ Primary local storage:
 
 - SQLite (sql.js) with OPFS when available.
 - Fallback local storage modes when persistent quota/backends fail.
-- The local database file/key is scoped per authenticated token hash, so different PAT/OAuth identities do not share repo indexes or embedding stores.
+- The local database file/key is scoped per authenticated GitHub account identity, so different GitHub accounts do not share repo indexes or embedding stores, while the same account keeps the same local workspace across OAuth token refreshes or PAT re-entry.
 
 Additional local persistence:
 
 - Chat backup in IndexedDB with localStorage fallback.
-- Auth-scoped settings for advanced retrieval mode, embedding preferences, and session continuity metadata.
+- Account-scoped settings for advanced retrieval mode, embedding preferences, and session continuity metadata.
 - Local runtime caches for model artifacts (WebLLM / embedding assets).
 
 Reset actions in UI:

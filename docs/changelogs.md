@@ -1,5 +1,16 @@
 # Changelogs
 
+## 2026-03-09 (Auth Persistence Across OAuth/PAT Re-login)
+
+- Fixed browser-local data appearing to disappear after refresh + re-login with OAuth or PAT.
+- Root cause:
+  - local persistence had been scoped by auth token hash, so a rotated OAuth token or a different PAT for the same GitHub account opened a different local scope.
+- Updated auth persistence to use a stable GitHub account identity instead:
+  - local SQLite/OPFS/localStorage database scope now follows the authenticated GitHub user rather than the current credential string,
+  - chat/session scope and provider-setting scope now follow the same stable account identity,
+  - legacy token-scoped local DB/settings data is migrated forward on login so existing browser-local data is not stranded.
+- This preserves cross-account isolation while keeping one user’s local workspace stable across refreshes, OAuth token rotation, and PAT re-entry.
+
 ## 2026-03-09 (`release-notes.md` renamed to `changelogs.md`)
 
 - Renamed the project changelog document from `docs/release-notes.md` to `docs/changelogs.md`.
