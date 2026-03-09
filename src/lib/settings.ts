@@ -14,6 +14,7 @@ export type LLMProviderSettings = {
 };
 
 const STORAGE_KEY_PREFIX = "gitstarrecall.llm.settings.";
+const STABLE_SCOPE_KEY_PREFIX = `${STORAGE_KEY_PREFIX}scope.`;
 const GCM_IV_LENGTH = 12;
 
 function hashScopeValue(raw: string): string {
@@ -22,12 +23,55 @@ function hashScopeValue(raw: string): string {
   ).toString();
 }
 
+function encodeScopeIdentity(scopeIdentity: string): string {
+  return encodeURIComponent(scopeIdentity);
+}
+
 function getStorageKey(scopeIdentity: string): string {
+  return `${STABLE_SCOPE_KEY_PREFIX}${encodeScopeIdentity(scopeIdentity)}`;
+}
+
+function getHistoricalScopeStorageKey(scopeIdentity: string): string {
   return `${STORAGE_KEY_PREFIX}${hashScopeValue(scopeIdentity)}`;
 }
 
 function getLegacyTokenStorageKey(token: string): string {
   return `${STORAGE_KEY_PREFIX}${hashScopeValue(token)}`;
+}
+
+function getStoredSettingsRecord(scopeIdentity: string): { key: string; value: string } | null {
+  const primaryKey = getStorageKey(scopeIdentity);
+  const primaryValue = localStorage.getItem(primaryKey);
+  if (primaryValue) {
+    return {
+      key: primaryKey,
+      value: primaryValue,
+    };
+  }
+
+  const historicalKey = getHistoricalScopeStorageKey(scopeIdentity);
+  const historicalValue = localStorage.getItem(historicalKey);
+  if (historicalValue) {
+    return {
+      key: historicalKey,
+      value: historicalValue,
+    };
+  }
+
+  return null;
+}
+
+function clearHistoricalScopeStorageKey(scopeIdentity: string): void {
+  const historicalKey = getHistoricalScopeStorageKey(scopeIdentity);
+  if (historicalKey !== getStorageKey(scopeIdentity)) {
+    localStorage.removeItem(historicalKey);
+  }
+}
+
+function persistScopedSettingsValue(scopeIdentity: string, value: string): void {
+  const key = getStorageKey(scopeIdentity);
+  localStorage.setItem(key, value);
+  clearHistoricalScopeStorageKey(scopeIdentity);
 }
 
 function getEncryptionKeyEnv(): string {
@@ -94,11 +138,10 @@ export function loadSettings(scopeIdentity: string | null): LLMProviderSettings 
   if (!scopeIdentity) return null;
 
   try {
-    const key = getStorageKey(scopeIdentity);
-    const stored = localStorage.getItem(key);
+    const stored = getStoredSettingsRecord(scopeIdentity);
     if (!stored) return null;
 
-    const parsed = JSON.parse(stored) as unknown;
+    const parsed = JSON.parse(stored.value) as unknown;
     if (!isValidStoredShape(parsed)) return null;
 
     const base: Omit<LLMProviderSettings, "apiKey"> = {
@@ -117,7 +160,7 @@ export function loadSettings(scopeIdentity: string | null): LLMProviderSettings 
     };
 
     if (typeof parsed.apiKeyEncrypted === "string") {
-      return null;
+      return { ...base, apiKey: "" };
     }
 
     if (typeof parsed.apiKey === "string") {
@@ -134,11 +177,10 @@ export async function loadSettingsAsync(scopeIdentity: string | null): Promise<L
   if (!scopeIdentity) return null;
 
   try {
-    const key = getStorageKey(scopeIdentity);
-    const stored = localStorage.getItem(key);
+    const stored = getStoredSettingsRecord(scopeIdentity);
     if (!stored) return null;
 
-    const parsed = JSON.parse(stored) as unknown;
+    const parsed = JSON.parse(stored.value) as unknown;
     if (!isValidStoredShape(parsed)) return null;
 
     const base: Omit<LLMProviderSettings, "apiKey"> = {
@@ -201,16 +243,14 @@ export function saveSettings(scopeIdentity: string | null, settings: LLMProvider
       .then((cryptoKey) => encrypt(settings.apiKey.trim(), cryptoKey))
       .then((apiKeyEncrypted) => {
         try {
-          const key = getStorageKey(scopeIdentity);
-          localStorage.setItem(key, JSON.stringify({ ...toStore, apiKeyEncrypted }));
+          persistScopedSettingsValue(scopeIdentity, JSON.stringify({ ...toStore, apiKeyEncrypted }));
         } catch {
           console.warn("Failed to save LLM settings to localStorage");
         }
       })
       .catch(() => {
         try {
-          const key = getStorageKey(scopeIdentity);
-          localStorage.setItem(key, JSON.stringify({ ...toStore }));
+          persistScopedSettingsValue(scopeIdentity, JSON.stringify({ ...toStore }));
         } catch {
           console.warn("Failed to save LLM settings to localStorage");
         }
@@ -219,11 +259,10 @@ export function saveSettings(scopeIdentity: string | null, settings: LLMProvider
   }
 
   try {
-    const key = getStorageKey(scopeIdentity);
     if (!hasApiKey) {
-      localStorage.setItem(key, JSON.stringify({ ...toStore, apiKey: "" }));
+      persistScopedSettingsValue(scopeIdentity, JSON.stringify({ ...toStore, apiKey: "" }));
     } else {
-      localStorage.setItem(key, JSON.stringify(toStore));
+      persistScopedSettingsValue(scopeIdentity, JSON.stringify(toStore));
     }
   } catch {
     console.warn("Failed to save LLM settings to localStorage");
@@ -236,6 +275,7 @@ export function clearSettings(scopeIdentity: string | null): void {
   try {
     const key = getStorageKey(scopeIdentity);
     localStorage.removeItem(key);
+    clearHistoricalScopeStorageKey(scopeIdentity);
   } catch {
     // Ignore errors
   }
@@ -251,37 +291,44 @@ export async function migrateLegacySettingsScope(
 
   try {
     const legacyKey = getLegacyTokenStorageKey(legacyToken);
-    const nextKey = getStorageKey(scopeIdentity);
     const legacyValue = localStorage.getItem(legacyKey);
+    const existingScopedRecord = getStoredSettingsRecord(scopeIdentity);
+
+    if (existingScopedRecord) {
+      if (existingScopedRecord.key !== getStorageKey(scopeIdentity)) {
+        persistScopedSettingsValue(scopeIdentity, existingScopedRecord.value);
+      }
+      if (legacyValue) {
+        localStorage.removeItem(legacyKey);
+      }
+      return;
+    }
+
     if (!legacyValue) {
       return;
     }
 
-    if (!localStorage.getItem(nextKey)) {
-      let nextValue = legacyValue;
-      const envSecret = getEncryptionKeyEnv();
-      if (envSecret && typeof crypto !== "undefined" && crypto.subtle) {
-        try {
-          const parsed = JSON.parse(legacyValue) as unknown;
-          if (isValidStoredShape(parsed) && typeof parsed.apiKeyEncrypted === "string") {
-            const legacyCryptoKey = await deriveKey(legacyToken, envSecret);
-            const apiKey = await decrypt(parsed.apiKeyEncrypted, legacyCryptoKey);
-            const nextCryptoKey = await deriveKey(scopeIdentity, envSecret);
-            const apiKeyEncrypted = await encrypt(apiKey, nextCryptoKey);
-            nextValue = JSON.stringify({
-              ...parsed,
-              apiKeyEncrypted,
-            });
-          }
-        } catch {
-          nextValue = legacyValue;
-        }
+    let nextValue = legacyValue;
+    const envSecret = getEncryptionKeyEnv();
+    if (envSecret && typeof crypto !== "undefined" && crypto.subtle) {
+      const parsed = JSON.parse(legacyValue) as unknown;
+      if (isValidStoredShape(parsed) && typeof parsed.apiKeyEncrypted === "string") {
+        const legacyCryptoKey = await deriveKey(legacyToken, envSecret);
+        const apiKey = await decrypt(parsed.apiKeyEncrypted, legacyCryptoKey);
+        const nextCryptoKey = await deriveKey(scopeIdentity, envSecret);
+        const apiKeyEncrypted = await encrypt(apiKey, nextCryptoKey);
+        nextValue = JSON.stringify({
+          ...parsed,
+          apiKeyEncrypted,
+        });
       }
-
-      localStorage.setItem(nextKey, nextValue);
     }
+
+    persistScopedSettingsValue(scopeIdentity, nextValue);
     localStorage.removeItem(legacyKey);
-  } catch {
-    console.warn("Failed to migrate legacy LLM settings scope");
+  } catch (error) {
+    throw new Error(
+      `Failed to migrate legacy LLM settings scope: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }

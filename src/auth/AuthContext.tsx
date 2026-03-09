@@ -20,7 +20,7 @@ import { AuthContext } from "./auth-context";
 import type { AuthContextValue, AuthMethod, OAuthCallbackInput } from "./auth-types";
 import { createGitHubApiClient } from "@/github/client";
 import { migrateLocalDatabaseScope, setLocalDatabaseScope } from "@/db/client";
-import { clearSettings, migrateLegacySettingsScope } from "@/lib/settings";
+import { migrateLegacySettingsScope } from "@/lib/settings";
 import { normalizeGitHubToken } from "@/lib/normalizeGitHubToken";
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -83,12 +83,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, [establishSession]);
 
   const logout = useCallback(() => {
-    clearSettings(authScopeIdentity);
     setLocalDatabaseScope(buildAuthStorageScope(null));
     setAccessToken(null);
     setAuthScopeIdentity(null);
     setAuthMethod(null);
-  }, [authScopeIdentity]);
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({
