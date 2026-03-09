@@ -252,6 +252,7 @@ Additional local persistence:
 - Chat backup in IndexedDB with localStorage fallback.
 - Account-scoped settings for advanced retrieval mode, embedding preferences, and session continuity metadata.
 - Local runtime caches for model artifacts (WebLLM / embedding assets).
+- If a legacy token-scoped settings record is malformed JSON during one-time migration, the app discards that unreadable historical record instead of repeatedly blocking login on the same parse failure.
 - If a legacy token-scoped DB snapshot is unreadable during one-time migration, the app discards that unreadable legacy copy and continues with a fresh account-scoped database instead of permanently blocking login.
 
 Reset actions in UI:

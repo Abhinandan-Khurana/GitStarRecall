@@ -91,6 +91,7 @@ Mitigations:
 - Browser WebLLM download is explicit opt-in; no GitHub token in request payloads.
 - Send only top-K snippets, not full repo content.
 - Keep GitHub tokens in memory only; provider/API-key settings may use scoped local storage with optional encryption support when configured.
+- Discard malformed legacy provider-settings JSON during one-time scope migration so unreadable historical records do not permanently block login.
 - Fail closed if encrypted provider settings cannot be safely re-encrypted during legacy-scope migration; preserve the legacy record instead of silently copying ciphertext to the wrong key scope.
 - Scope local SQLite/localStorage persistence by stable GitHub account identity so one authenticated identity does not inherit another identity's indexed corpus, while OAuth/PAT rotation for the same account keeps the same workspace.
 - Add “Clear all data” and “Clear token” actions.
