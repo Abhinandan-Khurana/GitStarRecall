@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { clearSettings, loadSettings, saveSettings, type LLMProviderSettings } from "./settings";
+import {
+  clearSettings,
+  loadSettings,
+  migrateLegacySettingsScope,
+  saveSettings,
+  type LLMProviderSettings,
+} from "./settings";
 
 class MemoryStorage implements Storage {
   private entries = new Map<string, string>();
@@ -29,13 +35,14 @@ class MemoryStorage implements Storage {
   }
 }
 
-function hashStorageKey(token: string): string {
-  const hash = token.split("").reduce((acc, char) => ((acc << 5) - acc) + char.charCodeAt(0), 0);
+function hashStorageKey(scopeIdentity: string): string {
+  const hash = scopeIdentity.split("").reduce((acc, char) => ((acc << 5) - acc) + char.charCodeAt(0), 0);
   return `gitstarrecall.llm.settings.${Math.abs(hash)}`;
 }
 
 describe("llm provider settings", () => {
-  const token = "test-token";
+  const scopeIdentity = "github:42";
+  const legacyToken = "ghp_legacy_token";
   let originalLocalStorage: Storage | undefined;
 
   beforeEach(() => {
@@ -71,8 +78,8 @@ describe("llm provider settings", () => {
       webllmLastRecommendedModel: "SmolLM2-360M-Instruct-q4f16_1-MLC",
     };
 
-    saveSettings(token, settings);
-    const loaded = loadSettings(token);
+    saveSettings(scopeIdentity, settings);
+    const loaded = loadSettings(scopeIdentity);
 
     expect(loaded).not.toBeNull();
     expect(loaded?.providerId).toBe("webllm");
@@ -83,7 +90,7 @@ describe("llm provider settings", () => {
   });
 
   it("supports legacy records without webllm fields", () => {
-    const key = hashStorageKey(token);
+    const key = hashStorageKey(scopeIdentity);
     localStorage.setItem(
       key,
       JSON.stringify({
@@ -96,7 +103,7 @@ describe("llm provider settings", () => {
       }),
     );
 
-    const loaded = loadSettings(token);
+    const loaded = loadSettings(scopeIdentity);
     expect(loaded).not.toBeNull();
     expect(loaded?.providerId).toBe("openai-compatible");
     expect(loaded?.webllmConsent).toBe(false);
@@ -119,9 +126,33 @@ describe("llm provider settings", () => {
       webllmLastRecommendedModel: "",
     };
 
-    saveSettings(token, settings);
-    expect(loadSettings(token)).not.toBeNull();
-    clearSettings(token);
-    expect(loadSettings(token)).toBeNull();
+    saveSettings(scopeIdentity, settings);
+    expect(loadSettings(scopeIdentity)).not.toBeNull();
+    clearSettings(scopeIdentity);
+    expect(loadSettings(scopeIdentity)).toBeNull();
+  });
+
+  it("migrates legacy token-scoped records into the user scope", async () => {
+    const legacyKey = hashStorageKey(legacyToken);
+    localStorage.setItem(
+      legacyKey,
+      JSON.stringify({
+        providerId: "ollama",
+        baseUrl: "http://localhost:11434",
+        model: "llama3.1:8b",
+        ollamaPreferredModel: "llama3.1:8b",
+        apiKey: "",
+        allowRemoteProvider: false,
+        allowLocalProvider: true,
+        webllmConsent: false,
+        webllmPreferredModel: "",
+        webllmLastRecommendedModel: "",
+      }),
+    );
+
+    await migrateLegacySettingsScope(legacyToken, scopeIdentity);
+
+    expect(localStorage.getItem(legacyKey)).toBeNull();
+    expect(loadSettings(scopeIdentity)?.providerId).toBe("ollama");
   });
 });

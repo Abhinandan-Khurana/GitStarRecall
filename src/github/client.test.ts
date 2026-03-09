@@ -30,6 +30,30 @@ function jsonResponse(payload: unknown, init: ResponseInit = {}): Response {
 }
 
 describe("github client integration", () => {
+  test("fetchAuthenticatedUser resolves the stable GitHub account identity", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async (input) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/user")) {
+        return jsonResponse({ id: 42, login: "octocat" });
+      }
+      return jsonResponse({ message: "Not Found" }, { status: 404 });
+    }) as typeof fetch;
+
+    const client = createGitHubApiClient({
+      accessToken: "token",
+      fetchImpl,
+      logger: {
+        debug: () => undefined,
+        warn: () => undefined,
+      },
+    });
+
+    await expect(client.fetchAuthenticatedUser()).resolves.toEqual({
+      id: 42,
+      login: "octocat",
+    });
+  });
+
   test("fetchAllStarredRepos follows Link rel=next until final page", async () => {
     const page1Repos = Array.from({ length: 100 }, (_, index) => makeRepo(index + 1));
     const page2Repos = Array.from({ length: 20 }, (_, index) => makeRepo(index + 101));
