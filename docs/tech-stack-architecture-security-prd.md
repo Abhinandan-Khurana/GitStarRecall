@@ -419,9 +419,9 @@ Reference:
 
 ### 3.2 Token Handling
 - GitHub OAuth tokens stored only in memory by default
-- Optional encrypted storage using WebCrypto (AES-GCM)
+- Provider API keys may use optional WebCrypto (AES-GCM) encryption in account-scoped local storage when configured
 - Never log tokens
-- Clear tokens on logout
+- Logout clears the in-memory GitHub credential; destructive local-data deletion is a separate explicit action
 - Use OAuth PKCE and avoid tokens in URLs
 
 ### 3.3 External LLM Usage

@@ -91,8 +91,9 @@ Mitigations:
 - Browser WebLLM download is explicit opt-in; no GitHub token in request payloads.
 - Send only top-K snippets, not full repo content.
 - Keep GitHub tokens in memory only; provider/API-key settings may use scoped local storage with optional encryption support when configured.
-- Scope local SQLite/localStorage persistence by auth token hash so one authenticated identity does not inherit another identity's indexed corpus.
+- Scope local SQLite/localStorage persistence by stable GitHub account identity so one authenticated identity does not inherit another identity's indexed corpus, while OAuth/PAT rotation for the same account keeps the same workspace.
 - Add “Clear all data” and “Clear token” actions.
+- Keep “Clear token” limited to signing out; reserve destructive local-data deletion for “Delete local data”.
 - Clear browser cache entries used for WebLLM/model artifacts during `Delete local data`.
 - Restrict debug logs to IDs/counts/timings; never log README plaintext by default.
 - Ollama embedding request payload must not include GitHub tokens or PAT values.

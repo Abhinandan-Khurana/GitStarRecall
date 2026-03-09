@@ -217,7 +217,7 @@ Recommended:
 ## 10.1 Retrieval Tuning (Sudo/Advanced)
 
 Developer advanced mode is available directly in UI as a checkbox (`Enable developer advanced mode (sudo)`).
-Settings are persisted per auth scope via `localStorage` (`gitstarrecall.sudo.<scope>`).
+Settings are persisted per auth scope via `localStorage` using the authenticated account-scoped key (`gitstarrecall.sudo.<auth-scope>`).
 When enabled, advanced controls become available:
 
 - `fetchK` (`80..300`)
@@ -257,6 +257,7 @@ Reset actions in UI:
 
 - `Clear token`
 - `Delete local data`
+- `Clear token` signs out and clears the in-memory GitHub credential, but preserves the account-scoped local workspace and provider/settings state for that GitHub account.
 - `Delete local data` also clears browser cache entries used for WebLLM/model artifacts when the browser cache API is available.
 
 ## 12) Troubleshooting

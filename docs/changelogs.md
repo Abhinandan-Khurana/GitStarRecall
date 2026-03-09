@@ -1,5 +1,22 @@
 # Changelogs
 
+## 2026-03-09 (Persistence Hardening Follow-up)
+
+- Closed review-discovered persistence gaps in the new GitHub-account-scoped storage model.
+- Hardened logout/reset semantics:
+  - `Clear token` now removes only the in-memory GitHub credential,
+  - account-scoped provider/model/API-key settings remain available when the same GitHub account signs back in,
+  - destructive local-state removal stays behind `Delete local data`.
+- Hardened account-scoped settings persistence:
+  - sync settings loading now still reports encrypted API-key-backed configurations as configured,
+  - stable account-scoped settings keys now use a distinct namespace with compatibility for already-written hashed scope records,
+  - legacy encrypted settings migration now fails loudly instead of silently stranding or dropping API keys.
+- Hardened local DB scope migration:
+  - migration now compares persisted snapshot freshness before preferring OPFS vs local-storage copies,
+  - stale legacy snapshots are cleaned up even when the stable target already exists,
+  - migration failures now surface as blocking errors instead of silently opening a fresh empty scope.
+- Updated `docs/Usage.md`, `docs/security-review-stride.md`, `docs/threat-modeling-stride.md`, and `docs/tech-stack-architecture-security-prd.md` to match the shipped logout and local-data semantics.
+
 ## 2026-03-09 (Auth Persistence Across OAuth/PAT Re-login)
 
 - Fixed browser-local data appearing to disappear after refresh + re-login with OAuth or PAT.
@@ -119,7 +136,7 @@
   - settings owns embedding runtime, provider defaults, developer retrieval tuning, privacy, and local data controls.
 - Extracted shared provider configuration UI into `ProviderSettingsForm` so chat/settings configuration paths stay aligned.
 - Hardened local-state isolation across identities:
-  - local SQLite/OPFS/localStorage database names are scoped by auth token hash,
+  - initial local SQLite/OPFS/localStorage database names were scoped by auth token hash in that rollout and were later migrated to stable GitHub-account identity scope on 2026-03-09,
   - auth-scoped helpers now isolate chat/session continuity and embedding preference keys,
   - added scope regression tests for auth helpers and DB naming.
 - Expanded local schema support for future workspace features:
