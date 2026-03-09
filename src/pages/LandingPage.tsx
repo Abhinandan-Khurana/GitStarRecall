@@ -30,11 +30,11 @@ export default function LandingPage() {
   }, [beginOAuthLogin]);
 
   const handlePatSubmit = useCallback(
-    (event: React.FormEvent<HTMLFormElement>) => {
+    async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
 
       try {
-        loginWithPat(patToken);
+        await loginWithPat(patToken);
         navigate("/app");
       } catch (err) {
         setAuthError(err instanceof Error ? err.message : "PAT login failed");

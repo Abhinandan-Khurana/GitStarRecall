@@ -2,6 +2,7 @@ import type {
   FetchStarsProgress,
   FetchReadmesResult,
   FetchStarredResult,
+  GitHubAuthenticatedUser,
   GitHubRateLimit,
   ReadmeFetchStats,
   ReadmeFetchProgress,
@@ -9,7 +10,7 @@ import type {
   RepoReadmeRecord,
 } from "./types";
 import { canonicalChecksumInput, sha256Hex } from "./checksum";
-import { normalizeGitHubToken } from "@/lib/normalizeGitHubToken";
+import { normalizeGitHubToken } from "../lib/normalizeGitHubToken";
 
 type Logger = {
   debug: (message: string, meta?: Record<string, unknown>) => void;
@@ -201,6 +202,17 @@ function assertJsonArray(payload: unknown): asserts payload is GitHubStarredRepo
   }
 }
 
+function assertAuthenticatedUser(payload: unknown): asserts payload is GitHubAuthenticatedUser {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("GitHub user response had unexpected payload");
+  }
+
+  const candidate = payload as Partial<GitHubAuthenticatedUser>;
+  if (!Number.isFinite(candidate.id) || typeof candidate.login !== "string" || !candidate.login.trim()) {
+    throw new Error("GitHub user response was missing id/login");
+  }
+}
+
 type GitHubReadmePayload = {
   content?: string;
   encoding?: string;
@@ -316,6 +328,22 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
 
   if (maxPages !== undefined && maxPages <= 0) {
     throw new Error("maxPages must be greater than 0");
+  }
+
+  async function fetchAuthenticatedUser(): Promise<GitHubAuthenticatedUser> {
+    const response = await requestWithBackoff({
+      url: `${API_BASE_URL}/user`,
+      fetchImpl,
+      accessToken: authToken,
+      logger,
+      maxRetries,
+    });
+    const payload = (await response.json()) as unknown;
+    assertAuthenticatedUser(payload);
+    return {
+      id: Number(payload.id),
+      login: payload.login.trim(),
+    };
   }
 
   async function fetchAllStarredRepos(options: FetchStarredOptions = {}): Promise<FetchStarredResult> {
@@ -708,6 +736,7 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
   }
 
   return {
+    fetchAuthenticatedUser,
     fetchAllStarredRepos,
     fetchReadmes,
   };

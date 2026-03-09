@@ -17,6 +17,11 @@ export type GitHubStarredRepo = {
   };
 };
 
+export type GitHubAuthenticatedUser = {
+  id: number;
+  login: string;
+};
+
 export type GitHubRateLimit = {
   limit: number | null;
   remaining: number | null;

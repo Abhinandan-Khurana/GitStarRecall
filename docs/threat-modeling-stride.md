@@ -15,7 +15,7 @@ In scope:
 - Browser embedding capability recommendation state (mobile/webgpu/cores/memory/perf probe)
 - Optional local Ollama embedding endpoint configuration (`localhost` only)
 - Developer advanced-mode (`sudo`) retrieval tuning state (scoped local persistence)
-- Auth-scoped browser persistence keys and per-identity local SQLite database files
+- GitHub-account-scoped browser persistence keys and per-identity local SQLite database files
 - Optional Browser WebLLM model runtime and downloaded model artifacts
 - Chat sessions and messages
 - User queries
@@ -91,8 +91,11 @@ Mitigations:
 - Browser WebLLM download is explicit opt-in; no GitHub token in request payloads.
 - Send only top-K snippets, not full repo content.
 - Keep GitHub tokens in memory only; provider/API-key settings may use scoped local storage with optional encryption support when configured.
-- Scope local SQLite/localStorage persistence by auth token hash so one authenticated identity does not inherit another identity's indexed corpus.
+- Discard malformed legacy provider-settings JSON during one-time scope migration so unreadable historical records do not permanently block login.
+- Fail closed if encrypted provider settings cannot be safely re-encrypted during legacy-scope migration; preserve the legacy record instead of silently copying ciphertext to the wrong key scope.
+- Scope local SQLite/localStorage persistence by stable GitHub account identity so one authenticated identity does not inherit another identity's indexed corpus, while OAuth/PAT rotation for the same account keeps the same workspace.
 - Add “Clear all data” and “Clear token” actions.
+- Keep “Clear token” limited to signing out; reserve destructive local-data deletion for “Delete local data”.
 - Clear browser cache entries used for WebLLM/model artifacts during `Delete local data`.
 - Restrict debug logs to IDs/counts/timings; never log README plaintext by default.
 - Ollama embedding request payload must not include GitHub tokens or PAT values.
@@ -115,6 +118,7 @@ Mitigations:
 - Deterministic fallback from `webgpu` to `wasm`.
 - Preload pending chunk queue once per run to avoid repeated hot-loop DB scans.
 - Buffer embedding writes to reduce checkpoint overhead and main-thread contention.
+- Discard unreadable legacy token-scoped DB snapshots during one-time scope migration so corrupt historical data does not permanently block login.
 
 ### E - Elevation of Privilege
 Threats:
@@ -141,7 +145,7 @@ Mitigations:
 
 Mapped requirements:
 - Local-first storage: SQLite WASM + sqlite-vec.
-- Auth-scoped local persistence for SQLite and settings continuity.
+- GitHub-account-scoped local persistence for SQLite and settings continuity.
 - Shared GitHub token normalization before in-memory storage/use.
 - OAuth PKCE and PAT fallback with warnings.
 - Explicit LLM opt-in.
@@ -253,6 +257,6 @@ Threat notes:
 Mitigations:
 
 - Strip header-style prefixes, quotes, and extra whitespace before using GitHub tokens.
-- Keep raw GitHub tokens in memory only and derive scoped local keys from hashed token identifiers rather than persisting the raw value.
+- Keep raw GitHub tokens in memory only and derive scoped local keys from the authenticated GitHub account identity rather than persisting the raw value or tying persistence to rotating credentials.
 - Keep 401 remediation focused on token validity/formatting issues before scope expansion.
 - Clear browser runtime/model caches during local data reset.

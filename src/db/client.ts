@@ -20,6 +20,7 @@ import type {
 
 const DB_NAME_PREFIX = "gitstarrecall";
 const LOCAL_STORAGE_KEY_PREFIX = "gitstarrecall.sqlite.base64";
+const LOCAL_STORAGE_UPDATED_AT_KEY_PREFIX = "gitstarrecall.sqlite.updated-at";
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_EMBEDDINGS = 256;
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_MS = 3000;
 
@@ -77,6 +78,10 @@ export function getScopedDatabaseStorageKey(scopeKey: string): string {
   return `${LOCAL_STORAGE_KEY_PREFIX}.${normalizeDatabaseScopeKey(scopeKey)}`;
 }
 
+function getScopedDatabaseUpdatedAtStorageKey(scopeKey: string): string {
+  return `${LOCAL_STORAGE_UPDATED_AT_KEY_PREFIX}.${normalizeDatabaseScopeKey(scopeKey)}`;
+}
+
 async function loadBytesFromOpfs(scopeKey: string): Promise<Uint8Array | null> {
   if (!isOpfsSupported()) {
     return null;
@@ -88,6 +93,21 @@ async function loadBytesFromOpfs(scopeKey: string): Promise<Uint8Array | null> {
     const file = await handle.getFile();
     const arrayBuffer = await file.arrayBuffer();
     return new Uint8Array(arrayBuffer);
+  } catch {
+    return null;
+  }
+}
+
+async function getOpfsLastModified(scopeKey: string): Promise<number | null> {
+  if (!isOpfsSupported()) {
+    return null;
+  }
+
+  try {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle(getScopedDatabaseFileName(scopeKey));
+    const file = await handle.getFile();
+    return Number.isFinite(file.lastModified) ? file.lastModified : null;
   } catch {
     return null;
   }
@@ -143,12 +163,27 @@ function loadBytesFromLocalStorage(scopeKey: string): Uint8Array | null {
   }
 }
 
+function loadLocalStorageUpdatedAt(scopeKey: string): number | null {
+  if (typeof localStorage === "undefined") {
+    return null;
+  }
+
+  const raw = localStorage.getItem(getScopedDatabaseUpdatedAtStorageKey(scopeKey));
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function writeBytesToLocalStorage(bytes: Uint8Array, scopeKey: string): void {
   if (typeof localStorage === "undefined") {
     return;
   }
 
   localStorage.setItem(getScopedDatabaseStorageKey(scopeKey), toBase64(bytes));
+  localStorage.setItem(getScopedDatabaseUpdatedAtStorageKey(scopeKey), String(Date.now()));
 }
 
 function clearLocalStorageBytes(scopeKey: string): void {
@@ -157,6 +192,121 @@ function clearLocalStorageBytes(scopeKey: string): void {
   }
 
   localStorage.removeItem(getScopedDatabaseStorageKey(scopeKey));
+  localStorage.removeItem(getScopedDatabaseUpdatedAtStorageKey(scopeKey));
+}
+
+type PersistedScopeSnapshot = {
+  bytes: Uint8Array;
+  storageMode: Extract<StorageMode, "opfs" | "local-storage">;
+  modifiedAt: number | null;
+};
+
+function readSingleNumericResult(database: Database, query: string): number | null {
+  try {
+    const result = database.exec(query);
+    if (result.length === 0 || result[0].values.length === 0) {
+      return null;
+    }
+
+    const value = Number(result[0].values[0]?.[0] ?? NaN);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function computeSnapshotFreshness(bytes: Uint8Array): Promise<number | null> {
+  try {
+    const sql = await getSql();
+    const database = new sql.Database(bytes);
+    try {
+      const candidates = [
+        readSingleNumericResult(database, "SELECT MAX(updated_at) FROM chat_sessions;"),
+        readSingleNumericResult(database, "SELECT MAX(created_at) FROM chat_messages;"),
+        readSingleNumericResult(database, "SELECT MAX(updated_at) FROM index_meta;"),
+        readSingleNumericResult(database, "SELECT MAX(last_synced_at) FROM repos;"),
+      ].filter((value): value is number => value !== null);
+
+      return candidates.length > 0 ? Math.max(...candidates) : null;
+    } finally {
+      database.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+async function readPersistedScopeSnapshot(scopeKey: string): Promise<PersistedScopeSnapshot | null> {
+  const opfsBytes = await loadBytesFromOpfs(scopeKey);
+  const localBytes = loadBytesFromLocalStorage(scopeKey);
+  const opfsSnapshot = opfsBytes
+    ? {
+      bytes: opfsBytes,
+      storageMode: "opfs" as const,
+      modifiedAt: await getOpfsLastModified(scopeKey),
+    }
+    : null;
+  const localSnapshot = localBytes
+    ? {
+      bytes: localBytes,
+      storageMode: "local-storage" as const,
+      modifiedAt: loadLocalStorageUpdatedAt(scopeKey),
+    }
+    : null;
+
+  if (!opfsSnapshot) {
+    return localSnapshot;
+  }
+
+  if (!localSnapshot) {
+    return opfsSnapshot;
+  }
+
+  const [opfsFreshness, localFreshness] = await Promise.all([
+    computeSnapshotFreshness(opfsSnapshot.bytes),
+    computeSnapshotFreshness(localSnapshot.bytes),
+  ]);
+
+  if (opfsFreshness !== null || localFreshness !== null) {
+    if ((localFreshness ?? Number.NEGATIVE_INFINITY) > (opfsFreshness ?? Number.NEGATIVE_INFINITY)) {
+      return localSnapshot;
+    }
+    if ((opfsFreshness ?? Number.NEGATIVE_INFINITY) > (localFreshness ?? Number.NEGATIVE_INFINITY)) {
+      return opfsSnapshot;
+    }
+  }
+
+  if ((localSnapshot.modifiedAt ?? Number.NEGATIVE_INFINITY) > (opfsSnapshot.modifiedAt ?? Number.NEGATIVE_INFINITY)) {
+    return localSnapshot;
+  }
+
+  return opfsSnapshot;
+}
+
+async function writePersistedScopeSnapshot(
+  bytes: Uint8Array,
+  scopeKey: string,
+  preferredStorageMode: Extract<StorageMode, "opfs" | "local-storage">,
+): Promise<Extract<StorageMode, "opfs" | "local-storage">> {
+  if (preferredStorageMode === "opfs") {
+    const opfsWritten = await writeBytesToOpfs(bytes, scopeKey);
+    if (opfsWritten) {
+      clearLocalStorageBytes(scopeKey);
+      return "opfs";
+    }
+  }
+
+  try {
+    writeBytesToLocalStorage(bytes, scopeKey);
+    return "local-storage";
+  } catch {
+    const opfsWritten = await writeBytesToOpfs(bytes, scopeKey);
+    if (opfsWritten) {
+      clearLocalStorageBytes(scopeKey);
+      return "opfs";
+    }
+    throw new Error(`Unable to persist local database for scope ${scopeKey}`);
+  }
 }
 
 function normalizePositiveInt(value: unknown, fallback: number): number {
@@ -576,6 +726,72 @@ function normalizeTimestamp(value: unknown, fallback: number): number {
 
 function toSqlStringLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
+}
+
+function rewriteScopedChatSessionIds(
+  database: Database,
+  fromChatScopeKey: string | null | undefined,
+  toChatScopeKey: string | null | undefined,
+): void {
+  const fromScope = String(fromChatScopeKey ?? "").trim();
+  const toScope = String(toChatScopeKey ?? "").trim();
+  if (!fromScope || !toScope || fromScope === toScope) {
+    return;
+  }
+
+  const fromPrefix = `${fromScope}:`;
+  const rows = database.exec(
+    `SELECT id FROM chat_sessions WHERE id LIKE ${toSqlStringLiteral(`${fromPrefix}%`)};`,
+  );
+  if (rows.length === 0 || rows[0].values.length === 0) {
+    return;
+  }
+
+  const sessionIdPairs = rows[0].values
+    .map((row) => String(row[0] ?? ""))
+    .filter((value) => value.startsWith(fromPrefix))
+    .map((oldSessionId) => ({
+      oldSessionId,
+      newSessionId: `${toScope}:${oldSessionId.slice(fromPrefix.length)}`,
+    }));
+
+  if (sessionIdPairs.length === 0) {
+    return;
+  }
+
+  database.run("PRAGMA foreign_keys = OFF;");
+  try {
+    database.run("BEGIN");
+    for (const { oldSessionId, newSessionId } of sessionIdPairs) {
+      const oldIdLiteral = toSqlStringLiteral(oldSessionId);
+      const newIdLiteral = toSqlStringLiteral(newSessionId);
+      database.run(
+        `UPDATE chat_messages SET session_id = ${newIdLiteral} WHERE session_id = ${oldIdLiteral};`,
+      );
+      if (tableExists(database, "session_context_items")) {
+        database.run(
+          `UPDATE session_context_items SET session_id = ${newIdLiteral} WHERE session_id = ${oldIdLiteral};`,
+        );
+      }
+      database.run(`UPDATE chat_sessions SET id = ${newIdLiteral} WHERE id = ${oldIdLiteral};`);
+
+      const oldMetaKey = `session_context_ids:${oldSessionId}`;
+      const newMetaKey = `session_context_ids:${newSessionId}`;
+      database.run(
+        `UPDATE index_meta SET key = ${toSqlStringLiteral(newMetaKey)} WHERE key = ${toSqlStringLiteral(oldMetaKey)};`,
+      );
+    }
+    database.run("COMMIT");
+  } catch (error) {
+    try {
+      database.run("ROLLBACK");
+    } catch {
+      // noop: best-effort rollback after migration failure
+    }
+    throw error;
+  } finally {
+    database.run("PRAGMA foreign_keys = ON;");
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -2172,6 +2388,72 @@ export class LocalDatabase {
   }
 }
 
+export async function migrateLocalDatabaseScope(args: {
+  fromScopeKey: string;
+  toScopeKey: string;
+  fromChatScopeKey?: string | null;
+  toChatScopeKey?: string | null;
+}): Promise<boolean> {
+  async function clearLegacyScopeSnapshot(scopeKey: string): Promise<void> {
+    await clearOpfsFile(scopeKey);
+    clearLocalStorageBytes(scopeKey);
+    dbPromiseByScope.delete(scopeKey);
+  }
+
+  function isUnreadableLegacySnapshotError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    return (
+      message.includes("file is not a database") ||
+      message.includes("not a database") ||
+      message.includes("database disk image is malformed") ||
+      message.includes("malformed")
+    );
+  }
+
+  const fromScopeKey = normalizeDatabaseScopeKey(args.fromScopeKey);
+  const toScopeKey = normalizeDatabaseScopeKey(args.toScopeKey);
+
+  if (fromScopeKey === toScopeKey) {
+    return false;
+  }
+
+  const existingTarget = await readPersistedScopeSnapshot(toScopeKey);
+  if (existingTarget) {
+    await clearLegacyScopeSnapshot(fromScopeKey);
+    return false;
+  }
+
+  const sourceSnapshot = await readPersistedScopeSnapshot(fromScopeKey);
+  if (!sourceSnapshot) {
+    return false;
+  }
+
+  try {
+    const sql = await getSql();
+    const database = new sql.Database(sourceSnapshot.bytes);
+    try {
+      runSchema(database);
+      rewriteScopedChatSessionIds(database, args.fromChatScopeKey, args.toChatScopeKey);
+      const migratedBytes = database.export();
+      await writePersistedScopeSnapshot(migratedBytes, toScopeKey, sourceSnapshot.storageMode);
+    } finally {
+      database.close();
+    }
+  } catch (error) {
+    if (isUnreadableLegacySnapshotError(error)) {
+      await clearLegacyScopeSnapshot(fromScopeKey);
+      return false;
+    }
+    throw new Error(
+      `Failed to migrate local database scope from ${fromScopeKey} to ${toScopeKey}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  await clearLegacyScopeSnapshot(fromScopeKey);
+  dbPromiseByScope.delete(toScopeKey);
+  return true;
+}
+
 export function setLocalDatabaseScope(scopeKey: string): void {
   currentDatabaseScopeKey = normalizeDatabaseScopeKey(scopeKey);
 }
@@ -2210,39 +2492,24 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
         return localDb;
       };
 
-      const opfsBytes = await loadBytesFromOpfs(scopeKey);
-
-      if (opfsBytes) {
+      const persistedSnapshot = await readPersistedScopeSnapshot(scopeKey);
+      if (persistedSnapshot) {
         try {
-          const db = new sql.Database(opfsBytes);
+          const db = new sql.Database(persistedSnapshot.bytes);
           runSchema(db);
           return new LocalDatabase({
             sql,
             db,
-            storageMode: "opfs",
+            storageMode: persistedSnapshot.storageMode,
             scopeKey,
             embeddingCheckpointPolicy,
           });
         } catch {
-          await clearOpfsFile(scopeKey);
-          return createFreshDatabase();
-        }
-      }
-
-      const localBytes = loadBytesFromLocalStorage(scopeKey);
-      if (localBytes) {
-        try {
-          const db = new sql.Database(localBytes);
-          runSchema(db);
-          return new LocalDatabase({
-            sql,
-            db,
-            storageMode: "local-storage",
-            scopeKey,
-            embeddingCheckpointPolicy,
-          });
-        } catch {
-          clearLocalStorageBytes(scopeKey);
+          if (persistedSnapshot.storageMode === "opfs") {
+            await clearOpfsFile(scopeKey);
+          } else {
+            clearLocalStorageBytes(scopeKey);
+          }
           return createFreshDatabase();
         }
       }

@@ -73,7 +73,7 @@ What stays local by default:
 - README content.
 - Chunks and embeddings.
 - Chat sessions and message history.
-- Auth-scoped local databases and settings, so one GitHub identity does not silently reuse another identity's local index.
+- GitHub-account-scoped local databases and settings, so one GitHub identity does not silently reuse another identity's local index.
 
 What can go remote (opt-in only):
 - Prompt context sent to a remote LLM provider when you enable it.
@@ -108,7 +108,7 @@ Read more:
 - README fetch pipeline with missing/failure tracking.
 - Adaptive batched README ingestion pipeline (feature-flagged rollout).
 - Local chunking + embedding generation.
-- Auth-scoped local database/storage isolation for repos, embeddings, chat state, and runtime preferences.
+- GitHub-account-scoped local database/storage isolation for repos, embeddings, chat state, and runtime preferences.
 - Browser embedding capability test with model recommendation (mobile-safe fallback).
 - Persistent chat sessions with ordered messages.
 - Library browsing and session transcript views outside the main Recall workflow.

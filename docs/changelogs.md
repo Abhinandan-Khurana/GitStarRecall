@@ -1,5 +1,43 @@
 # Changelogs
 
+## 2026-03-09 (Migration Recovery Edge Cases)
+
+- Hardened the stable-scope migration paths for two low-frequency but high-impact recovery cases.
+- Encrypted provider settings migration now fails closed:
+  - if a legacy token-scoped settings record contains an encrypted API key but `VITE_LLM_SETTINGS_ENCRYPTION_KEY` or Web Crypto support is unavailable, the app now preserves the legacy record and surfaces the migration failure instead of silently copying unusable ciphertext into the new account scope.
+  - if a legacy token-scoped settings record is malformed JSON, the app now discards that unreadable historical record instead of re-throwing the parse failure on every login.
+- Legacy DB migration now recovers from unreadable historical snapshots:
+  - if a legacy token-scoped SQLite snapshot is unreadable during one-time migration, the app now discards only that unreadable legacy copy and continues login with a fresh stable account scope instead of permanently blocking future logins.
+- Updated `docs/Usage.md`, `docs/security-review-stride.md`, and `docs/threat-modeling-stride.md` to document the env-secret requirement for encrypted provider-key migration and the unreadable-legacy-snapshot recovery path.
+
+## 2026-03-09 (Persistence Hardening Follow-up)
+
+- Closed review-discovered persistence gaps in the new GitHub-account-scoped storage model.
+- Hardened logout/reset semantics:
+  - `Clear token` now removes only the in-memory GitHub credential,
+  - account-scoped provider/model/API-key settings remain available when the same GitHub account signs back in,
+  - destructive local-state removal stays behind `Delete local data`.
+- Hardened account-scoped settings persistence:
+  - sync settings loading now still reports encrypted API-key-backed configurations as configured,
+  - stable account-scoped settings keys now use a distinct namespace with compatibility for already-written hashed scope records,
+  - legacy encrypted settings migration now fails loudly instead of silently stranding or dropping API keys.
+- Hardened local DB scope migration:
+  - migration now compares persisted snapshot freshness before preferring OPFS vs local-storage copies,
+  - stale legacy snapshots are cleaned up even when the stable target already exists,
+  - non-recoverable migration failures still surface as blocking errors instead of silently opening a fresh empty scope.
+- Updated `docs/Usage.md`, `docs/security-review-stride.md`, `docs/threat-modeling-stride.md`, and `docs/tech-stack-architecture-security-prd.md` to match the shipped logout and local-data semantics.
+
+## 2026-03-09 (Auth Persistence Across OAuth/PAT Re-login)
+
+- Fixed browser-local data appearing to disappear after refresh + re-login with OAuth or PAT.
+- Root cause:
+  - local persistence had been scoped by auth token hash, so a rotated OAuth token or a different PAT for the same GitHub account opened a different local scope.
+- Updated auth persistence to use a stable GitHub account identity instead:
+  - local SQLite/OPFS/localStorage database scope now follows the authenticated GitHub user rather than the current credential string,
+  - chat/session scope and provider-setting scope now follow the same stable account identity,
+  - legacy token-scoped local DB/settings data is migrated forward on login so existing browser-local data is not stranded.
+- This preserves cross-account isolation while keeping one user’s local workspace stable across refreshes, OAuth token rotation, and PAT re-entry.
+
 ## 2026-03-09 (`release-notes.md` renamed to `changelogs.md`)
 
 - Renamed the project changelog document from `docs/release-notes.md` to `docs/changelogs.md`.
@@ -108,7 +146,7 @@
   - settings owns embedding runtime, provider defaults, developer retrieval tuning, privacy, and local data controls.
 - Extracted shared provider configuration UI into `ProviderSettingsForm` so chat/settings configuration paths stay aligned.
 - Hardened local-state isolation across identities:
-  - local SQLite/OPFS/localStorage database names are scoped by auth token hash,
+  - initial local SQLite/OPFS/localStorage database names were scoped by auth token hash in that rollout and were later migrated to stable GitHub-account identity scope on 2026-03-09,
   - auth-scoped helpers now isolate chat/session continuity and embedding preference keys,
   - added scope regression tests for auth helpers and DB naming.
 - Expanded local schema support for future workspace features:

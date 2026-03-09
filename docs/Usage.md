@@ -65,7 +65,7 @@ These must match your GitHub OAuth app settings exactly.
 - `VITE_EMBEDDING_BACKEND_PREFERRED=webgpu|wasm`
 - `VITE_README_BATCH_PIPELINE_V2=1` enables staged README pipeline.
 - `VITE_OLLAMA_BASE_URL`, `VITE_OLLAMA_TIMEOUT_MS`
-- `VITE_LLM_SETTINGS_ENCRYPTION_KEY` for encrypted provider API key storage.
+- `VITE_LLM_SETTINGS_ENCRYPTION_KEY` for encrypted provider API key storage. Keep this stable across deployments if users already have encrypted provider API keys stored locally; removing it prevents decrypt/re-encrypt migration of those saved keys.
 
 ## 5) GitHub OAuth Setup
 
@@ -117,12 +117,14 @@ The public landing page now uses a parallax-first narrative flow:
 - Click `Get started` or continue directly from the lower OAuth card and complete the GitHub OAuth flow.
 - OAuth should be treated as a read-only access path for reading the public and private repositories that the authorized account/token can access.
 - Token is held in memory; not persisted as raw token storage.
+- Browser-local data scope is derived from the authenticated GitHub account, so re-login with a refreshed OAuth token keeps the same local workspace.
 
 ## 7.2 PAT fallback
 
 - Paste the token directly. Header-style prefixes such as `Bearer ` / `token `, surrounding quotes, and extra whitespace are normalized automatically before use.
 - Use a token with read access to `/user/starred` and the public/private repositories you want indexed.
 - Ensure PAT scopes can read `/user/starred` and the repositories you want indexed.
+- Browser-local data scope is derived from the authenticated GitHub account, so re-entering a different PAT for the same account keeps the same local workspace.
 
 ## 8) Daily Usage Flow
 
@@ -215,7 +217,7 @@ Recommended:
 ## 10.1 Retrieval Tuning (Sudo/Advanced)
 
 Developer advanced mode is available directly in UI as a checkbox (`Enable developer advanced mode (sudo)`).
-Settings are persisted per auth scope via `localStorage` (`gitstarrecall.sudo.<scope>`).
+Settings are persisted per auth scope via `localStorage` using the authenticated account-scoped key (`gitstarrecall.sudo.<auth-scope>`).
 When enabled, advanced controls become available:
 
 - `fetchK` (`80..300`)
@@ -243,18 +245,21 @@ Primary local storage:
 
 - SQLite (sql.js) with OPFS when available.
 - Fallback local storage modes when persistent quota/backends fail.
-- The local database file/key is scoped per authenticated token hash, so different PAT/OAuth identities do not share repo indexes or embedding stores.
+- The local database file/key is scoped per authenticated GitHub account identity, so different GitHub accounts do not share repo indexes or embedding stores, while the same account keeps the same local workspace across OAuth token refreshes or PAT re-entry.
 
 Additional local persistence:
 
 - Chat backup in IndexedDB with localStorage fallback.
-- Auth-scoped settings for advanced retrieval mode, embedding preferences, and session continuity metadata.
+- Account-scoped settings for advanced retrieval mode, embedding preferences, and session continuity metadata.
 - Local runtime caches for model artifacts (WebLLM / embedding assets).
+- If a legacy token-scoped settings record is malformed JSON during one-time migration, the app discards that unreadable historical record instead of repeatedly blocking login on the same parse failure.
+- If a legacy token-scoped DB snapshot is unreadable during one-time migration, the app discards that unreadable legacy copy and continues with a fresh account-scoped database instead of permanently blocking login.
 
 Reset actions in UI:
 
 - `Clear token`
 - `Delete local data`
+- `Clear token` signs out and clears the in-memory GitHub credential, but preserves the account-scoped local workspace and provider/settings state for that GitHub account.
 - `Delete local data` also clears browser cache entries used for WebLLM/model artifacts when the browser cache API is available.
 
 ## 12) Troubleshooting

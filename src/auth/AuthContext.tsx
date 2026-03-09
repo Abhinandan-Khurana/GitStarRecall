@@ -9,15 +9,23 @@ import {
   exchangeOAuthCode,
   getOAuthConfig,
 } from "./githubOAuth";
-import { buildAuthStorageScope } from "./authScope";
+import {
+  buildAuthStorageScope,
+  buildChatScopeKey,
+  buildGitHubUserScopeIdentity,
+  buildLegacyTokenChatScopeKey,
+  buildLegacyTokenStorageScope,
+} from "./authScope";
 import { AuthContext } from "./auth-context";
 import type { AuthContextValue, AuthMethod, OAuthCallbackInput } from "./auth-types";
-import { setLocalDatabaseScope } from "@/db/client";
-import { clearSettings } from "@/lib/settings";
+import { createGitHubApiClient } from "@/github/client";
+import { migrateLocalDatabaseScope, setLocalDatabaseScope } from "@/db/client";
+import { migrateLegacySettingsScope } from "@/lib/settings";
 import { normalizeGitHubToken } from "@/lib/normalizeGitHubToken";
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [authScopeIdentity, setAuthScopeIdentity] = useState<string | null>(null);
   const [authMethod, setAuthMethod] = useState<AuthMethod | null>(null);
 
   const oauthConfig = useMemo(() => getOAuthConfig(), []);
@@ -25,6 +33,32 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const beginOAuthLogin = useCallback(async () => {
     const authorizeUrl = await buildGitHubAuthorizeUrl();
     window.location.assign(authorizeUrl);
+  }, []);
+
+  const establishSession = useCallback(async (token: string, method: AuthMethod) => {
+    const normalizedToken = normalizeGitHubToken(token);
+    if (!normalizedToken) {
+      throw new Error("GitHub token is required");
+    }
+
+    const viewer = await createGitHubApiClient({
+      accessToken: normalizedToken,
+    }).fetchAuthenticatedUser();
+    const nextAuthScopeIdentity = buildGitHubUserScopeIdentity(viewer);
+    const nextDatabaseScope = buildAuthStorageScope(nextAuthScopeIdentity);
+
+    await migrateLocalDatabaseScope({
+      fromScopeKey: buildLegacyTokenStorageScope(normalizedToken),
+      toScopeKey: nextDatabaseScope,
+      fromChatScopeKey: buildLegacyTokenChatScopeKey(normalizedToken),
+      toChatScopeKey: buildChatScopeKey(nextAuthScopeIdentity),
+    });
+    await migrateLegacySettingsScope(normalizedToken, nextAuthScopeIdentity);
+
+    setLocalDatabaseScope(nextDatabaseScope);
+    setAccessToken(normalizedToken);
+    setAuthScopeIdentity(nextAuthScopeIdentity);
+    setAuthMethod(method);
   }, []);
 
   const handleOAuthCallback = useCallback(async (input: OAuthCallbackInput) => {
@@ -41,34 +75,24 @@ export function AuthProvider({ children }: PropsWithChildren) {
       state: input.state,
     });
 
-    const normalizedToken = normalizeGitHubToken(token);
-    setLocalDatabaseScope(buildAuthStorageScope(normalizedToken));
-    setAccessToken(normalizedToken);
-    setAuthMethod("oauth");
-  }, []);
+    await establishSession(token, "oauth");
+  }, [establishSession]);
 
-  const loginWithPat = useCallback((token: string) => {
-    const trimmed = normalizeGitHubToken(token);
-
-    if (!trimmed) {
-      throw new Error("GitHub token is required");
-    }
-
-    setLocalDatabaseScope(buildAuthStorageScope(trimmed));
-    setAccessToken(trimmed);
-    setAuthMethod("pat");
-  }, []);
+  const loginWithPat = useCallback(async (token: string) => {
+    await establishSession(token, "pat");
+  }, [establishSession]);
 
   const logout = useCallback(() => {
-    clearSettings(accessToken);
     setLocalDatabaseScope(buildAuthStorageScope(null));
     setAccessToken(null);
+    setAuthScopeIdentity(null);
     setAuthMethod(null);
-  }, [accessToken]);
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       accessToken,
+      authScopeIdentity,
       authMethod,
       oauthConfig,
       isAuthenticated: Boolean(accessToken),
@@ -79,6 +103,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }),
     [
       accessToken,
+      authScopeIdentity,
       authMethod,
       oauthConfig,
       beginOAuthLogin,
