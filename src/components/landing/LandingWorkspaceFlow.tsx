@@ -5,7 +5,7 @@ import { useParallaxProgress } from "@/components/landing/useParallaxProgress";
 const FLOW_STEPS = [
   {
     title: "Connect GitHub",
-    body: "Read your starred repositories with explicit read-only permissions, whether you use OAuth or a PAT.",
+    body: "Read your starred public repositories with explicit read-only permissions, whether you use OAuth or a PAT.",
     icon: Github,
   },
   {

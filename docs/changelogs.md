@@ -1,5 +1,13 @@
 # Changelogs
 
+## 2026-04-07 (Public-Repo-Only Access Policy)
+
+- Removed private-repository access across OAuth behavior, runtime sync, and product messaging.
+- OAuth now requests only `read:user` (removed `repo` scope from authorize configuration).
+- Star sync now enforces public-only ingestion by filtering out private repositories before indexing and README fetch.
+- Updated landing/auth copy and security/product docs to consistently describe public-repo read-only behavior.
+- Added OAuth scope regression coverage and public-filtering test coverage in GitHub client tests.
+
 ## 2026-03-09 (Migration Recovery Edge Cases)
 
 - Hardened the stable-scope migration paths for two low-frequency but high-impact recovery cases.
@@ -51,7 +59,7 @@
   - recorded the shipped remote-provider disclosure and local-data reset semantics, including WebLLM/model cache cleanup.
 - Aligned related user-facing docs with the current auth behavior:
   - `docs/Usage.md` now explains PAT wrapper normalization and current 401 troubleshooting guidance,
-  - `README.md` now describes OAuth/PAT as read-only access paths for authorized public/private repositories.
+  - `README.md` now describes OAuth/PAT as read-only access paths for authorized public repositories.
 
 ## 2026-03-09 (SessionChat provider label button fix)
 
@@ -60,7 +68,7 @@
 ## 2026-03-08 (GitHub Auth 401 Fix and Token Normalization)
 
 - Hardened GitHub auth token handling for both OAuth tokens and pasted PATs:
-  - shared token normalization now strips accidental `Bearer ` / `token ` prefixes, surrounding quotes, and extra whitespace before the token is stored or reused,
+  - shared token normalization now strips accidental `Bearer`  / `token`  prefixes, surrounding quotes, and extra whitespace before the token is stored or reused,
   - reduces avoidable authorization failures when users paste tokens copied from shells, headers, or quoted env values.
 - Standardized GitHub API authorization behavior around normalized raw tokens and `Bearer` request headers so login/import flows consistently send the expected credential format.
 - Improved the GitHub 401 error guidance shown to users:
@@ -223,7 +231,7 @@
   - queries use `Instruct: ...` + `Query: ...`,
   - passages/documents are embedded as raw text (no `passage:` prefix).
 - Lexical broad sampling now targets the corpus interior slice first (excluding oldest/newest windows) to reduce overlap and improve unique lexical candidate coverage.
-- Curated embedding warning logic now matches retrieval-profile model families (for example `mxbai-embed*`, `nomic-embed*`) to avoid false custom-model warnings on valid variants.
+- Curated embedding warning logic now matches retrieval-profile model families (for example `mxbai-embed`*, `nomic-embed`*) to avoid false custom-model warnings on valid variants.
 - `Rebuild Embeddings` now requires explicit user confirmation before clearing and regenerating the embedding index.
 - README section splitting for large-readme chunking is now code-fence-aware, so heading-like lines inside fenced code blocks do not create artificial section boundaries.
 - Chunk budgeting for large READMEs now intentionally under-fills when fewer than 120 windows clear the quality floor (no low-quality padding fallback).

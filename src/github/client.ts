@@ -378,18 +378,21 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
       lastRateLimit = parseRateLimit(response.headers);
       const payload = (await response.json()) as unknown;
       assertJsonArray(payload);
+      const publicRepos = payload.filter((repo) => !repo.private);
+      const filteredPrivateCount = payload.length - publicRepos.length;
 
-      repos.push(...payload);
+      repos.push(...publicRepos);
       fetchedPages += 1;
       options.onProgress?.({
         fetchedPages,
         totalReposSoFar: repos.length,
-        latestPageCount: payload.length,
+        latestPageCount: publicRepos.length,
       });
 
       logger.debug("fetched stars page", {
         page: fetchedPages,
-        count: payload.length,
+        count: publicRepos.length,
+        filteredPrivateCount,
         total: repos.length,
         remaining: lastRateLimit.remaining,
       });

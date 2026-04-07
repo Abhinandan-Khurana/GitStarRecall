@@ -104,7 +104,7 @@ WebLLM model policy:
   - `GET /repos/{owner}/{repo}/readme` for README
   - `GET /repos/{owner}/{repo}` for repo metadata (if needed)
 - Auth: OAuth (PKCE) or fine-grained PAT
-- Permissions: `Starring` + `Contents` read for private repos (or full `repo` scope)
+- Permissions: read-only access for starred public repositories (`read:user` OAuth scope + public-repo filtering at runtime)
 
 ### 1.8 Cross-Platform Compute Compatibility
 Browser-only (default local-first path):
@@ -135,7 +135,7 @@ Reference:
 1. User authenticates with GitHub OAuth or provides a PAT.
 2. `/app` routes the user to `Setup` until repos and embeddings exist, then defaults to `Recall`.
 3. App fetches all starred repositories via GitHub REST API (paginated).
-4. For each repo, fetch README and metadata.
+4. For each public repo, fetch README and metadata.
 5. Chunk README + metadata.
 6. Embedding orchestrator schedules micro-batches to worker pool (preferred backend `webgpu`, fallback `wasm`).
 7. Store embeddings and repo metadata in SQLite WASM and build vector index.
@@ -438,7 +438,7 @@ Reference:
 - Respect GitHub rate limit headers
 - Backoff and retry strategy on 403/429
 - Avoid heavy parallel requests
-- Handle GitHub edge cases: missing README, renamed/deleted repos, and private repo access errors
+- Handle GitHub edge cases: missing README and renamed/deleted repos
 
 ### 3.6 Embedding Runtime and Worker Safety
 - Cap worker pool size (default `2`) to prevent local resource exhaustion.
@@ -468,13 +468,13 @@ Reference:
 
 ### 4.1 Assets
 - GitHub tokens (OAuth or PAT)
-- Private repo README content
+- Public repo README content
 - Local embeddings and index
 - User query history
 
 ### 4.2 Threats
 1. Token exfiltration via XSS or dependency compromise
-2. Leakage of private repo content to external LLM providers
+2. Leakage of repository content to external LLM providers
 3. Local provider exposure: sending data to a local endpoint that is not trusted
 4. Malicious README content executing scripts
 5. SQLite WASM DB corruption or malicious injection

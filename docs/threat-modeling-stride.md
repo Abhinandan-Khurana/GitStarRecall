@@ -8,7 +8,7 @@ This document maps risks using the STRIDE model and lists mitigations aligned wi
 
 In scope:
 - GitHub tokens (OAuth/PAT)
-- Starred repo metadata and README content (including private repos)
+- Starred public-repo metadata and README content
 - Embeddings and vector index
 - Embedding model artifacts downloaded at runtime (browser cache)
 - Embedding runtime selection state (`webgpu` / `wasm`) and performance diagnostics
@@ -80,10 +80,10 @@ Mitigations:
 
 ### I - Information Disclosure
 Threats:
-- Private README content sent to external LLM provider unintentionally.
+- README content sent to external LLM provider unintentionally.
 - Tokens leaked through logs or URL parameters.
 - Local DB accessed by other scripts via XSS.
-- Overly verbose debug logs expose private chunk text.
+- Overly verbose debug logs expose sensitive chunk text.
 - Local reset leaves browser-cached model/runtime artifacts behind after the user expects a full wipe.
 
 Mitigations:
@@ -169,7 +169,7 @@ Mapped requirements:
 ### 5.1 Data Categories
 - GitHub user identity (username, avatar, profile URL)
 - Starred repo metadata and README content
-- Private repo content (if authorized)
+- Public repo content
 - Chat session history and user queries
 - Local embeddings and vector index
 
@@ -246,7 +246,7 @@ New/changed components:
 
 - Shared `normalizeGitHubToken` helper for OAuth callback tokens and pasted PATs.
 - GitHub API requests standardized on normalized raw tokens plus `Authorization: Bearer <token>`.
-- Public auth/login surfaces now describe OAuth and PAT as read-only access paths for starred public/private repositories when authorized.
+- Public auth/login surfaces now describe OAuth and PAT as read-only access paths for starred public repositories.
 - Local data deletion clears scoped DB state, chat backups, and browser cache entries used for WebLLM/model artifacts.
 
 Threat notes:
