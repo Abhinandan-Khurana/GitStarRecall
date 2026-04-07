@@ -1,5 +1,21 @@
 # Changelogs
 
+## 2026-04-07 (Midnight Minimal UI Overhaul)
+
+- Redesigned the full landing page and app shell with a new "Midnight Minimal" design system:
+  - Near-black cool-toned base (`hsl(240 10% 5%)`) with hot coral accent (`hsl(8 85% 58%)`).
+  - Both dark and light themes are equally polished; light theme uses a cool gray base with deeper coral for contrast.
+- Replaced `@paper-design/shaders-react` shader background with a CSS-only atmospheric gradient using multiple overlapping radial gradients and a slow ambient drift animation (Raycast-inspired).
+- Swapped font stack to Bricolage Grotesque (display), Outfit (body), and JetBrains Mono (code).
+- Removed pervasive glassmorphism (backdrop-blur + translucent backgrounds) from cards, sections, and controls; replaced with solid card surfaces using `--card` / `--muted` tokens and subtle `--border` outlines. Glass retained only on the hero navbar.
+- Added `useRevealOnScroll` hook (IntersectionObserver-based) for scroll-triggered entrance animations on ConnectSection, ValueRail, and WorkspaceFlow.
+- Refined hero entrance animations to use cinematic `cubic-bezier(0.22, 1, 0.36, 1)` curves at 0.8s duration; reduced float-cloud drift to 3-5px over 6-8s for subtler ambient motion.
+- Added scroll-aware navbar that transitions from transparent to solid on scroll.
+- Added scroll-down indicator in hero section.
+- Tightened spacing across landing sections, footer, and app shell; added typographic step numbers as visual anchors in WorkspaceFlow.
+- Updated app shell sidebar with active nav indicator (2px coral left border) and entrance stagger on AppHomePage.
+- All animations respect `prefers-reduced-motion`.
+
 ## 2026-04-07 (Public-Repo-Only Access Policy)
 
 - Removed private-repository access across OAuth behavior, runtime sync, and product messaging.

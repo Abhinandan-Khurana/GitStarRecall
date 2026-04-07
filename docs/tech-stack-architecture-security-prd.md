@@ -8,6 +8,7 @@ Design reference:
 - Emphasize security and local-first behavior visually and in copy.
 - Use a landing page plus an authenticated app shell with dedicated setup, recall, library, sessions, and settings routes after GitHub login.
 - Landing page is accessible without login, with developer/security-friendly details and a demo video.
+- Current design system: "Midnight Minimal" -- near-black cool-toned base with hot coral accent, Bricolage Grotesque / Outfit / JetBrains Mono fonts, solid card surfaces (no glassmorphism except hero navbar), CSS atmospheric gradient hero background with ambient drift animation, scroll-triggered entrance animations via IntersectionObserver.
 
 ---
 

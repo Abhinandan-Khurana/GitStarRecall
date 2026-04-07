@@ -91,8 +91,10 @@ Read more:
 
 ## Product Capabilities
 
-- Public landing page redesigned as a parallax-first product narrative with:
-  - shader-backed background,
+- Public landing page redesigned with a "Midnight Minimal" design system:
+  - CSS atmospheric gradient background with ambient drift animation (Raycast-inspired),
+  - Bricolage Grotesque / Outfit / JetBrains Mono font stack,
+  - solid card surfaces with hot coral accent, scroll-triggered entrance animations,
   - animated post-login workspace walkthrough,
   - lower `Connect your stars` section reached from `Get started`,
   - explicit OAuth/PAT read-only access messaging for authorized public repositories.
