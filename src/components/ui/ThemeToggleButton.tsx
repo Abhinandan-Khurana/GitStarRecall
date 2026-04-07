@@ -11,8 +11,8 @@ type ThemeToggleButtonProps = {
   className?: string;
 };
 
-const glassClass =
-  "rounded-full border-white/25 bg-white/10 backdrop-blur-md text-foreground hover:bg-white/20 hover:text-foreground active:bg-white/25 active:text-foreground dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:active:bg-white/15";
+const toggleClass =
+  "rounded-full border-border text-foreground hover:bg-muted hover:text-foreground active:bg-muted";
 
 export function ThemeToggleButton({
   showLabel = false,
@@ -33,7 +33,7 @@ export function ThemeToggleButton({
       <Button
         variant="outline"
         size="sm"
-        className={cn(glassClass, "flex-1 px-4", className)}
+        className={cn(toggleClass, "flex-1 px-4", className)}
         onClick={toggleTheme}
         aria-label={`Toggle theme, currently ${resolvedTheme}`}
       >
@@ -47,7 +47,7 @@ export function ThemeToggleButton({
     <Button
       variant="outline"
       size="icon"
-      className={cn(glassClass, className)}
+      className={cn(toggleClass, className)}
       onClick={toggleTheme}
       aria-label={`Toggle theme, currently ${resolvedTheme}`}
     >

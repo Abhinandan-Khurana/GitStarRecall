@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowUpRight, Sparkles } from "lucide-react";
 import { useAuth } from "@/auth/useAuth";
@@ -9,17 +9,16 @@ import { LandingValueRail } from "@/components/landing/LandingValueRail";
 import { LandingWorkspaceFlow } from "@/components/landing/LandingWorkspaceFlow";
 import { Button } from "@/components/ui/button";
 import { useParallaxProgress } from "@/components/landing/useParallaxProgress";
-import { useTheme } from "@/features/theme/useTheme";
 
 export default function LandingPage() {
   const navigate = useNavigate();
   const connectRef = useRef<HTMLElement | null>(null);
   const workflowRef = useRef<HTMLDivElement | null>(null);
-  const { resolvedTheme } = useTheme();
   const { beginOAuthLogin, loginWithPat, isAuthenticated } = useAuth();
   const [authError, setAuthError] = useState<string | null>(null);
   const [patToken, setPatToken] = useState("");
   const { progress, reducedMotion } = useParallaxProgress({ start: 0, end: 0.24 });
+  const scrolled = progress > 0.1;
 
   const handleOAuthLogin = useCallback(async () => {
     try {
@@ -61,17 +60,8 @@ export default function LandingPage() {
     window.open("https://github.com/Abhinandan-Khurana/GitStarRecall", "_blank", "noreferrer");
   }, []);
 
-  const heroShaderColors = useMemo(
-    () =>
-      resolvedTheme === "dark"
-        ? ["#140d1d", "#2b1536", "#4d1d45", "#73415a", "#2c203a", "#0f0a13"]
-        : ["#fff7f9", "#ffe8f0", "#ffe8dc", "#f5d9ff", "#ffe2cf", "#fffaf2"],
-    [resolvedTheme],
-  );
-
   return (
     <LandingParallaxScene className="min-h-screen">
-      {/* Navigation is rendered inside LandingHero component */}
       <LandingHero
         onScrollToConnect={scrollToConnect}
         onScrollToFlow={scrollToFlow}
@@ -79,9 +69,9 @@ export default function LandingPage() {
         isAuthenticated={isAuthenticated}
         onNavCtaClick={isAuthenticated ? () => navigate("/app") : scrollToConnect}
         reducedMotion={reducedMotion}
-        shaderColors={heroShaderColors}
-        heroOffsetY={reducedMotion ? 0 : progress * 70}
-        chipOffsetY={reducedMotion ? 0 : progress * -48}
+        heroOffsetY={reducedMotion ? 0 : progress * 40}
+        chipOffsetY={reducedMotion ? 0 : progress * -28}
+        scrolled={scrolled}
       />
 
       <LandingValueRail />
@@ -102,20 +92,23 @@ export default function LandingPage() {
         reducedMotion={reducedMotion}
       />
 
-      <footer className="px-4 pb-14 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-[1500px] flex-col gap-4 rounded-[30px] border border-white/15 bg-white/30 px-6 py-6 text-sm text-foreground/68 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between dark:bg-white/[0.04]">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/12 text-primary">
-              <Sparkles className="h-4 w-4" />
+      <footer className="px-4 pb-8 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[1500px]">
+          <div className="mb-6 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+          <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card/60 px-6 py-5 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Sparkles className="h-4 w-4" />
+              </div>
+              <p className="max-w-xl leading-6">
+                Built for rediscovery: search by intent, inspect the match, and move into a local-first workspace without hiding context.
+              </p>
             </div>
-            <p className="max-w-xl leading-6">
-              Built for rediscovery: search by intent, inspect the match, and move into a local-first workspace without hiding context.
-            </p>
+            <Button variant="outline" className="shrink-0 rounded-full" onClick={openSource}>
+              View source
+              <ArrowUpRight className="ml-2 h-4 w-4" />
+            </Button>
           </div>
-          <Button variant="outline" className="rounded-full border-white/20 bg-white/30 dark:bg-white/[0.04]" onClick={openSource}>
-            View source
-            <ArrowUpRight className="ml-2 h-4 w-4" />
-          </Button>
         </div>
       </footer>
     </LandingParallaxScene>

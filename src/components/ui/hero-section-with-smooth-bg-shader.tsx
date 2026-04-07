@@ -1,6 +1,4 @@
 import type { ReactNode } from "react";
-import { MeshGradient } from "@paper-design/shaders-react";
-import { useEffect, useState } from "react";
 
 interface HeroSectionProps {
   title?: string;
@@ -9,16 +7,11 @@ interface HeroSectionProps {
   buttonText?: string;
   onButtonClick?: () => void;
   colors?: string[];
-  distortion?: number;
-  swirl?: number;
-  speed?: number;
-  offsetX?: number;
   className?: string;
   titleClassName?: string;
   descriptionClassName?: string;
   buttonClassName?: string;
   maxWidth?: string;
-  veilOpacity?: string;
   fontFamily?: string;
   fontWeight?: number;
   reducedMotion?: boolean;
@@ -32,58 +25,20 @@ export function HeroSection({
   description = "A local-first memory layer for GitHub stars that stays readable, intentional, and fast.",
   buttonText = "Get started",
   onButtonClick,
-  colors = ["#fff4f9", "#ffdce9", "#fde7cf", "#f9c6e9", "#f0d8ff", "#fff7ef"],
-  distortion = 0.75,
-  swirl = 0.52,
-  speed = 0.35,
-  offsetX = 0.04,
   className = "",
   titleClassName = "",
   descriptionClassName = "",
   buttonClassName = "",
   maxWidth = "max-w-7xl",
-  veilOpacity = "bg-white/20 dark:bg-black/25",
   fontFamily = "var(--font-display)",
   fontWeight = 600,
   reducedMotion = false,
   renderContent = true,
   children,
 }: HeroSectionProps) {
-  const [dimensions, setDimensions] = useState({ width: 1920, height: 1080 });
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    const update = () =>
-      setDimensions({
-        width: window.innerWidth,
-        height: window.innerHeight,
-      });
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
-
   return (
     <section className={`relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-background ${className}`}>
-      <div className="pointer-events-none fixed inset-0 h-screen w-screen">
-        {mounted ? (
-          <>
-            <MeshGradient
-              width={dimensions.width}
-              height={dimensions.height}
-              colors={colors}
-              distortion={reducedMotion ? 0.12 : distortion}
-              swirl={reducedMotion ? 0.12 : swirl}
-              grainMixer={0}
-              grainOverlay={0}
-              speed={reducedMotion ? 0.08 : speed}
-              offsetX={offsetX}
-            />
-            <div className={`absolute inset-0 ${veilOpacity}`} />
-          </>
-        ) : null}
-      </div>
+      <div className="hero-bg pointer-events-none fixed inset-0 h-screen w-screen overflow-hidden" />
 
       <div className={`relative z-10 mx-auto w-full px-6 ${maxWidth}`}>
         {renderContent ? (
@@ -102,7 +57,7 @@ export function HeroSection({
               <button
                 type="button"
                 onClick={onButtonClick}
-                className={`rounded-full border border-border/70 bg-foreground px-6 py-4 text-sm font-medium text-background transition duration-300 hover:scale-[1.01] hover:bg-foreground/90 sm:px-8 ${buttonClassName}`}
+                className={`rounded-full border border-border/70 bg-foreground px-6 py-4 text-sm font-medium text-background transition duration-300 hover:bg-foreground/90 sm:px-8 ${buttonClassName}`}
               >
                 {buttonText}
               </button>

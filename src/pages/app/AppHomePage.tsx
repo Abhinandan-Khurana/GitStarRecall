@@ -81,12 +81,12 @@ export default function AppHomePage() {
   }, [summary.embeddingCount, summary.repoCount]);
 
   return (
-    <div className="space-y-5">
-      <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
-        <CardHeader className="border-b border-border/60 pb-4">
+    <div className="stagger-children space-y-5">
+      <Card className="border-border bg-[var(--app-panel)] shadow-none">
+        <CardHeader className="border-b border-border pb-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <CardTitle className="font-display text-2xl">Workspace</CardTitle>
+              <CardTitle className="font-display text-2xl font-bold">Workspace</CardTitle>
               <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
                 Use this page as the launch surface for setup, recall, browsing, history, and settings.
               </p>
@@ -98,17 +98,17 @@ export default function AppHomePage() {
         </CardHeader>
         <CardContent className="space-y-5 pt-5">
           <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-md border border-border/60 bg-background/70 p-4">
+            <div className="rounded-md border border-border bg-muted/50 p-4">
               <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Repos</p>
-              <p className="mt-2 font-display text-2xl font-semibold text-foreground">{summary.repoCount}</p>
+              <p className="mt-2 font-display text-2xl font-bold text-primary">{summary.repoCount}</p>
             </div>
-            <div className="rounded-md border border-border/60 bg-background/70 p-4">
+            <div className="rounded-md border border-border bg-muted/50 p-4">
               <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Embeddings</p>
-              <p className="mt-2 font-display text-2xl font-semibold text-foreground">{summary.embeddingCount}</p>
+              <p className="mt-2 font-display text-2xl font-bold text-primary">{summary.embeddingCount}</p>
             </div>
-            <div className="rounded-md border border-border/60 bg-background/70 p-4">
+            <div className="rounded-md border border-border bg-muted/50 p-4">
               <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Sessions</p>
-              <p className="mt-2 font-display text-2xl font-semibold text-foreground">{summary.sessionCount}</p>
+              <p className="mt-2 font-display text-2xl font-bold text-primary">{summary.sessionCount}</p>
             </div>
           </div>
 
@@ -131,7 +131,7 @@ export default function AppHomePage() {
           </div>
 
           <div className="grid gap-3 lg:grid-cols-2">
-            <div className="rounded-md border border-border/60 bg-background/70 p-4">
+            <div className="rounded-md border border-border bg-muted/50 p-4">
               <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Workspace health</p>
               <p className="mt-2 text-sm text-muted-foreground">
                 {summary.repoCount === 0
@@ -141,7 +141,7 @@ export default function AppHomePage() {
                     : "Search and chat context are ready for use."}
               </p>
             </div>
-            <div className="rounded-md border border-border/60 bg-background/70 p-4">
+            <div className="rounded-md border border-border bg-muted/50 p-4">
               <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Continue where you left off</p>
               <p className="mt-2 text-sm text-muted-foreground">
                 {summary.latestSessionId && summary.lastSessionUpdatedAt
@@ -188,12 +188,12 @@ export default function AppHomePage() {
         ].map((item) => {
           const Icon = item.icon;
           return (
-            <Card key={item.title} className="flex h-full flex-col border-border/60 bg-[var(--app-panel)] shadow-none">
+            <Card key={item.title} className="flex h-full flex-col border-border bg-[var(--app-panel)] shadow-none transition-shadow duration-200 hover:shadow-sm">
               <CardHeader className="pb-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary">
                   <Icon className="h-4 w-4" />
                 </div>
-                <CardTitle className="pt-3 font-display text-base">{item.title}</CardTitle>
+                <CardTitle className="pt-3 font-display text-base font-bold">{item.title}</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-1 flex-col justify-between gap-4">
                 <p className="text-sm leading-6 text-muted-foreground">{item.body}</p>

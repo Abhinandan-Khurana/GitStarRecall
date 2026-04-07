@@ -129,7 +129,7 @@ export function AppShell() {
     <div className="min-h-screen bg-[var(--app-bg)] text-foreground">
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <div className="mx-auto flex min-h-screen max-w-[1600px]">
-        <aside className="hidden w-64 shrink-0 border-r border-border/60 bg-[var(--app-panel)] px-5 py-6 lg:flex lg:flex-col">
+        <aside className="hidden w-64 shrink-0 border-r border-border bg-[var(--app-panel)] px-5 py-6 lg:flex lg:flex-col">
           <Link
             to="/"
             className="flex min-w-0 items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-background/70"
@@ -145,7 +145,7 @@ export function AppShell() {
 
           <Button
             variant="outline"
-            className="mt-5 flex w-full min-w-0 items-center justify-between gap-3 overflow-hidden rounded-md border-border/70 bg-background/60"
+            className="mt-5 flex w-full min-w-0 items-center justify-between gap-3 overflow-hidden rounded-md border-border bg-muted"
             onClick={() => setPaletteOpen(true)}
           >
             <span className="flex min-w-0 items-center gap-2">
@@ -162,13 +162,14 @@ export function AppShell() {
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  end={item.to === "/app"}
                   title={item.to === "/app/settings" ? `Settings (${openSettingsShortcut})` : undefined}
                   className={({ isActive }) =>
                     cn(
-                      "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+                      "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-200",
                       isActive
-                        ? "bg-primary/10 text-foreground"
-                        : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                        ? "border-l-2 border-primary bg-primary/8 pl-[10px] text-foreground"
+                        : "border-l-2 border-transparent pl-[10px] text-muted-foreground hover:bg-muted hover:text-foreground",
                     )
                   }
                 >
@@ -180,7 +181,7 @@ export function AppShell() {
           </nav>
 
           <div className="mt-auto space-y-4">
-            <div className="rounded-md border border-border/60 bg-background/70 p-4">
+            <div className="rounded-md border border-border bg-muted/50 p-4">
               <Sheet open={syncCenterOpen} onOpenChange={setSyncCenterOpen}>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-muted-foreground">Workspace</span>
@@ -190,26 +191,26 @@ export function AppShell() {
                     </Button>
                   </SheetTrigger>
                 </div>
-                <SheetContent className="w-full border-border/60 bg-[var(--app-panel)] sm:max-w-lg">
+                <SheetContent className="w-full border-border bg-[var(--app-panel)] sm:max-w-lg">
                   <SheetHeader>
                     <SheetTitle className="font-display text-xl">Sync Center</SheetTitle>
                   </SheetHeader>
                   <div className="mt-6 space-y-4 text-sm">
                     <div className="grid grid-cols-3 gap-3">
-                      <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                      <div className="rounded-md border border-border bg-muted/50 p-4">
                         <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Repos</p>
                         <p className="mt-2 text-lg font-semibold text-foreground">{stats.repoCount}</p>
                       </div>
-                      <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                      <div className="rounded-md border border-border bg-muted/50 p-4">
                         <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Embeddings</p>
                         <p className="mt-2 text-lg font-semibold text-foreground">{stats.embeddingCount}</p>
                       </div>
-                      <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                      <div className="rounded-md border border-border bg-muted/50 p-4">
                         <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Sessions</p>
                         <p className="mt-2 text-lg font-semibold text-foreground">{stats.sessionCount}</p>
                       </div>
                     </div>
-                    <div className="rounded-md border border-border/60 bg-background/70 p-4 text-muted-foreground">
+                    <div className="rounded-md border border-border bg-muted/50 p-4 text-muted-foreground">
                       <p className="font-medium text-foreground">Current status</p>
                       <p className="mt-2">
                         {stats.repoCount === 0
@@ -256,7 +257,7 @@ export function AppShell() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 border-b border-border/60 bg-[var(--app-bg)]/95 backdrop-blur">
+          <header className="sticky top-0 z-20 border-b border-border bg-[var(--app-bg)]/95 backdrop-blur-sm">
             <div className="flex items-center justify-between gap-4 px-4 py-4 sm:px-6">
               <Link to="/" className="min-w-0 transition-opacity hover:opacity-80">
                 <p className="font-display text-xl font-semibold">{getTitle(location.pathname)}</p>
@@ -269,12 +270,12 @@ export function AppShell() {
                       <Menu className="h-4 w-4" />
                     </Button>
                   </SheetTrigger>
-                  <SheetContent side="left" className="w-[88vw] border-border/60 bg-[var(--app-panel)] sm:max-w-sm">
+                  <SheetContent side="left" className="w-[88vw] border-border bg-[var(--app-panel)] sm:max-w-sm">
                     <SheetHeader>
                       <SheetTitle className="font-display text-xl">Workspace</SheetTitle>
                     </SheetHeader>
                     <div className="mt-6 space-y-5">
-                      <div className="rounded-md border border-border/60 bg-background/70 p-4">
+                      <div className="rounded-md border border-border bg-muted/50 p-4">
                         <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Status</p>
                         <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
                           <div>
@@ -301,10 +302,10 @@ export function AppShell() {
                               onClick={() => setMobileNavOpen(false)}
                               className={({ isActive }) =>
                                 cn(
-                                  "flex items-center gap-3 rounded-md px-3 py-3 text-sm font-medium transition-colors",
+                                  "flex items-center gap-3 rounded-md px-3 py-3 text-sm font-medium transition-all duration-200",
                                   isActive
-                                    ? "bg-primary/10 text-foreground"
-                                    : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                                    ? "border-l-2 border-primary bg-primary/8 pl-[10px] text-foreground"
+                                    : "border-l-2 border-transparent pl-[10px] text-muted-foreground hover:bg-muted hover:text-foreground",
                                 )
                               }
                             >
