@@ -1,5 +1,13 @@
 # Changelogs
 
+## 2026-04-07 (Footer Redesign and Stacking Fix)
+
+- Replaced the old card-style footer with a minimal two-column layout:
+  - Left: brand lockup, tagline, "Source" and "Star on GitHub" pill buttons.
+  - Right: categorized link columns — Resources (Usage Guide, Changelogs, All Docs) and Trust & Security (Security Policy, STRIDE Review, Code of Conduct).
+  - Bottom strip: theme-native badge pills (Ask DeepWiki, MIT License, STRIDE Reviewed) replacing shields.io images, plus "Made with love by Abhinandan-Khurana" attribution.
+- Fixed z-index stacking bug where the fixed hero background overlay (`position: fixed; inset: 0`) painted over all content below the hero. Added `relative z-10` to `LandingConnectSection`, `LandingWorkspaceFlow`, and the footer.
+
 ## 2026-04-07 (Landing UX Overhaul and App Onboarding)
 
 - Restructured the landing page to eliminate conversion friction (auth was 3-4 viewports below the hero CTA):

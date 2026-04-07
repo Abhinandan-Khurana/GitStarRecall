@@ -111,7 +111,7 @@ Read more:
   - hero contains a direct "Continue with GitHub" OAuth button (zero-click auth) plus a "Use a PAT instead" secondary CTA,
   - compact auth section one scroll below the hero with OAuth and PAT side-by-side,
   - lean static "How it works" 3-step section downstream of auth,
-  - footer with links to docs, changelog, security, and MIT license,
+  - minimal footer with brand lockup, Star on GitHub pill, categorized resource and security link columns, theme-native badge pills (DeepWiki, MIT, STRIDE), and author attribution,
   - explicit read-only access trust badge in hero and auth section.
 - GitHub OAuth and PAT authentication paths.
 - Route-based workspace with dedicated `Setup`, `Recall`, `Library`, `Sessions`, and `Settings` surfaces.
