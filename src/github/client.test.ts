@@ -1,13 +1,13 @@
 import { createGitHubApiClient } from "./client";
 import type { GitHubStarredRepo } from "./types";
 
-function makeRepo(id: number): GitHubStarredRepo {
+function makeRepo(id: number, isPrivate = false): GitHubStarredRepo {
   return {
     id,
     node_id: `node-${id}`,
     name: `repo-${id}`,
     full_name: `owner/repo-${id}`,
-    private: false,
+    private: isPrivate,
     html_url: `https://github.com/owner/repo-${id}`,
     description: `repo ${id}`,
     stargazers_count: id,
@@ -94,6 +94,36 @@ describe("github client integration", () => {
     expect(result.fetchedPages).toBe(2);
     expect(result.repos).toHaveLength(120);
     expect(result.removedRepoIds).toEqual([9999]);
+  });
+
+  test("fetchAllStarredRepos excludes private repositories from results", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async (input) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const parsed = new URL(url);
+      const page = parsed.searchParams.get("page");
+
+      if (page === "1") {
+        return jsonResponse([makeRepo(1, false), makeRepo(2, true), makeRepo(3, false)]);
+      }
+
+      return jsonResponse([], { status: 404 });
+    }) as typeof fetch;
+
+    const client = createGitHubApiClient({
+      accessToken: "token",
+      fetchImpl,
+      logger: {
+        debug: () => undefined,
+        warn: () => undefined,
+      },
+    });
+
+    const result = await client.fetchAllStarredRepos({
+      previousRepoIds: [1, 2, 3],
+    });
+
+    expect(result.repos.map((repo) => repo.id)).toEqual([1, 3]);
+    expect(result.removedRepoIds).toEqual([2]);
   });
 
   test("fetchReadmes handles success, missing README, and failed responses", async () => {

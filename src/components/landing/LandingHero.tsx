@@ -21,7 +21,7 @@ const PREVIEW_ITEMS = [
   "Read stars by memory",
   "Explicit context",
   "Local-first index",
-  "Private repos supported",
+  "Public repos only",
 ] as const;
 
 function HeroCard({
@@ -134,7 +134,7 @@ export function LandingHero({
                         <Lock className="h-5 w-5" />
                       </div>
                       <p className="text-sm leading-7 text-foreground/78">
-                        GitHub OAuth uses read-only access so GitStarRecall can read your public repositories. Personal Access Tokens should use the same read-only repository scope for reading public repositories.
+                        GitHub OAuth requests public-repo read-only access, and PAT fallback should use equivalent read-only repository access. GitStarRecall never asks for write access.
                       </p>
                     </div>
                   </HeroCard>
@@ -200,7 +200,7 @@ export function LandingHero({
                           <Lock className="h-5 w-5" />
                         </div>
                         <p className="text-base leading-7 text-foreground/78">
-                          OAuth and PAT only need read-only repo access to import your starred public and private repositories. GitStarRecall never asks for write access.
+                          OAuth and PAT only need read-only access for your starred public repositories. GitStarRecall never asks for write access.
                         </p>
                       </div>
                       <div className="mt-5 flex flex-wrap gap-2 text-xs text-foreground/72">

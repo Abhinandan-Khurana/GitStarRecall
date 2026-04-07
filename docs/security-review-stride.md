@@ -69,7 +69,7 @@ Security posture notes:
   - collapses extra whitespace before in-memory use.
 - Standardized GitHub API authorization around normalized raw tokens plus `Authorization: Bearer <token>` request headers.
 - Updated 401 guidance to focus on invalid, expired, revoked, or incorrectly pasted tokens instead of implying extra scopes are usually required.
-- Public auth/login copy now consistently frames OAuth and PAT as read-only access paths for starred public and private repositories when the authorized token can read them.
+- Public auth/login copy now consistently frames OAuth and PAT as read-only access paths for starred public repositories.
 - `Delete local data` now clears scoped database state, chat backup state, and browser cache entries associated with WebLLM/model runtime artifacts.
 - Legacy encrypted provider API-key migration now fails closed if `VITE_LLM_SETTINGS_ENCRYPTION_KEY` or Web Crypto support is unavailable, preserving the old record instead of silently orphaning ciphertext under the new account scope.
 - Malformed legacy provider-settings JSON is now treated as unreadable historical data and discarded during one-time migration so the same parse failure does not block every future login.
@@ -158,11 +158,11 @@ No material gaps identified for DoS mitigations.
 
 | Mitigation | Status | Evidence / Gap |
 |------------|--------|-----------------|
-| Minimal GitHub scopes / fine-grained PAT | **Context** | OAuth uses `["read:user", "repo"]` in `getOAuthConfig()`. “repo” is broad (full repo access). For “starred repos + READMEs” the threat model recommends minimal scopes or fine-grained PAT. |
+| Minimal GitHub scopes / fine-grained PAT | **Done** | OAuth now uses `["read:user"]` in `getOAuthConfig()`, and runtime sync filters private repositories before indexing so the app remains public-repo read-only. |
 | Local endpoints clearly labeled; explicit opt-in | **Done** | Local provider is labeled “Local (Ollama)” in SessionChat; base URL is user-editable in the same panel; use requires `allowLocalProvider`. |
 | Browser embedding path default; local Ollama explicit | **Done** | Default embedding flow is in-browser worker embedding; optional Ollama embedding is explicit and localhost-restricted. Browser WebLLM LLM path is feature-flagged and consent-gated. |
 
-**Recommendation:** Document that OAuth scope `repo` is used for starred repos and README access, and that users using PAT should prefer a fine-grained PAT with minimal permissions (e.g. read-only for repos they need). Consider, if GitHub API allows, narrowing OAuth scopes in the future.
+**Recommendation:** Keep docs and landing copy aligned with the public-repo-only policy and continue to steer PAT users toward minimal read-only permissions.
 
 ---
 
@@ -175,7 +175,7 @@ No material gaps identified for DoS mitigations.
 | **R** Repudiation | Aligned | Keep disclosure/audit copy aligned as new provider surfaces are added. |
 | **I** Information Disclosure | Mostly aligned | Keep sensitive material out of error messages because local/prod logging persists message text. |
 | **D** Denial of Service | Aligned | — |
-| **E** Elevation of Privilege | Aligned | Document OAuth scope; recommend fine-grained PAT where applicable. |
+| **E** Elevation of Privilege | Aligned | Keep OAuth scope at `read:user` and enforce public-repo-only indexing behavior. |
 
 ---
 
@@ -183,7 +183,7 @@ No material gaps identified for DoS mitigations.
 
 1. **Medium:** Document CSP (and `unsafe-eval`) and ensure CSP is applied in all deployment modes (e.g. static host).
 2. **Medium:** Add embedding reconciliation (e.g. `chunks_pending + embeddings_created`) for integrity.
-3. **Low:** Document OAuth scopes and fine-grained PAT guidance for users who use PAT.
+3. **Low:** Add regression checks that keep docs/copy synchronized with `read:user` + public-only behavior.
 4. **Low:** Keep error-message construction free of sensitive content because production/local observability stores message-only diagnostics.
 
 This review is based on the codebase and [threat-modeling-stride.md](./threat-modeling-stride.md) as of the review date. Re-do after significant auth, LLM, or storage changes.

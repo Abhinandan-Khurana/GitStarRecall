@@ -35,7 +35,7 @@ export function getOAuthConfig(): OAuthConfig {
   return {
     clientId: import.meta.env.VITE_GITHUB_CLIENT_ID ?? "",
     redirectUri,
-    scopes: ["read:user", "repo"],
+    scopes: ["read:user"],
   };
 }
 

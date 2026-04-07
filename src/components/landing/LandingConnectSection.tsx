@@ -39,7 +39,7 @@ export function LandingConnectSection({
             Authentication
           </Badge>
           <h2 className="mt-4 font-display text-3xl font-semibold text-foreground sm:text-4xl">Connect your stars</h2>
-          <p className="mt-4 text-base leading-7 text-foreground/72">Choose OAuth for the fastest setup or use a PAT if you want manual control. Both paths only need read-only repo access.</p>
+          <p className="mt-4 text-base leading-7 text-foreground/72">Choose OAuth for the fastest setup or use a PAT if you want manual control. Both paths stay public-repo read-only.</p>
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
@@ -58,7 +58,7 @@ export function LandingConnectSection({
                   <p className="text-sm text-foreground/60">No write permission is used.</p>
                 </div>
               </div>
-              <p className="mt-4 text-sm leading-7 text-foreground/72">OAuth and PAT only need read-only repo access to read your starred public and private repositories.</p>
+              <p className="mt-4 text-sm leading-7 text-foreground/72">OAuth and PAT only need read-only access to read your starred public repositories.</p>
             </div>
 
             <div className="rounded-[24px] border border-white/15 bg-white/35 p-5 dark:border-white/10 dark:bg-white/[0.04]">
@@ -102,7 +102,7 @@ export function LandingConnectSection({
                     <p className="text-xs text-foreground/55">Preferred path</p>
                   </div>
                 </div>
-                <p className="mt-4 text-sm leading-7 text-foreground/78">Read starred public and private repositories with GitHub read-only access. No write scope is used.</p>
+                <p className="mt-4 text-sm leading-7 text-foreground/78">Read starred public repositories with GitHub read-only access. No write scope is used.</p>
                 <Button onClick={onPrimaryAction} className="mt-6 w-full rounded-full shadow-[0_18px_48px_rgba(184,83,138,0.24)]">
                   <Github className="mr-2 h-4 w-4" />
                   {primaryLabel}
@@ -119,7 +119,7 @@ export function LandingConnectSection({
                     <p className="text-xs text-foreground/55">Manual fallback</p>
                   </div>
                 </div>
-                <p className="mt-4 text-sm leading-7 text-foreground/78">Use a read-only token with repo access to read your starred public and private repositories. The token stays local to this session.</p>
+                <p className="mt-4 text-sm leading-7 text-foreground/78">Use a read-only token with repo access to read your starred public repositories. The token stays local to this session.</p>
 
                 <div className="mt-5 space-y-2">
                   <Label htmlFor="landing-pat-token" className="text-xs uppercase tracking-[0.22em] text-foreground/50">

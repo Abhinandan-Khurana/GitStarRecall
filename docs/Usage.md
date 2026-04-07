@@ -115,15 +115,16 @@ The public landing page now uses a parallax-first narrative flow:
 ## 7.1 OAuth (recommended)
 
 - Click `Get started` or continue directly from the lower OAuth card and complete the GitHub OAuth flow.
-- OAuth should be treated as a read-only access path for reading the public and private repositories that the authorized account/token can access.
+- OAuth is a read-only access path for reading your starred public repositories.
+- OAuth authorization requests only the `read:user` scope.
 - Token is held in memory; not persisted as raw token storage.
 - Browser-local data scope is derived from the authenticated GitHub account, so re-login with a refreshed OAuth token keeps the same local workspace.
 
 ## 7.2 PAT fallback
 
 - Paste the token directly. Header-style prefixes such as `Bearer ` / `token `, surrounding quotes, and extra whitespace are normalized automatically before use.
-- Use a token with read access to `/user/starred` and the public/private repositories you want indexed.
-- Ensure PAT scopes can read `/user/starred` and the repositories you want indexed.
+- Use a token with read access to `/user/starred` and the public repositories you want indexed.
+- Ensure PAT scopes can read `/user/starred` and the public repositories you want indexed.
 - Browser-local data scope is derived from the authenticated GitHub account, so re-entering a different PAT for the same account keeps the same local workspace.
 
 ## 8) Daily Usage Flow
@@ -268,7 +269,7 @@ Reset actions in UI:
 
 - The app normalizes common pasted wrappers (`Bearer `, `token `, surrounding quotes, whitespace), but the underlying token still must be valid.
 - Most 401s come from invalid, expired, revoked, or incorrectly pasted tokens rather than missing extra scopes.
-- Verify the token can read `/user/starred` and any repositories you expect to import.
+- Verify the token can read `/user/starred` and any public repositories you expect to import.
 
 ## 12.2 OAuth callback 404
 
