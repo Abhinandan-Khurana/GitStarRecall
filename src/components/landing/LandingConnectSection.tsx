@@ -15,7 +15,6 @@ type LandingConnectSectionProps = {
   onPatTokenChange: (value: string) => void;
   onPatSubmit: (event: FormEvent<HTMLFormElement>) => void;
   authError: string | null;
-  reducedMotion: boolean;
 };
 
 export function LandingConnectSection({

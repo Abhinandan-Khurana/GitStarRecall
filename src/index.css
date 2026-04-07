@@ -485,7 +485,8 @@ a {
 
 /* ---- Focus ring ---- */
 *:focus-visible {
-  outline: none;
+  outline: 2px solid hsl(var(--primary) / 0.6);
+  outline-offset: 2px;
   box-shadow: none;
 }
 

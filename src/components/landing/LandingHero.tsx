@@ -36,7 +36,7 @@ function HeroCard({
 }) {
   return (
     <div
-      className={`rounded-2xl border border-border bg-card p-5 shadow-sm transition-shadow duration-300 hover:shadow-md ${className ?? ""}`}
+      className={`relative rounded-2xl border border-border bg-card p-5 shadow-sm transition-shadow duration-300 hover:shadow-md ${className ?? ""}`}
       style={style}
     >
       <p className="text-xs font-medium uppercase tracking-[0.3em] text-muted-foreground">{title}</p>
