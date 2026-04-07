@@ -23,7 +23,7 @@ export function LandingWorkspaceFlow() {
   const { ref: revealRef, revealed } = useRevealOnScroll<HTMLDivElement>();
 
   return (
-    <section className="px-4 py-10 sm:px-6 lg:px-8">
+    <section className="relative z-10 px-4 py-10 sm:px-6 lg:px-8">
       <div ref={revealRef} className="mx-auto max-w-[1500px]">
         <h2 className={`text-center font-display text-3xl font-bold text-foreground sm:text-4xl reveal ${revealed ? "revealed" : ""}`}>
           How it works

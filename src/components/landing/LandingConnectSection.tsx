@@ -30,7 +30,7 @@ export function LandingConnectSection({
   const { ref: revealRef, revealed } = useRevealOnScroll<HTMLDivElement>();
 
   return (
-    <section id="connect" ref={connectRef} className="px-4 pb-12 pt-10 sm:px-6 lg:px-8">
+    <section id="connect" ref={connectRef} className="relative z-10 px-4 pb-12 pt-10 sm:px-6 lg:px-8">
       <div ref={revealRef} className="mx-auto max-w-3xl">
         <div className={`text-center reveal ${revealed ? "revealed" : ""}`}>
           <h2 className="font-display text-3xl font-bold text-foreground sm:text-4xl">Connect your stars</h2>
