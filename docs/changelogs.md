@@ -1,5 +1,31 @@
 # Changelogs
 
+## 2026-04-07 (Landing UX Overhaul and App Onboarding)
+
+- Restructured the landing page to eliminate conversion friction (auth was 3-4 viewports below the hero CTA):
+  - Hero now contains a direct "Continue with GitHub" OAuth button as the primary CTA. Authenticated users see "Open app" instead.
+  - "Use a PAT instead" secondary CTA scrolls to a compact auth section one viewport below.
+  - Added a trust badge ("Read-only access. No write scope.") under the headline on all viewports.
+  - Navbar "Get started" button now triggers OAuth directly when logged out.
+  - Removed the scroll indicator (Scroll + ChevronDown) from the hero.
+  - Reduced mobile hero proof cards from 3 to 2 (dropped "Read-only GitHub access" card; messaging moved to trust badge and compact auth).
+- Compact Auth Section replaces the heavy two-column `Connect your stars` layout:
+  - Single centered card (`max-w-3xl`) with OAuth and PAT side-by-side.
+  - Removed left column (Permission note, Read-only explainer, What happens next bullets).
+  - Single trust line with lock icon below the cards replaces three prior instances of read-only messaging.
+- Removed `LandingValueRail` (5-view interactive showcase) from the landing page. The interactive workspace preview is now in the authenticated app.
+- Simplified `LandingWorkspaceFlow` into a lean static "How it works" section:
+  - Removed `useParallaxProgress` hook, outer card wrapper, header grid, sidebar box, and watermark step numbers.
+  - Clean horizontal 3-step layout with section title "How it works".
+- Upgraded landing footer with links to Usage Docs, Changelog, Security, and MIT License line.
+- App onboarding improvements:
+  - First-time users (`repoCount === 0`) are auto-navigated from `/app` to `/app/setup` with a loading spinner while the DB resolves.
+  - Added `OnboardingStepper` component: horizontal 3-step progress indicator (Connect / Index / Search) shown at top of AppHomePage when indexing is incomplete.
+  - Added `WorkspaceGuide` component: interactive 5-view workspace preview (extracted from LandingValueRail, stripped of parallax/scroll-reveal), integrated as a collapsible "Explore workspace views" section on AppHomePage for returning users. Dismiss state persisted in localStorage.
+- Fixed AppShell header and sidebar brand links from `/` to `/app` so clicking the brand navigates to the app home instead of the marketing landing page.
+- New files: `src/components/app/OnboardingStepper.tsx`, `src/components/app/WorkspaceGuide.tsx`.
+- Landing page target flow: Hero (OAuth inline) → Compact Auth (one scroll) → How It Works → Footer.
+
 ## 2026-04-07 (Midnight Minimal UI Overhaul)
 
 - Redesigned the full landing page and app shell with a new "Midnight Minimal" design system:

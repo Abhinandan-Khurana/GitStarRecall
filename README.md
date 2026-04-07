@@ -95,12 +95,15 @@ Read more:
   - CSS atmospheric gradient background with ambient drift animation (Raycast-inspired),
   - Bricolage Grotesque / Outfit / JetBrains Mono font stack,
   - solid card surfaces with hot coral accent, scroll-triggered entrance animations,
-  - animated post-login workspace walkthrough,
-  - lower `Connect your stars` section reached from `Get started`,
-  - explicit OAuth/PAT read-only access messaging for authorized public repositories.
+  - hero contains a direct "Continue with GitHub" OAuth button (zero-click auth) plus a "Use a PAT instead" secondary CTA,
+  - compact auth section one scroll below the hero with OAuth and PAT side-by-side,
+  - lean static "How it works" 3-step section downstream of auth,
+  - footer with links to docs, changelog, security, and MIT license,
+  - explicit read-only access trust badge in hero and auth section.
 - GitHub OAuth and PAT authentication paths.
 - Route-based workspace with dedicated `Setup`, `Recall`, `Library`, `Sessions`, and `Settings` surfaces.
 - Persistent app shell with workspace health, keyboard navigation, and command palette (`Cmd/Ctrl+K`).
+- First-time users are auto-routed from `/app` to `/app/setup`; returning users see a compact onboarding stepper and collapsible interactive workspace guide on the home dashboard.
 - Star sync with pagination handling (manual via `Fetch Stars`).
 - Checksum-based diff sync for changed/new/removed stars.
 - README fetch pipeline with missing/failure tracking.
@@ -153,7 +156,7 @@ Notes:
 - Star sync is user-triggered via `Fetch Stars`; search runs on existing local embeddings.
 - Vector data is stored as Float32 blobs in local SQLite tables.
 - Retrieval/search is local; no server-side vector index is required.
-- The authenticated app now uses a route-based shell: `/app` redirects to `Setup` until repos and embeddings exist, then defaults to `Recall`.
+- The authenticated app now uses a route-based shell: `/app` auto-navigates first-time users to `/app/setup`; returning users see a home dashboard with onboarding stepper (if indexing incomplete), interactive workspace guide, and quick-nav cards.
 - Browser embedding model is capability-driven (`embeddinggemma` on strong desktop, `Xenova/all-MiniLM-L6-v2` on mobile/weak/no-WebGPU); local Ollama embedding is opt-in.
 - Retrieval path uses dense fetch + confidence gate + conditional lexical safety net + MMR with per-repo cap.
 - WebLLM/local/remote generation paths are explicit opt-in with consent controls.

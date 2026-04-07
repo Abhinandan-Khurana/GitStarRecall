@@ -131,7 +131,7 @@ export function AppShell() {
       <div className="mx-auto flex min-h-screen max-w-[1600px]">
         <aside className="hidden w-64 shrink-0 border-r border-border bg-[var(--app-panel)] px-5 py-6 lg:flex lg:flex-col">
           <Link
-            to="/"
+            to="/app"
             className="flex min-w-0 items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-background/70"
           >
             <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -259,7 +259,7 @@ export function AppShell() {
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-20 border-b border-border bg-[var(--app-bg)]/95 backdrop-blur-sm">
             <div className="flex items-center justify-between gap-4 px-4 py-4 sm:px-6">
-              <Link to="/" className="min-w-0 transition-opacity hover:opacity-80">
+              <Link to="/app" className="min-w-0 transition-opacity hover:opacity-80">
                 <p className="font-display text-xl font-semibold">{getTitle(location.pathname)}</p>
                 <p className="truncate text-sm text-muted-foreground">{getDescription(location.pathname)}</p>
               </Link>

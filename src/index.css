@@ -278,13 +278,7 @@ a {
   100% { transform: translateY(0) translateX(0); }
 }
 
-@keyframes float-cloud-c {
-  0% { transform: translateY(0) translateX(0); }
-  25% { transform: translateY(-2.5px) translateX(1.5px); }
-  50% { transform: translateY(-4px) translateX(-1px); }
-  75% { transform: translateY(-2px) translateX(1px); }
-  100% { transform: translateY(0) translateX(0); }
-}
+
 
 @keyframes float {
   0%, 100% { transform: translateY(0); }
@@ -345,11 +339,6 @@ a {
   animation: float-cloud-b 8s ease-in-out 1.4s infinite;
   will-change: transform;
 }
-.animate-float-card-c {
-  animation: float-cloud-c 9s ease-in-out 1s infinite;
-  will-change: transform;
-}
-
 .animate-headline-entrance {
   animation: headline-entrance 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -449,7 +438,6 @@ a {
   .animate-float,
   .animate-float-card-a,
   .animate-float-card-b,
-  .animate-float-card-c,
   .animate-headline-entrance,
   .animate-supporting-entrance,
   .animate-float-entrance,

@@ -1,19 +1,19 @@
 import { useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowUpRight, Sparkles } from "lucide-react";
+import { ArrowUpRight, BookText, FileText, Shield, Sparkles } from "lucide-react";
 import { useAuth } from "@/auth/useAuth";
 import { LandingConnectSection } from "@/components/landing/LandingConnectSection";
 import { LandingHero } from "@/components/landing/LandingHero";
 import { LandingParallaxScene } from "@/components/landing/LandingParallaxScene";
-import { LandingValueRail } from "@/components/landing/LandingValueRail";
 import { LandingWorkspaceFlow } from "@/components/landing/LandingWorkspaceFlow";
 import { Button } from "@/components/ui/button";
 import { useParallaxProgress } from "@/components/landing/useParallaxProgress";
 
+const REPO_URL = "https://github.com/Abhinandan-Khurana/GitStarRecall";
+
 export default function LandingPage() {
   const navigate = useNavigate();
   const connectRef = useRef<HTMLElement | null>(null);
-  const workflowRef = useRef<HTMLDivElement | null>(null);
   const { beginOAuthLogin, loginWithPat, isAuthenticated } = useAuth();
   const [authError, setAuthError] = useState<string | null>(null);
   const [patToken, setPatToken] = useState("");
@@ -49,36 +49,23 @@ export default function LandingPage() {
     });
   }, [reducedMotion]);
 
-  const scrollToFlow = useCallback(() => {
-    workflowRef.current?.scrollIntoView({
-      behavior: reducedMotion ? "auto" : "smooth",
-      block: "start",
-    });
-  }, [reducedMotion]);
-
   const openSource = useCallback(() => {
-    window.open("https://github.com/Abhinandan-Khurana/GitStarRecall", "_blank", "noreferrer");
+    window.open(REPO_URL, "_blank", "noreferrer");
   }, []);
 
   return (
     <LandingParallaxScene className="min-h-screen">
       <LandingHero
         onScrollToConnect={scrollToConnect}
-        onScrollToFlow={scrollToFlow}
+        onOAuthLogin={() => void handleOAuthLogin()}
         onOpenSource={openSource}
         isAuthenticated={isAuthenticated}
-        onNavCtaClick={isAuthenticated ? () => navigate("/app") : scrollToConnect}
+        onNavCtaClick={isAuthenticated ? () => navigate("/app") : () => void handleOAuthLogin()}
         reducedMotion={reducedMotion}
         heroOffsetY={reducedMotion ? 0 : progress * 40}
         chipOffsetY={reducedMotion ? 0 : progress * -28}
         scrolled={scrolled}
       />
-
-      <LandingValueRail />
-
-      <div ref={workflowRef}>
-        <LandingWorkspaceFlow />
-      </div>
 
       <LandingConnectSection
         connectRef={connectRef}
@@ -91,22 +78,41 @@ export default function LandingPage() {
         authError={authError}
       />
 
+      <LandingWorkspaceFlow />
+
       <footer className="px-4 pb-8 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-[1500px]">
           <div className="mb-6 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
-          <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card/60 px-6 py-5 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <Sparkles className="h-4 w-4" />
+          <div className="flex flex-col gap-6 rounded-2xl border border-border bg-card/60 px-6 py-5 text-sm text-muted-foreground">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+                <p className="max-w-xl leading-6">
+                  Built for rediscovery: search by intent, inspect the match, and move into a local-first workspace without hiding context.
+                </p>
               </div>
-              <p className="max-w-xl leading-6">
-                Built for rediscovery: search by intent, inspect the match, and move into a local-first workspace without hiding context.
-              </p>
+              <Button variant="outline" className="shrink-0 rounded-full" onClick={openSource}>
+                View source
+                <ArrowUpRight className="ml-2 h-4 w-4" />
+              </Button>
             </div>
-            <Button variant="outline" className="shrink-0 rounded-full" onClick={openSource}>
-              View source
-              <ArrowUpRight className="ml-2 h-4 w-4" />
-            </Button>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-4 text-xs text-muted-foreground">
+              <a href={`${REPO_URL}/blob/main/docs/Usage.md`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 transition-colors hover:text-foreground">
+                <BookText className="h-3.5 w-3.5" />
+                Usage Docs
+              </a>
+              <a href={`${REPO_URL}/blob/main/docs/changelogs.md`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 transition-colors hover:text-foreground">
+                <FileText className="h-3.5 w-3.5" />
+                Changelog
+              </a>
+              <a href={`${REPO_URL}/blob/main/SECURITY.md`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 transition-colors hover:text-foreground">
+                <Shield className="h-3.5 w-3.5" />
+                Security
+              </a>
+              <span className="ml-auto text-muted-foreground/60">MIT License</span>
+            </div>
           </div>
         </div>
       </footer>
