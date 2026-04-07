@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
-import { ArrowUpRight, Github, Heart, Sparkles, Star } from "lucide-react";
+import { ArrowUpRight, Github, Heart, ShieldCheck, Sparkles, Star } from "lucide-react";
 import { useAuth } from "@/auth/useAuth";
 import { LandingConnectSection } from "@/components/landing/LandingConnectSection";
 import { LandingHero } from "@/components/landing/LandingHero";
@@ -147,27 +147,37 @@ export default function LandingPage() {
           </div>
 
           <div className="mt-8 flex flex-col items-center gap-4 border-t border-border pt-6">
-            <div className="flex flex-wrap justify-center gap-2">
-              <a href="https://deepwiki.com/Abhinandan-Khurana/GitStarRecall" target="_blank" rel="noreferrer">
-                <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" className="h-5" />
-              </a>
-              <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-334155" className="h-5" />
-              <a href={`${REPO_URL}/blob/main/docs/security-review-stride.md`} target="_blank" rel="noreferrer">
-                <img alt="STRIDE Reviewed" src="https://img.shields.io/badge/security-STRIDE_Reviewed-059669" className="h-5" />
-              </a>
-            </div>
-            <div className="flex items-center gap-4 text-xs text-muted-foreground/50">
-              <span>MIT License</span>
-              <span className="h-3 w-px bg-border" />
+            <div className="flex flex-wrap justify-center gap-1.5">
               <a
-                href="https://github.com/Abhinandan-Khurana"
+                href="https://deepwiki.com/Abhinandan-Khurana/GitStarRecall"
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1 transition-colors hover:text-muted-foreground"
+                className="inline-flex items-center rounded-md border border-border bg-card/50 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
               >
-                Made with <Heart className="h-3 w-3 text-primary/70" /> by Abhinandan-Khurana
+                <Sparkles className="mr-1.5 h-3 w-3 text-primary/60" />
+                Ask DeepWiki
+              </a>
+              <span className="inline-flex items-center rounded-md border border-border bg-card/50 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                MIT License
+              </span>
+              <a
+                href={`${REPO_URL}/blob/main/docs/security-review-stride.md`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center rounded-md border border-border bg-card/50 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ShieldCheck className="mr-1.5 h-3 w-3 text-emerald-500/70" />
+                STRIDE Reviewed
               </a>
             </div>
+            <a
+              href="https://github.com/Abhinandan-Khurana"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+            >
+              Made with <Heart className="h-3 w-3 text-primary/70" /> by Abhinandan-Khurana
+            </a>
           </div>
         </div>
       </footer>
