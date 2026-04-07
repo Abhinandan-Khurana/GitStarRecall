@@ -106,15 +106,16 @@ Routing:
 
 ## 7) Authentication in App
 
-The public landing page now uses a parallax-first narrative flow:
+The public landing page uses a conversion-first flow:
 
-- `Get started` scrolls to the lower `Connect your stars` block.
-- `See the workspace flow` jumps to the landing workflow section.
-- The landing copy explicitly calls out the read-only access model for both OAuth and PAT.
+- The hero contains a direct "Continue with GitHub" OAuth button as the primary CTA (zero-click auth path).
+- A secondary "Use a PAT instead" link scrolls to the compact auth section one viewport below.
+- A lean "How it works" section sits downstream of auth, not upstream.
+- The landing copy uses a read-only trust badge in the hero and auth section.
 
 ## 7.1 OAuth (recommended)
 
-- Click `Get started` or continue directly from the lower OAuth card and complete the GitHub OAuth flow.
+- Click "Continue with GitHub" in the hero or in the compact auth section below and complete the GitHub OAuth flow.
 - OAuth is a read-only access path for reading your starred public repositories.
 - OAuth authorization requests only the `read:user` scope.
 - Token is held in memory; not persisted as raw token storage.
@@ -130,9 +131,10 @@ The public landing page now uses a parallax-first narrative flow:
 ## 8) Daily Usage Flow
 
 1. Login via OAuth or PAT.
-2. Open `/app` and let the workspace route you:
-   - `Setup` when repos/embeddings are missing
-   - `Recall` when the local index is ready
+2. Open `/app`:
+   - First-time users (`repoCount === 0`) are auto-navigated to `/app/setup`.
+   - Users with repos but incomplete embeddings see a 3-step onboarding stepper (Connect → Index → Search) at the top of the home dashboard.
+   - Returning users with a complete index land on the home dashboard with access to an interactive workspace guide and quick-nav cards.
 3. In `Setup`, click `Fetch Stars` to sync/update stars and embeddings.
 4. In `Recall`, search existing local embeddings and continue the active session.
 5. Use `Library` to browse indexed repos and `Sessions` to inspect or resume prior threads.

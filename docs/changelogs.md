@@ -1,5 +1,55 @@
 # Changelogs
 
+## 2026-04-07 (Footer Redesign and Stacking Fix)
+
+- Replaced the old card-style footer with a minimal two-column layout:
+  - Left: brand lockup, tagline, "Source" and "Star on GitHub" pill buttons.
+  - Right: categorized link columns — Resources (Usage Guide, Changelogs, All Docs) and Trust & Security (Security Policy, STRIDE Review, Code of Conduct).
+  - Bottom strip: theme-native badge pills (Ask DeepWiki, MIT License, STRIDE Reviewed) replacing shields.io images, plus "Made with love by Abhinandan-Khurana" attribution.
+- Fixed z-index stacking bug where the fixed hero background overlay (`position: fixed; inset: 0`) painted over all content below the hero. Added `relative z-10` to `LandingConnectSection`, `LandingWorkspaceFlow`, and the footer.
+
+## 2026-04-07 (Landing UX Overhaul and App Onboarding)
+
+- Restructured the landing page to eliminate conversion friction (auth was 3-4 viewports below the hero CTA):
+  - Hero now contains a direct "Continue with GitHub" OAuth button as the primary CTA. Authenticated users see "Open app" instead.
+  - "Use a PAT instead" secondary CTA scrolls to a compact auth section one viewport below.
+  - Added a trust badge ("Read-only access. No write scope.") under the headline on all viewports.
+  - Navbar "Get started" button now triggers OAuth directly when logged out.
+  - Removed the scroll indicator (Scroll + ChevronDown) from the hero.
+  - Reduced mobile hero proof cards from 3 to 2 (dropped "Read-only GitHub access" card; messaging moved to trust badge and compact auth).
+- Compact Auth Section replaces the heavy two-column `Connect your stars` layout:
+  - Single centered card (`max-w-3xl`) with OAuth and PAT side-by-side.
+  - Removed left column (Permission note, Read-only explainer, What happens next bullets).
+  - Single trust line with lock icon below the cards replaces three prior instances of read-only messaging.
+- Removed `LandingValueRail` (5-view interactive showcase) from the landing page. The interactive workspace preview is now in the authenticated app.
+- Simplified `LandingWorkspaceFlow` into a lean static "How it works" section:
+  - Removed `useParallaxProgress` hook, outer card wrapper, header grid, sidebar box, and watermark step numbers.
+  - Clean horizontal 3-step layout with section title "How it works".
+- Upgraded landing footer with links to Usage Docs, Changelog, Security, and MIT License line.
+- App onboarding improvements:
+  - First-time users (`repoCount === 0`) are auto-navigated from `/app` to `/app/setup` with a loading spinner while the DB resolves.
+  - Added `OnboardingStepper` component: horizontal 3-step progress indicator (Connect / Index / Search) shown at top of AppHomePage when indexing is incomplete.
+  - Added `WorkspaceGuide` component: interactive 5-view workspace preview (extracted from LandingValueRail, stripped of parallax/scroll-reveal), integrated as a collapsible "Explore workspace views" section on AppHomePage for returning users. Dismiss state persisted in localStorage.
+- Fixed AppShell header and sidebar brand links from `/` to `/app` so clicking the brand navigates to the app home instead of the marketing landing page.
+- New files: `src/components/app/OnboardingStepper.tsx`, `src/components/app/WorkspaceGuide.tsx`.
+- Landing page target flow: Hero (OAuth inline) → Compact Auth (one scroll) → How It Works → Footer.
+
+## 2026-04-07 (Midnight Minimal UI Overhaul)
+
+- Redesigned the full landing page and app shell with a new "Midnight Minimal" design system:
+  - Near-black cool-toned base (`hsl(240 10% 5%)`) with hot coral accent (`hsl(8 85% 58%)`).
+  - Both dark and light themes are equally polished; light theme uses a cool gray base with deeper coral for contrast.
+- Replaced `@paper-design/shaders-react` shader background with a CSS-only atmospheric gradient using multiple overlapping radial gradients and a slow ambient drift animation (Raycast-inspired).
+- Swapped font stack to Bricolage Grotesque (display), Outfit (body), and JetBrains Mono (code).
+- Removed pervasive glassmorphism (backdrop-blur + translucent backgrounds) from cards, sections, and controls; replaced with solid card surfaces using `--card` / `--muted` tokens and subtle `--border` outlines. Glass retained only on the hero navbar.
+- Added `useRevealOnScroll` hook (IntersectionObserver-based) for scroll-triggered entrance animations on ConnectSection, ValueRail, and WorkspaceFlow.
+- Refined hero entrance animations to use cinematic `cubic-bezier(0.22, 1, 0.36, 1)` curves at 0.8s duration; reduced float-cloud drift to 3-5px over 6-8s for subtler ambient motion.
+- Added scroll-aware navbar that transitions from transparent to solid on scroll.
+- Added scroll-down indicator in hero section.
+- Tightened spacing across landing sections, footer, and app shell; added typographic step numbers as visual anchors in WorkspaceFlow.
+- Updated app shell sidebar with active nav indicator (2px coral left border) and entrance stagger on AppHomePage.
+- All animations respect `prefers-reduced-motion`.
+
 ## 2026-04-07 (Public-Repo-Only Access Policy)
 
 - Removed private-repository access across OAuth behavior, runtime sync, and product messaging.

@@ -8,6 +8,7 @@ Design reference:
 - Emphasize security and local-first behavior visually and in copy.
 - Use a landing page plus an authenticated app shell with dedicated setup, recall, library, sessions, and settings routes after GitHub login.
 - Landing page is accessible without login, with developer/security-friendly details and a demo video.
+- Current design system: "Midnight Minimal" -- near-black cool-toned base with hot coral accent, Bricolage Grotesque / Outfit / JetBrains Mono fonts, solid card surfaces (no glassmorphism except hero navbar), CSS atmospheric gradient hero background with ambient drift animation, scroll-triggered entrance animations via IntersectionObserver. Landing page uses a conversion-first flow: hero with inline OAuth CTA, compact auth section one scroll below, lean static "How it works" downstream. Post-login app includes auto-routing for first-time users, onboarding stepper, and collapsible interactive workspace guide.
 
 ---
 
@@ -133,7 +134,7 @@ Reference:
 
 ### 2.1 High-Level Flow
 1. User authenticates with GitHub OAuth or provides a PAT.
-2. `/app` routes the user to `Setup` until repos and embeddings exist, then defaults to `Recall`.
+2. `/app` auto-navigates first-time users (`repoCount === 0`) to `/app/setup`; returning users see the home dashboard with onboarding progress and workspace guide.
 3. App fetches all starred repositories via GitHub REST API (paginated).
 4. For each public repo, fetch README and metadata.
 5. Chunk README + metadata.

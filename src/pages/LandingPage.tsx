@@ -1,25 +1,32 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowUpRight, Sparkles } from "lucide-react";
+import type { ReactNode } from "react";
+import { ArrowUpRight, Github, Heart, ShieldCheck, Sparkles, Star } from "lucide-react";
 import { useAuth } from "@/auth/useAuth";
 import { LandingConnectSection } from "@/components/landing/LandingConnectSection";
 import { LandingHero } from "@/components/landing/LandingHero";
 import { LandingParallaxScene } from "@/components/landing/LandingParallaxScene";
-import { LandingValueRail } from "@/components/landing/LandingValueRail";
 import { LandingWorkspaceFlow } from "@/components/landing/LandingWorkspaceFlow";
-import { Button } from "@/components/ui/button";
 import { useParallaxProgress } from "@/components/landing/useParallaxProgress";
-import { useTheme } from "@/features/theme/useTheme";
+
+function FooterLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+      {children}
+    </a>
+  );
+}
+
+const REPO_URL = "https://github.com/Abhinandan-Khurana/GitStarRecall";
 
 export default function LandingPage() {
   const navigate = useNavigate();
   const connectRef = useRef<HTMLElement | null>(null);
-  const workflowRef = useRef<HTMLDivElement | null>(null);
-  const { resolvedTheme } = useTheme();
   const { beginOAuthLogin, loginWithPat, isAuthenticated } = useAuth();
   const [authError, setAuthError] = useState<string | null>(null);
   const [patToken, setPatToken] = useState("");
   const { progress, reducedMotion } = useParallaxProgress({ start: 0, end: 0.24 });
+  const scrolled = progress > 0.1;
 
   const handleOAuthLogin = useCallback(async () => {
     try {
@@ -50,45 +57,23 @@ export default function LandingPage() {
     });
   }, [reducedMotion]);
 
-  const scrollToFlow = useCallback(() => {
-    workflowRef.current?.scrollIntoView({
-      behavior: reducedMotion ? "auto" : "smooth",
-      block: "start",
-    });
-  }, [reducedMotion]);
-
   const openSource = useCallback(() => {
-    window.open("https://github.com/Abhinandan-Khurana/GitStarRecall", "_blank", "noreferrer");
+    window.open(REPO_URL, "_blank", "noreferrer");
   }, []);
-
-  const heroShaderColors = useMemo(
-    () =>
-      resolvedTheme === "dark"
-        ? ["#140d1d", "#2b1536", "#4d1d45", "#73415a", "#2c203a", "#0f0a13"]
-        : ["#fff7f9", "#ffe8f0", "#ffe8dc", "#f5d9ff", "#ffe2cf", "#fffaf2"],
-    [resolvedTheme],
-  );
 
   return (
     <LandingParallaxScene className="min-h-screen">
-      {/* Navigation is rendered inside LandingHero component */}
       <LandingHero
         onScrollToConnect={scrollToConnect}
-        onScrollToFlow={scrollToFlow}
+        onOAuthLogin={() => void handleOAuthLogin()}
         onOpenSource={openSource}
         isAuthenticated={isAuthenticated}
-        onNavCtaClick={isAuthenticated ? () => navigate("/app") : scrollToConnect}
+        onNavCtaClick={isAuthenticated ? () => navigate("/app") : () => void handleOAuthLogin()}
         reducedMotion={reducedMotion}
-        shaderColors={heroShaderColors}
-        heroOffsetY={reducedMotion ? 0 : progress * 70}
-        chipOffsetY={reducedMotion ? 0 : progress * -48}
+        heroOffsetY={reducedMotion ? 0 : progress * 40}
+        chipOffsetY={reducedMotion ? 0 : progress * -28}
+        scrolled={scrolled}
       />
-
-      <LandingValueRail />
-
-      <div ref={workflowRef}>
-        <LandingWorkspaceFlow />
-      </div>
 
       <LandingConnectSection
         connectRef={connectRef}
@@ -99,23 +84,101 @@ export default function LandingPage() {
         onPatTokenChange={setPatToken}
         onPatSubmit={handlePatSubmit}
         authError={authError}
-        reducedMotion={reducedMotion}
       />
 
-      <footer className="px-4 pb-14 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-[1500px] flex-col gap-4 rounded-[30px] border border-white/15 bg-white/30 px-6 py-6 text-sm text-foreground/68 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between dark:bg-white/[0.04]">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/12 text-primary">
-              <Sparkles className="h-4 w-4" />
+      <LandingWorkspaceFlow />
+
+      <footer className="relative z-10 px-5 pb-10 pt-4 sm:px-8 lg:px-10">
+        <div className="mx-auto max-w-[1500px]">
+          <div className="mb-8 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+
+          <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
+            <div className="max-w-sm">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Sparkles className="h-3.5 w-3.5" />
+                </div>
+                <span className="font-display text-base font-semibold text-foreground">GitStarRecall</span>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                Search by intent, inspect the match, and move into a local-first workspace without hiding context.
+              </p>
+              <div className="mt-4 flex items-center gap-2">
+                <a
+                  href={REPO_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground"
+                >
+                  <Github className="h-3.5 w-3.5" />
+                  Source
+                  <ArrowUpRight className="h-3 w-3 opacity-50" />
+                </a>
+                <a
+                  href={REPO_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-3.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                >
+                  <Star className="h-3.5 w-3.5" />
+                  Star on GitHub
+                </a>
+              </div>
             </div>
-            <p className="max-w-xl leading-6">
-              Built for rediscovery: search by intent, inspect the match, and move into a local-first workspace without hiding context.
-            </p>
+
+            <div className="grid grid-cols-2 gap-x-12 gap-y-6 text-sm sm:gap-x-16">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/60">Resources</p>
+                <nav className="mt-3 flex flex-col gap-2">
+                  <FooterLink href={`${REPO_URL}/blob/main/docs/Usage.md`}>Usage Guide</FooterLink>
+                  <FooterLink href={`${REPO_URL}/blob/main/docs/changelogs.md`}>Changelogs</FooterLink>
+                  <FooterLink href={`${REPO_URL}/tree/main/docs`}>All Docs</FooterLink>
+                </nav>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/60">Trust &amp; Security</p>
+                <nav className="mt-3 flex flex-col gap-2">
+                  <FooterLink href={`${REPO_URL}/blob/main/SECURITY.md`}>Security Policy</FooterLink>
+                  <FooterLink href={`${REPO_URL}/blob/main/docs/security-review-stride.md`}>STRIDE Review</FooterLink>
+                  <FooterLink href={`${REPO_URL}/blob/main/CODE_OF_CONDUCT.md`}>Code of Conduct</FooterLink>
+                </nav>
+              </div>
+            </div>
           </div>
-          <Button variant="outline" className="rounded-full border-white/20 bg-white/30 dark:bg-white/[0.04]" onClick={openSource}>
-            View source
-            <ArrowUpRight className="ml-2 h-4 w-4" />
-          </Button>
+
+          <div className="mt-8 flex flex-col items-center gap-4 border-t border-border pt-6">
+            <div className="flex flex-wrap justify-center gap-1.5">
+              <a
+                href="https://deepwiki.com/Abhinandan-Khurana/GitStarRecall"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center rounded-md border border-border bg-card/50 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Sparkles className="mr-1.5 h-3 w-3 text-primary/60" />
+                Ask DeepWiki
+              </a>
+              <span className="inline-flex items-center rounded-md border border-border bg-card/50 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                MIT License
+              </span>
+              <a
+                href={`${REPO_URL}/blob/main/docs/security-review-stride.md`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center rounded-md border border-border bg-card/50 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ShieldCheck className="mr-1.5 h-3 w-3 text-emerald-500/70" />
+                STRIDE Reviewed
+              </a>
+            </div>
+            <a
+              href="https://github.com/Abhinandan-Khurana"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+            >
+              Made with <Heart className="h-3 w-3 text-primary/70" /> by Abhinandan-Khurana
+            </a>
+          </div>
         </div>
       </footer>
     </LandingParallaxScene>

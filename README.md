@@ -1,9 +1,22 @@
+<p align="center">
+  <img src="./static/gitstarrecall-logo.png" width="220" alt="GitStarRecall logo">
+</p>
+
+<!-- <h1 align="center">GitStarRecall</h1> -->
+
+<p align="center">
+  <strong>Find your starred repos by memory, not by name.</strong>
+</p>
 
 
-# GitStarRecall
-
-**Find your starred repos by memory, not by name.**
-
+<p align="center">
+  <a href="https://deepwiki.com/Abhinandan-Khurana/GitStarRecall"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+  <a href="./docs/Usage.md"><img alt="Usage Guide" src="https://img.shields.io/badge/docs-Usage_Guide-0ea5e9"></a>
+  <a href="./docs/changelogs.md"><img alt="Changelogs" src="https://img.shields.io/badge/docs-Changelogs-1d4ed8"></a>
+  <a href="./CODE_OF_CONDUCT.md"><img alt="Code of Conduct" src="https://img.shields.io/badge/community-Code_of_Conduct-15803d"></a>
+  <a href="./SECURITY.md"><img alt="Security Policy" src="https://img.shields.io/badge/security-Policy-166534"></a>
+  <a href="./docs/security-review-stride.md"><img alt="Security Review" src="https://img.shields.io/badge/security-STRIDE_Reviewed-059669"></a>
+</p>
 
 
 **GitStarRecall** is a local-first web app that turns your GitHub stars into a searchable memory system.
@@ -91,14 +104,19 @@ Read more:
 
 ## Product Capabilities
 
-- Public landing page redesigned as a parallax-first product narrative with:
-  - shader-backed background,
-  - animated post-login workspace walkthrough,
-  - lower `Connect your stars` section reached from `Get started`,
-  - explicit OAuth/PAT read-only access messaging for authorized public repositories.
+- Public landing page redesigned with a "Midnight Minimal" design system:
+  - CSS atmospheric gradient background with ambient drift animation (Raycast-inspired),
+  - Bricolage Grotesque / Outfit / JetBrains Mono font stack,
+  - solid card surfaces with hot coral accent, scroll-triggered entrance animations,
+  - hero contains a direct "Continue with GitHub" OAuth button (zero-click auth) plus a "Use a PAT instead" secondary CTA,
+  - compact auth section one scroll below the hero with OAuth and PAT side-by-side,
+  - lean static "How it works" 3-step section downstream of auth,
+  - minimal footer with brand lockup, Star on GitHub pill, categorized resource and security link columns, theme-native badge pills (DeepWiki, MIT, STRIDE), and author attribution,
+  - explicit read-only access trust badge in hero and auth section.
 - GitHub OAuth and PAT authentication paths.
 - Route-based workspace with dedicated `Setup`, `Recall`, `Library`, `Sessions`, and `Settings` surfaces.
 - Persistent app shell with workspace health, keyboard navigation, and command palette (`Cmd/Ctrl+K`).
+- First-time users are auto-routed from `/app` to `/app/setup`; returning users see a compact onboarding stepper and collapsible interactive workspace guide on the home dashboard.
 - Star sync with pagination handling (manual via `Fetch Stars`).
 - Checksum-based diff sync for changed/new/removed stars.
 - README fetch pipeline with missing/failure tracking.
@@ -151,7 +169,7 @@ Notes:
 - Star sync is user-triggered via `Fetch Stars`; search runs on existing local embeddings.
 - Vector data is stored as Float32 blobs in local SQLite tables.
 - Retrieval/search is local; no server-side vector index is required.
-- The authenticated app now uses a route-based shell: `/app` redirects to `Setup` until repos and embeddings exist, then defaults to `Recall`.
+- The authenticated app now uses a route-based shell: `/app` auto-navigates first-time users to `/app/setup`; returning users see a home dashboard with onboarding stepper (if indexing incomplete), interactive workspace guide, and quick-nav cards.
 - Browser embedding model is capability-driven (`embeddinggemma` on strong desktop, `Xenova/all-MiniLM-L6-v2` on mobile/weak/no-WebGPU); local Ollama embedding is opt-in.
 - Retrieval path uses dense fetch + confidence gate + conditional lexical safety net + MMR with per-repo cap.
 - WebLLM/local/remote generation paths are explicit opt-in with consent controls.
