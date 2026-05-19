@@ -32,7 +32,6 @@ export function HeroSection({
   maxWidth = "max-w-7xl",
   fontFamily = "var(--font-display)",
   fontWeight = 600,
-  reducedMotion: _reducedMotion = false,
   renderContent = true,
   children,
 }: HeroSectionProps) {
