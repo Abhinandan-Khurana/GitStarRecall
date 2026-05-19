@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { getLocalDatabase } from "@/db/client";
 import type { RepoRecord } from "@/db/types";
 import { useAuth } from "@/auth/useAuth";
-import SafeMarkdown from "@/components/SafeMarkdown";
+import { getReadmeDisplayExcerpt, summarizeReadmeDisplayHealth } from "@/readme/displayExcerpt";
 
 function matchesRepo(repo: RepoRecord, query: string) {
   if (!query) return true;
@@ -46,6 +46,17 @@ export default function LibraryPage() {
     };
   }, [accessToken, searchParams]);
 
+  useEffect(() => {
+    if (!import.meta.env.DEV || repos.length === 0) {
+      return;
+    }
+
+    const summary = summarizeReadmeDisplayHealth(repos);
+    if (summary["empty-display"] > 0 || summary.missing > 0) {
+      console.debug("[library-readme-preview] display health", summary);
+    }
+  }, [repos]);
+
   const filteredRepos = useMemo(() => {
     return repos.filter((repo) => {
       if (!matchesRepo(repo, query)) {
@@ -66,6 +77,10 @@ export default function LibraryPage() {
     });
   }, [query, repos, savedView]);
   const selectedRepo = filteredRepos.find((repo) => repo.id === selectedRepoId) ?? repos.find((repo) => repo.id === selectedRepoId) ?? null;
+  const selectedReadmeExcerpt = useMemo(
+    () => getReadmeDisplayExcerpt(selectedRepo?.readmeText),
+    [selectedRepo?.readmeText],
+  );
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
@@ -208,11 +223,12 @@ export default function LibraryPage() {
               <div>
                 <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">README excerpt</p>
                 <div className="mt-2 rounded-md border border-border/60 bg-background/70 p-4 text-sm text-muted-foreground">
-                  {selectedRepo.readmeText ? (
-                    <SafeMarkdown
-                      className="max-h-72 overflow-auto whitespace-pre-wrap break-words [&_code]:break-all [&_pre]:overflow-x-auto"
-                      content={selectedRepo.readmeText.slice(0, 1600)}
-                    />
+                  {selectedReadmeExcerpt.kind === "ready" ? (
+                    <p className="max-h-72 overflow-auto whitespace-pre-wrap break-words">
+                      {selectedReadmeExcerpt.text}
+                    </p>
+                  ) : selectedReadmeExcerpt.kind === "empty-display" ? (
+                    "README indexed, but no displayable preview text was found."
                   ) : (
                     "README content has not been indexed yet."
                   )}
