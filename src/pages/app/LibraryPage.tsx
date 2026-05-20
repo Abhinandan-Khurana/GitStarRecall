@@ -1,28 +1,56 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowRight, ArrowUpRight, Database, Search } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronDown, Database, Search } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getLocalDatabase } from "@/db/client";
 import type { RepoRecord } from "@/db/types";
 import { useAuth } from "@/auth/useAuth";
 import { getReadmeDisplayExcerpt, summarizeReadmeDisplayHealth } from "@/readme/displayExcerpt";
+import { filterLibraryRepos, getLibraryFilterOptions, parseMinStarsFilter, type LibraryFilters } from "./libraryFilters";
 
-function matchesRepo(repo: RepoRecord, query: string) {
-  if (!query) return true;
-  const haystack = `${repo.fullName} ${repo.description ?? ""} ${repo.language ?? ""} ${repo.topics.join(" ")} ${repo.readmeText ?? ""}`.toLowerCase();
-  return haystack.includes(query.toLowerCase());
-}
+const defaultLibraryFilters: LibraryFilters = {
+  query: "",
+  language: "all",
+  topic: "all",
+  recency: "all",
+  minStars: "",
+  readmeStatus: "all",
+  sortBy: "recently-synced",
+};
+
+const recencyLabels: Record<LibraryFilters["recency"], string> = {
+  all: "Any time",
+  "30": "Updated in 30 days",
+  "90": "Updated in 90 days",
+  "365": "Updated this year",
+};
+
+const readmeStatusLabels: Record<LibraryFilters["readmeStatus"], string> = {
+  all: "Any README status",
+  indexed: "README indexed",
+  missing: "README missing",
+};
+
+const sortLabels: Record<LibraryFilters["sortBy"], string> = {
+  "recently-synced": "Recently synced",
+  updated: "Recently updated",
+  stars: "Stars",
+  forks: "Forks",
+  name: "Name",
+};
 
 export default function LibraryPage() {
   const navigate = useNavigate();
   const { accessToken } = useAuth();
   const [repos, setRepos] = useState<RepoRecord[]>([]);
-  const [query, setQuery] = useState("");
-  const [savedView, setSavedView] = useState("all");
+  const [filters, setFilters] = useState<LibraryFilters>(defaultLibraryFilters);
   const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -57,25 +85,19 @@ export default function LibraryPage() {
     }
   }, [repos]);
 
-  const filteredRepos = useMemo(() => {
-    return repos.filter((repo) => {
-      if (!matchesRepo(repo, query)) {
-        return false;
-      }
-
-      if (savedView === "typescript") {
-        return repo.language?.toLowerCase() === "typescript";
-      }
-      if (savedView === "ai") {
-        return repo.topics.some((topic) => topic.toLowerCase().includes("ai") || topic.toLowerCase().includes("ml"));
-      }
-      if (savedView === "recent") {
-        return Date.now() - new Date(repo.updatedAt).getTime() < 1000 * 60 * 60 * 24 * 90;
-      }
-
-      return true;
-    });
-  }, [query, repos, savedView]);
+  const filterOptions = useMemo(() => getLibraryFilterOptions(repos), [repos]);
+  const filteredRepos = useMemo(() => filterLibraryRepos(repos, filters), [filters, repos]);
+  const activeFilterBadges = useMemo(() => {
+    const badges: string[] = [];
+    if (filters.query.trim()) badges.push(`Search: ${filters.query.trim()}`);
+    if (filters.language !== "all") badges.push(`Language: ${filters.language}`);
+    if (filters.topic !== "all") badges.push(`Topic: ${filters.topic}`);
+    if (filters.recency !== "all") badges.push(recencyLabels[filters.recency]);
+    if (parseMinStarsFilter(filters.minStars) !== null) badges.push(`≥ ${filters.minStars.trim()} stars`);
+    if (filters.readmeStatus !== "all") badges.push(readmeStatusLabels[filters.readmeStatus]);
+    if (filters.sortBy !== "recently-synced") badges.push(`Sort: ${sortLabels[filters.sortBy]}`);
+    return badges;
+  }, [filters]);
   const selectedRepo = filteredRepos.find((repo) => repo.id === selectedRepoId) ?? repos.find((repo) => repo.id === selectedRepoId) ?? null;
   const selectedReadmeExcerpt = useMemo(
     () => getReadmeDisplayExcerpt(selectedRepo?.readmeText),
@@ -95,33 +117,136 @@ export default function LibraryPage() {
               {filteredRepos.length} repos
             </Badge>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {[
-              { id: "all", label: "All repos" },
-              { id: "recent", label: "Recently updated" },
-              { id: "typescript", label: "TypeScript" },
-              { id: "ai", label: "AI / ML" },
-            ].map((view) => (
-              <Button
-                key={view.id}
-                type="button"
-                variant={savedView === view.id ? "secondary" : "outline"}
-                className="h-8 rounded-md"
-                onClick={() => setSavedView(view.id)}
-              >
-                {view.label}
-              </Button>
-            ))}
-          </div>
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              value={filters.query}
+              onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
               placeholder="Filter by repo, topic, language, description, or README text"
               className="h-11 rounded-md border-border/70 bg-background pl-10"
             />
           </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Select value={filters.language} onValueChange={(language) => setFilters((current) => ({ ...current, language }))}>
+              <SelectTrigger aria-label="Filter by language" className="rounded-md border-border/70 bg-background">
+                <SelectValue placeholder="Language" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All languages</SelectItem>
+                {filterOptions.languages.map((language) => (
+                  <SelectItem key={language} value={language}>
+                    {language}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filters.topic} onValueChange={(topic) => setFilters((current) => ({ ...current, topic }))}>
+              <SelectTrigger aria-label="Filter by GitHub topic" className="rounded-md border-border/70 bg-background">
+                <SelectValue placeholder="Topic" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All GitHub topics</SelectItem>
+                {filterOptions.topics.map((topic) => (
+                  <SelectItem key={topic} value={topic}>
+                    {topic}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={filters.recency}
+              onValueChange={(recency) => setFilters((current) => ({ ...current, recency: recency as LibraryFilters["recency"] }))}
+            >
+              <SelectTrigger aria-label="Filter by recency" className="rounded-md border-border/70 bg-background">
+                <SelectValue placeholder="Recency" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(recencyLabels).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="outline" className="h-9 w-fit rounded-md border-dashed">
+                Advanced filters
+                <ChevronDown className="ml-2 h-4 w-4" />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2 rounded-lg border border-border/60 bg-background/50 p-3">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="library-min-stars" className="text-xs text-muted-foreground">
+                    Min stars
+                  </Label>
+                  <Input
+                    id="library-min-stars"
+                    inputMode="numeric"
+                    value={filters.minStars}
+                    onChange={(event) => setFilters((current) => ({ ...current, minStars: event.target.value }))}
+                    placeholder="Any"
+                    className="h-9 rounded-md border-border/70 bg-background"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="library-readme-status" className="text-xs text-muted-foreground">README status</Label>
+                  <Select
+                    value={filters.readmeStatus}
+                    onValueChange={(readmeStatus) => setFilters((current) => ({ ...current, readmeStatus: readmeStatus as LibraryFilters["readmeStatus"] }))}
+                  >
+                    <SelectTrigger id="library-readme-status" className="rounded-md border-border/70 bg-background">
+                      <SelectValue placeholder="README status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(readmeStatusLabels).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="library-sort-by" className="text-xs text-muted-foreground">Sort by</Label>
+                  <Select
+                    value={filters.sortBy}
+                    onValueChange={(sortBy) => setFilters((current) => ({ ...current, sortBy: sortBy as LibraryFilters["sortBy"] }))}
+                  >
+                    <SelectTrigger id="library-sort-by" className="rounded-md border-border/70 bg-background">
+                      <SelectValue placeholder="Sort by" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(sortLabels).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+          {activeFilterBadges.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-background/40 p-2">
+              {activeFilterBadges.map((badge) => (
+                <Badge key={badge} variant="secondary" className="rounded-md">
+                  {badge}
+                </Badge>
+              ))}
+              <Button
+                type="button"
+                variant="ghost"
+                className="ml-auto h-7 rounded-md px-2 text-xs text-muted-foreground"
+                onClick={() => setFilters(defaultLibraryFilters)}
+              >
+                Reset filters
+              </Button>
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent className="p-0">
           <ScrollArea className="h-[calc(100vh-16rem)]">
@@ -255,7 +380,7 @@ export default function LibraryPage() {
                 type="button"
                 variant="ghost"
                 className="w-full rounded-md text-muted-foreground"
-                onClick={() => setQuery(selectedRepo.fullName)}
+                onClick={() => setFilters({ ...defaultLibraryFilters, query: selectedRepo.fullName })}
               >
                 Filter library to this repo
               </Button>
