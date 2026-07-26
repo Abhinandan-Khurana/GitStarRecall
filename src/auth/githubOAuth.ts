@@ -2,6 +2,7 @@ const AUTH_STATE_KEY = "gitstarrecall.oauth.state";
 const AUTH_VERIFIER_KEY = "gitstarrecall.oauth.verifier";
 const AUTH_ISSUED_AT_KEY = "gitstarrecall.oauth.issued-at";
 const AUTH_SESSION_TTL_MS = 10 * 60 * 1000;
+const OAUTH_EXCHANGE_TIMEOUT_MS = 10_000;
 const inFlightExchanges = new Map<string, Promise<string>>();
 
 function base64UrlEncode(bytes: Uint8Array): string {
@@ -124,53 +125,63 @@ async function performOAuthCodeExchange(args: { code: string; state: string }): 
 
   const verifier = readOAuthSession(args.state);
   const config = getOAuthConfig();
-  let response: Response;
-  try {
-    response = await fetch(exchangeUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        code: args.code,
-        codeVerifier: verifier,
-        redirectUri: config.redirectUri,
-        clientId: config.clientId,
-      }),
-    });
-  } catch (error) {
-    throw new OAuthExchangeError("OAuth token exchange is temporarily unavailable", true, {
-      cause: error,
-    });
-  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OAUTH_EXCHANGE_TIMEOUT_MS);
 
-  if (!response.ok) {
-    if (response.status === 429 || response.status >= 500) {
-      throw new OAuthExchangeError(
-        `OAuth token exchange is temporarily unavailable (${response.status})`,
-        true,
-      );
+  try {
+    let response: Response;
+    try {
+      response = await fetch(exchangeUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          code: args.code,
+          codeVerifier: verifier,
+          redirectUri: config.redirectUri,
+          clientId: config.clientId,
+        }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      const message = controller.signal.aborted
+        ? "OAuth token exchange timed out"
+        : "OAuth token exchange is temporarily unavailable";
+      throw new OAuthExchangeError(message, true, { cause: error });
     }
+
+    if (!response.ok) {
+      if (response.status === 429 || response.status >= 500) {
+        throw new OAuthExchangeError(
+          `OAuth token exchange is temporarily unavailable (${response.status})`,
+          true,
+        );
+      }
+      clearOAuthSession();
+      throw new Error(`OAuth token exchange failed (${response.status})`);
+    }
+
+    let payload: { access_token?: string };
+    try {
+      payload = (await response.json()) as { access_token?: string };
+    } catch (error) {
+      const message = controller.signal.aborted
+        ? "OAuth token exchange timed out"
+        : "OAuth token exchange returned an invalid response";
+      throw new OAuthExchangeError(message, true, { cause: error });
+    }
+
+    if (!payload.access_token) {
+      clearOAuthSession();
+      throw new Error("OAuth exchange did not return access_token");
+    }
+
     clearOAuthSession();
-    throw new Error(`OAuth token exchange failed (${response.status})`);
+    return payload.access_token;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  let payload: { access_token?: string };
-  try {
-    payload = (await response.json()) as { access_token?: string };
-  } catch (error) {
-    throw new OAuthExchangeError("OAuth token exchange returned an invalid response", true, {
-      cause: error,
-    });
-  }
-
-  if (!payload.access_token) {
-    clearOAuthSession();
-    throw new Error("OAuth exchange did not return access_token");
-  }
-
-  clearOAuthSession();
-  return payload.access_token;
 }
 
 export function exchangeOAuthCode(args: { code: string; state: string }): Promise<string> {
