@@ -1,0 +1,22 @@
+# Reviewed exceptions apply only to these advisory IDs and expire automatically.
+# OSV-Scanner remains fail-closed for every other vulnerability.
+
+[[IgnoredVulns]]
+id = "GHSA-4x5r-pxfx-6jf8"
+ignoreUntil = 2026-10-31
+reason = "@babel/core is a development-only Vite transform dependency; this app compiles trusted repository source and never accepts attacker-controlled Babel input. Recheck when @vitejs/plugin-react supports @babel/core 7.29.6 or later."
+
+[[IgnoredVulns]]
+id = "GHSA-2g4f-4pwh-qvx6"
+ignoreUntil = 2026-10-31
+reason = "ajv 6.12.6 is development-only through ESLint; the app does not execute it at runtime or enable AJV $data validation. Recheck when ESLint supports ajv 6.14.0 or later."
+
+[[IgnoredVulns]]
+id = "GHSA-mh99-v99m-4gvg"
+ignoreUntil = 2026-10-31
+reason = "brace-expansion 1.1.16 is development-only through ESLint's minimatch 3 dependency and receives no attacker-controlled glob patterns; forcing the fixed 5.x major would violate the parent dependency contract. Recheck after an ESLint dependency update."
+
+[[IgnoredVulns]]
+id = "GHSA-qwww-vcr4-c8h2"
+ignoreUntil = 2026-10-31
+reason = "The advisory affects only unstable React Router RSC APIs; this deployment is a static Vite BrowserRouter SPA and uses no RSC or server actions. Recheck when react-router-dom has a compatible 8.3.0 or later release."

@@ -36,6 +36,7 @@ jobs:
     with:
       # Example of specifying custom arguments
       scan-args: |-
+        --config=./osv-scanner.toml
         -r
         ./
   scan-pr:
@@ -48,5 +49,6 @@ jobs:
     with:
       # Example of specifying custom arguments
       scan-args: |-
+        --config=./osv-scanner.toml
         -r
         ./
