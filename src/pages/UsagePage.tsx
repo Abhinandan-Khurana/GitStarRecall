@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import { buildChatScopeKey, buildEmbeddingPreferenceScopeKey } from "../auth/authScope";
 import { createGitHubApiClient } from "../github/client";
-import type { GitHubStarredRepo, RepoReadmeRecord } from "../github/types";
+import type { RepoReadmeRecord } from "../github/types";
 import { getLocalDatabase } from "../db/client";
 import { backupChatSnapshot, loadChatBackup } from "../db/chatBackup";
 import type {
@@ -43,6 +43,12 @@ import {
   getReadmeProgressLabel,
   type IndexingStatus,
 } from "../sync/status";
+import {
+  applyReadmeBatchTransition,
+  buildIncompleteSyncResult,
+  buildSyncCompletion,
+  toPreviousReadmeStateByRepoId,
+} from "./readmeSyncOutcome";
 import { sortChatMessages } from "../chat/order";
 import { captureLocalError, captureLocalWarn } from "../observability/localLog";
 import { SessionChat } from "../components/SessionChat";
@@ -72,7 +78,7 @@ import {
 } from "../llm/providers";
 import { resolveProviderFallback } from "../llm/fallback";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
-import { loadSettings, loadSettingsAsync, saveSettings } from "../lib/settings";
+import { useProviderSettingsPersistence } from "../hooks/useProviderSettingsPersistence";
 import {
   getWebLLMSelectableModels,
   WEBLLM_FALLBACK_MODEL_ID,
@@ -632,27 +638,6 @@ function getEmbeddingWorkerBatchSize(): number {
   return 8;
 }
 
-function mapStarredRepoToRecord(repo: GitHubStarredRepo, syncedAt: number): RepoRecord {
-  return {
-    id: repo.id,
-    fullName: repo.full_name,
-    name: repo.name,
-    description: repo.description,
-    topics: repo.topics ?? [],
-    language: repo.language,
-    htmlUrl: repo.html_url,
-    stars: repo.stargazers_count,
-    forks: repo.forks_count,
-    updatedAt: repo.updated_at,
-    readmeUrl: null,
-    readmeText: null,
-    readmeEtag: null,
-    readmeLastModified: null,
-    checksum: null,
-    lastSyncedAt: syncedAt,
-  };
-}
-
 async function clearWebLLMRuntimeCaches(): Promise<void> {
   if (!("caches" in globalThis)) {
     return;
@@ -708,21 +693,9 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const [languageFilter, setLanguageFilter] = useState("all");
   const [topicFilter, setTopicFilter] = useState("all");
   const [updatedWithinDaysFilter, setUpdatedWithinDaysFilter] = useState("all");
-  const defaultProviderId = webLLMEnabled ? "webllm" : "openai-compatible";
-  const [providerId, setProviderId] = useState<LLMProviderId>(defaultProviderId);
-  const [providerBaseUrl, setProviderBaseUrl] = useState(
-    providerDefinitions.find((provider) => provider.id === defaultProviderId)?.defaultBaseUrl ??
-    (defaultProviderId === "openai-compatible" ? "https://api.openai.com" : ""),
-  );
-  const [providerModel, setProviderModel] = useState(
-    providerDefinitions.find((provider) => provider.id === defaultProviderId)?.defaultModel ??
-    (defaultProviderId === "webllm" ? WEBLLM_PRIMARY_MODEL_ID : "gpt-4o-mini"),
-  );
-  const [providerApiKey, setProviderApiKey] = useState("");
-  const [ollamaPreferredChatModel, setOllamaPreferredChatModel] = useState("llama3.1:8b");
-  const [allowRemoteProvider, setAllowRemoteProvider] = useState(false);
-  const [allowLocalProvider, setAllowLocalProvider] = useState(false);
-  const [webllmConsent, setWebllmConsent] = useState(false);
+  const { providerId, setProviderId, providerBaseUrl, setProviderBaseUrl, providerModel, setProviderModel, providerApiKey, setProviderApiKey, ollamaPreferredChatModel, setOllamaPreferredChatModel, allowRemoteProvider, setAllowRemoteProvider,
+    allowLocalProvider, setAllowLocalProvider, webllmConsent, setWebllmConsent, webllmSelectedModel, setWebllmSelectedModel, webllmModelManuallySet, setWebllmModelManuallySet, webllmLastRecommendedModel, setWebllmLastRecommendedModel, saveState: providerSettingsSaveState, statusMessage: providerSettingsStatusMessage } =
+    useProviderSettingsPersistence({ scopeIdentity: authScopeIdentity, webLLMEnabled, webLLMPrimaryModel: WEBLLM_PRIMARY_MODEL_ID, providerDefinitions });
   const [webllmRuntimeState, setWebllmRuntimeState] = useState<
     "idle" | "probing" | "needs-consent" | "downloading" | "ready" | "failed"
   >("idle");
@@ -732,13 +705,10 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const [browserEmbeddingModelCandidates, setBrowserEmbeddingModelCandidates] = useState<string[]>(
     BROWSER_EMBEDDING_MODEL_CANDIDATES_DEFAULT,
   );
-  const [webllmSelectedModel, setWebllmSelectedModel] = useState(WEBLLM_PRIMARY_MODEL_ID);
-  const [webllmModelManuallySet, setWebllmModelManuallySet] = useState(false);
   const [webllmDownloadProgress, setWebllmDownloadProgress] = useState(0);
   const [webllmProgressText, setWebllmProgressText] = useState<string | null>(null);
   const [webllmDialogOpen, setWebllmDialogOpen] = useState(false);
   const [webllmAllowModelDownload, setWebllmAllowModelDownload] = useState(false);
-  const [webllmLastRecommendedModel, setWebllmLastRecommendedModel] = useState("");
   const [allowOllamaEmbedding, setAllowOllamaEmbedding] = useState(false);
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState(getDefaultOllamaBaseUrl());
   const [ollamaModel, setOllamaModel] = useState(getDefaultOllamaModel());
@@ -853,7 +823,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setWebllmSelectedModel(resolveHermesModelSelection(value));
       setWebllmModelManuallySet(true);
     }
-  }, [providerId]);
+  }, [providerId, setOllamaPreferredChatModel, setProviderModel, setWebllmModelManuallySet, setWebllmSelectedModel]);
 
   const ensureBrowserEmbeddingRecommendation = useCallback(async (): Promise<BrowserEmbeddingRecommendation> => {
     if (browserEmbeddingRecommendation) {
@@ -1299,96 +1269,6 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     };
   }, []);
 
-  // Load saved provider settings when user logs in (sync for plaintext, async for encrypted)
-  useEffect(() => {
-    if (!authScopeIdentity) return;
-    const sync = loadSettings(authScopeIdentity);
-    if (sync) {
-      const savedProviderId =
-        !webLLMEnabled && sync.providerId === "webllm" ? "openai-compatible" : sync.providerId;
-      const savedProviderDefinition =
-        providerDefinitions.find((provider) => provider.id === savedProviderId) ?? providerDefinitions[0];
-      setProviderId(savedProviderId);
-      setProviderBaseUrl(sync.baseUrl || savedProviderDefinition.defaultBaseUrl);
-      setProviderModel(sync.model || savedProviderDefinition.defaultModel);
-      setOllamaPreferredChatModel(sync.ollamaPreferredModel || "llama3.1:8b");
-      setProviderApiKey(sync.apiKey);
-      setAllowRemoteProvider(sync.allowRemoteProvider);
-      setAllowLocalProvider(sync.allowLocalProvider);
-      setWebllmConsent(sync.webllmConsent);
-      if (savedProviderDefinition.id === "webllm") {
-        setWebllmSelectedModel(sync.webllmPreferredModel || sync.model || WEBLLM_PRIMARY_MODEL_ID);
-        setWebllmModelManuallySet(Boolean(sync.webllmPreferredModel));
-      } else {
-        setWebllmSelectedModel(
-          sync.webllmPreferredModel || sync.webllmLastRecommendedModel || WEBLLM_PRIMARY_MODEL_ID,
-        );
-        setWebllmModelManuallySet(Boolean(sync.webllmPreferredModel));
-      }
-      setWebllmLastRecommendedModel(sync.webllmLastRecommendedModel ?? "");
-      return;
-    }
-    let cancelled = false;
-    loadSettingsAsync(authScopeIdentity).then((saved) => {
-      if (cancelled || !saved) return;
-      const savedProviderId =
-        !webLLMEnabled && saved.providerId === "webllm" ? "openai-compatible" : saved.providerId;
-      const savedProviderDefinition =
-        providerDefinitions.find((provider) => provider.id === savedProviderId) ?? providerDefinitions[0];
-      setProviderId(savedProviderId);
-      setProviderBaseUrl(saved.baseUrl || savedProviderDefinition.defaultBaseUrl);
-      setProviderModel(saved.model || savedProviderDefinition.defaultModel);
-      setOllamaPreferredChatModel(saved.ollamaPreferredModel || "llama3.1:8b");
-      setProviderApiKey(saved.apiKey);
-      setAllowRemoteProvider(saved.allowRemoteProvider);
-      setAllowLocalProvider(saved.allowLocalProvider);
-      setWebllmConsent(saved.webllmConsent);
-      if (savedProviderDefinition.id === "webllm") {
-        setWebllmSelectedModel(saved.webllmPreferredModel || saved.model || WEBLLM_PRIMARY_MODEL_ID);
-        setWebllmModelManuallySet(Boolean(saved.webllmPreferredModel));
-      } else {
-        setWebllmSelectedModel(
-          saved.webllmPreferredModel || saved.webllmLastRecommendedModel || WEBLLM_PRIMARY_MODEL_ID,
-        );
-        setWebllmModelManuallySet(Boolean(saved.webllmPreferredModel));
-      }
-      setWebllmLastRecommendedModel(saved.webllmLastRecommendedModel ?? "");
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [authScopeIdentity]);
-
-  // Save provider settings when they change
-  useEffect(() => {
-    if (authScopeIdentity) {
-      saveSettings(authScopeIdentity, {
-        providerId,
-        baseUrl: providerBaseUrl,
-        model: providerModel,
-        apiKey: providerApiKey,
-        allowRemoteProvider,
-        allowLocalProvider,
-        webllmConsent,
-        webllmPreferredModel: webllmSelectedModel,
-        webllmLastRecommendedModel,
-        ollamaPreferredModel: ollamaPreferredChatModel,
-      });
-    }
-  }, [
-    authScopeIdentity,
-    providerId,
-    providerBaseUrl,
-    providerModel,
-    providerApiKey,
-    allowRemoteProvider,
-    allowLocalProvider,
-    webllmConsent,
-    webllmSelectedModel,
-    webllmLastRecommendedModel,
-    ollamaPreferredChatModel,
-  ]);
-
   useEffect(() => {
     if (providerId !== "ollama") {
       return;
@@ -1403,7 +1283,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       }
       return normalizedModel;
     });
-  }, [providerId, providerModel]);
+  }, [providerId, providerModel, setOllamaPreferredChatModel]);
 
   useEffect(() => {
     if (providerId !== "ollama") {
@@ -1450,6 +1330,8 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     ollamaChatRecommendedModel,
     providerId,
     providerModel,
+    setOllamaPreferredChatModel,
+    setProviderModel,
   ]);
 
   useEffect(() => {
@@ -1516,7 +1398,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     return () => {
       cancelled = true;
     };
-  }, [providerId, webllmLastRecommendedModel, webllmModelManuallySet, webllmSelectedModel]);
+  }, [providerId, setProviderModel, setWebllmLastRecommendedModel, setWebllmSelectedModel, webllmLastRecommendedModel, webllmModelManuallySet, webllmSelectedModel]);
 
   useEffect(() => {
     const fallbackPreference: OllamaPreferenceSnapshot = {
@@ -1777,19 +1659,12 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
     const candidateIds = new Set(syncPlan.candidateRepoIds);
     const candidates = starResult.repos.filter((repo) => candidateIds.has(repo.id));
-    const previousSyncStateByRepoId = new Map(
-      existingStates.map((state) => [
-        state.id,
-        {
-          checksum: state.checksum,
-          readmeEtag: state.readmeEtag ?? null,
-          readmeLastModified: state.readmeLastModified ?? null,
-        },
-      ]),
-    );
+    const previousSyncStateByRepoId = toPreviousReadmeStateByRepoId(existingStates);
     let chunkUpsertLatencyTotalMs = 0;
     let chunkUpsertCount = 0;
     let firstEmbeddingAvailableAt: number | null = null;
+    const successfullyChangedRepoIds = new Set<number>();
+    let chunkingCoverageCompleted = 0;
     let lastReadmeStats = {
       requested: candidates.length,
       succeeded: 0,
@@ -1840,43 +1715,32 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
         const localRepo = existingReposById.get(readme.repoId);
         const localState = existingById.get(readme.repoId);
-        const record = mapStarredRepoToRecord(remoteRepo, syncedAt);
-        if (readme.notModified && localRepo) {
-          record.readmeUrl = localRepo.readmeUrl;
-          record.readmeText = localRepo.readmeText;
-          record.checksum = localRepo.checksum;
-          record.readmeEtag = readme.readmeEtag ?? localRepo.readmeEtag;
-          record.readmeLastModified = readme.readmeLastModified ?? localRepo.readmeLastModified;
-        } else {
-          record.readmeUrl = readme.readmeUrl;
-          record.readmeText = readme.readmeText;
-          record.checksum = readme.checksum;
-          record.readmeEtag = readme.readmeEtag;
-          record.readmeLastModified = readme.readmeLastModified;
-        }
-
         const metadataChanged = localState ? repoMetadataChanged(localState, remoteRepo) : true;
-        const checksumChanged = localRepo ? localRepo.checksum !== record.checksum : true;
-        if (!localRepo || checksumChanged || metadataChanged) {
+        const transition = applyReadmeBatchTransition({
+          remoteRepo,
+          readme,
+          localRepo,
+          metadataChanged,
+          syncedAt,
+        });
+        if (transition.shouldUpsert) {
+          const { record } = transition;
           upserts.push(record);
         }
-        if (checksumChanged) {
+        if (transition.shouldRechunk) {
+          const { record } = transition;
           changedForChunk.push(record);
+          successfullyChangedRepoIds.add(record.id);
         }
 
+        const { record } = transition;
         existingReposById.set(record.id, record);
-        existingById.set(record.id, {
-          id: record.id,
-          fullName: record.fullName,
-          description: record.description,
-          topics: record.topics,
-          language: record.language,
-          updatedAt: record.updatedAt,
-          readmeEtag: record.readmeEtag,
-          readmeLastModified: record.readmeLastModified,
-          checksum: record.checksum,
-        });
+        existingById.set(record.id, transition.syncState);
       }
+
+      chunkingCoverageCompleted += batch.filter(
+        (readme) => readme.outcome !== "transient_failure",
+      ).length;
 
       if (upserts.length > 0) {
         await database.upsertRepos(upserts);
@@ -1914,7 +1778,10 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
               chunkingActive: completedReadmes < previous.chunkingTarget,
               embeddingWindowed: previous.embeddingWindowed,
               chunkTotal: database.getChunkCount(),
-              chunkingCompleted: Math.max(previous.chunkingCompleted, completedReadmes),
+              chunkingCompleted: Math.max(
+                previous.chunkingCompleted,
+                chunkingCoverageCompleted,
+              ),
             }
           : previous,
       );
@@ -1992,7 +1859,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         totalRepos: starResult.repos.length,
         removedRepos: syncPlan.removedRepoIds.length,
         candidateRepos: candidates.length,
-        changedRepos: readmeResult.records.filter((record) => !record.notModified).length,
+        changedRepos: successfullyChangedRepoIds.size,
         fetchedPages: starResult.fetchedPages,
       }),
       updatedAt: Date.now(),
@@ -2019,45 +1886,60 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     const localRepoCount = database.getRepoCount();
     const localChunkCount = database.getChunkCount();
     const localEmbeddingCount = database.getEmbeddingCount();
-    const readmeCount = readmeResult.records.length - readmeResult.missingCount - readmeResult.failedCount;
     const hasPendingEmbeddingChunks = database.getPendingEmbeddingChunkCount() > 0;
+    const hasReadmeRetriesPending = readmeResult.failedCount > 0;
+    const completion = buildSyncCompletion({
+      totalRepos: starResult.repos.length,
+      fetchedPages: starResult.fetchedPages,
+      candidateCount: candidates.length,
+      changedCount: successfullyChangedRepoIds.size,
+      removedCount: syncPlan.removedRepoIds.length,
+      records: readmeResult.records,
+      missingCount: readmeResult.missingCount,
+      failedCount: readmeResult.failedCount,
+      repoCount: localRepoCount,
+      chunkCount: localChunkCount,
+      embeddingCount: localEmbeddingCount,
+      pendingEmbeddings: hasPendingEmbeddingChunks,
+      pipelineV2: usePipelineV2,
+      readmeP95LatencyMs: lastReadmeStats.p95LatencyMs,
+    });
     setIndexingStatus((previous) =>
       previous
         ? {
-          ...previous,
-          phase: hasPendingEmbeddingChunks ? "Preparing embeddings for unindexed chunks" : "Sync complete",
-          primaryStage: hasPendingEmbeddingChunks ? "embedding-init" : "complete",
-          readmeActive: false,
-          chunkingActive: false,
-          embeddingActive: hasPendingEmbeddingChunks,
-          embeddingWindowed: false,
-          repoTotal: starResult.repos.length,
-          readmesTarget: candidates.length,
-          readmesCompleted: candidates.length,
-          chunkingTarget: candidates.length,
-          chunkingCompleted: candidates.length,
-          readmesMissing: readmeResult.missingCount,
-          readmesFailed: readmeResult.failedCount,
-          chunkTotal: localChunkCount,
-          embeddingsCreated: hasPendingEmbeddingChunks ? 0 : localEmbeddingCount,
-          embeddingTarget: 0,
-          elapsedSeconds: hasPendingEmbeddingChunks
-            ? undefined
-            : Math.max(1, Math.round((Date.now() - previous.startedAt) / 1000)),
-        }
+            ...previous,
+            ...completion.status,
+            elapsedSeconds: hasPendingEmbeddingChunks
+              ? undefined
+              : Math.max(1, Math.round((Date.now() - previous.startedAt) / 1000)),
+          }
         : previous,
     );
-
-    setStarsSummary(
-      `Sync complete: ${starResult.repos.length} stars scanned (${starResult.fetchedPages} pages), ` +
-      `${readmeResult.records.filter((record) => !record.notModified).length} changed/new, ${syncPlan.removedRepoIds.length} removed. ` +
-      `READMEs fetched: ${readmeCount}, missing: ${readmeResult.missingCount}, failed: ${readmeResult.failedCount}. ` +
-      `Local DB: ${localRepoCount} repos, ${localChunkCount} chunks, ${localEmbeddingCount} embeddings. ` +
-      `Pipeline: ${usePipelineV2 ? "batch-v2" : "legacy"} · README p95 ${Math.round(lastReadmeStats.p95LatencyMs)}ms.`,
-    );
+    setStarsSummary(completion.summary);
 
     if (hasPendingEmbeddingChunks) {
       await generateEmbeddings(database);
+    }
+    if (hasReadmeRetriesPending) {
+      const finalRepoCount = database.getRepoCount();
+      const finalChunkCount = database.getChunkCount();
+      const finalEmbeddingCount = database.getEmbeddingCount();
+      const incomplete = buildIncompleteSyncResult({
+        failedCount: readmeResult.failedCount,
+        candidateCount: candidates.length,
+        repoCount: finalRepoCount,
+        chunkCount: finalChunkCount,
+        embeddingCount: finalEmbeddingCount,
+      });
+      setIndexingStatus((previous) =>
+        previous
+          ? {
+              ...previous,
+              ...incomplete.status,
+            }
+          : previous,
+      );
+      setStarsSummary(incomplete.summary);
     }
   };
 
@@ -3654,6 +3536,8 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                       void refreshOllamaCatalog();
                     }}
                   />
+                  <p aria-live="polite" className={`text-xs ${providerSettingsSaveState === "error" ? "text-destructive" : "text-muted-foreground"}`}>
+                    {providerSettingsStatusMessage}</p>
                   <div className="rounded-md border border-border/60 bg-background/70 p-4">
                     <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Permissions</p>
                     <p className="mt-2">Remote providers: <span className="font-medium text-foreground">{allowRemoteProvider ? "enabled" : "disabled"}</span></p>
