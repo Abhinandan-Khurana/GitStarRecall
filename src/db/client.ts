@@ -23,6 +23,7 @@ const LOCAL_STORAGE_KEY_PREFIX = "gitstarrecall.sqlite.base64";
 const LOCAL_STORAGE_UPDATED_AT_KEY_PREFIX = "gitstarrecall.sqlite.updated-at";
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_EMBEDDINGS = 256;
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_MS = 3000;
+const DATABASE_WRITER_LOCK_PREFIX = "gitstarrecall:database-writer";
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
 let currentDatabaseScopeKey = "anon";
@@ -34,6 +35,19 @@ type EmbeddingCheckpointPolicy = {
 };
 
 type SqlRowValue = string | number | Uint8Array | null;
+
+export class LocalDatabaseWriterLeaseError extends Error {
+  readonly code = "DATABASE_WRITER_LEASE_UNAVAILABLE";
+  readonly scopeKey: string;
+
+  constructor(scopeKey: string) {
+    super(
+      `Another tab is already writing local data for scope ${scopeKey}. Close the other tab or finish its operation, then retry.`,
+    );
+    this.name = "LocalDatabaseWriterLeaseError";
+    this.scopeKey = scopeKey;
+  }
+}
 
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -886,6 +900,10 @@ export class LocalDatabase {
   private pendingEmbeddingsSinceCheckpoint = 0;
   private pendingEmbeddingsStartedAt = 0;
   private lastEmbeddingCheckpointAt: number | null = null;
+  private persistenceTail: Promise<void> = Promise.resolve();
+  private destructiveOperationBarrier: Promise<void> = Promise.resolve();
+  private writerLeaseAvailable: Promise<boolean>;
+  private releaseWriterLease: (() => void) | null = null;
 
   constructor(args: {
     sql: SqlJsStatic;
@@ -908,6 +926,7 @@ export class LocalDatabase {
         DEFAULT_EMBEDDING_CHECKPOINT_EVERY_MS,
       ),
     };
+    this.writerLeaseAvailable = this.acquireWriterLease();
   }
 
   get storageMode(): StorageMode {
@@ -1326,9 +1345,59 @@ export class LocalDatabase {
       .slice(0, tuning.topK);
   }
 
-  private async persist(): Promise<void> {
-    const bytes = this.db.export();
+  private acquireWriterLease(): Promise<boolean> {
+    if (this._storageMode === "memory" || typeof navigator === "undefined" || !navigator.locks) {
+      return Promise.resolve(true);
+    }
 
+    let reportAvailability: (available: boolean) => void;
+    const availability = new Promise<boolean>((resolve) => {
+      reportAvailability = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      this.releaseWriterLease = resolve;
+    });
+
+    void navigator.locks
+      .request(
+        `${DATABASE_WRITER_LOCK_PREFIX}:${this.scopeKey}`,
+        { mode: "exclusive", ifAvailable: true },
+        async (lock) => {
+          reportAvailability(Boolean(lock));
+          if (lock) {
+            await held;
+          }
+        },
+      )
+      .catch(() => {
+        reportAvailability(false);
+      });
+
+    return availability;
+  }
+
+  private beginMutation(): Promise<void> {
+    const destructiveBarrier = this.destructiveOperationBarrier;
+    return this.writerLeaseAvailable.then(async (available) => {
+      if (!available) {
+        throw new LocalDatabaseWriterLeaseError(this.scopeKey);
+      }
+      await destructiveBarrier;
+    });
+  }
+
+  releaseWriterLeaseForTests(): void {
+    this.releaseWriterLease?.();
+    this.releaseWriterLease = null;
+  }
+
+  private enqueuePersistence(task: () => Promise<void>): Promise<void> {
+    const ownResult = this.persistenceTail.then(task);
+    this.persistenceTail = ownResult.catch(() => undefined);
+    return ownResult;
+  }
+
+  private async writeSnapshot(bytes: Uint8Array): Promise<void> {
     if (this._storageMode === "opfs") {
       const written = await writeBytesToOpfs(bytes, this.scopeKey);
 
@@ -1341,13 +1410,23 @@ export class LocalDatabase {
 
     if (this._storageMode === "local-storage") {
       try {
+        if (typeof localStorage === "undefined") {
+          throw new Error("localStorage is unavailable");
+        }
         writeBytesToLocalStorage(bytes, this.scopeKey);
-      } catch {
-        // localStorage quota can be exceeded for large DB snapshots; degrade to in-memory
-        // mode instead of failing the active operation.
-        this._storageMode = "memory";
+      } catch (error) {
+        throw new Error(`Unable to persist local database for scope ${this.scopeKey}`, {
+          cause: error,
+        });
       }
     }
+  }
+
+  private persist(): Promise<void> {
+    return this.enqueuePersistence(async () => {
+      const bytes = this.db.export();
+      await this.writeSnapshot(bytes);
+    });
   }
 
   private shouldCheckpointEmbeddings(now: number): boolean {
@@ -1390,6 +1469,7 @@ export class LocalDatabase {
   }
 
   async flushPendingEmbeddingCheckpoint(): Promise<boolean> {
+    await this.beginMutation();
     if (this.pendingEmbeddingsSinceCheckpoint <= 0) {
       return false;
     }
@@ -1402,6 +1482,7 @@ export class LocalDatabase {
   }
 
   async upsertRepos(repos: RepoRecord[]): Promise<void> {
+    await this.beginMutation();
     const statement = this.db.prepare(`
       INSERT INTO repos (
         id, full_name, name, description, topics_json, language, html_url, stars, forks,
@@ -1637,6 +1718,7 @@ export class LocalDatabase {
   }
 
   async clearEmbeddings(): Promise<void> {
+    await this.beginMutation();
     this.db.run("DELETE FROM embeddings;");
     this.vectorIndexCache = null;
     this.vectorIndexCacheCount = -1;
@@ -2017,6 +2099,7 @@ export class LocalDatabase {
   }
 
   async upsertChunks(chunks: ChunkRecord[]): Promise<void> {
+    await this.beginMutation();
     const statement = this.db.prepare(`
       INSERT INTO chunks (id, repo_id, chunk_id, text, source, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -2054,6 +2137,7 @@ export class LocalDatabase {
   }
 
   async deleteReposByIds(repoIds: number[]): Promise<void> {
+    await this.beginMutation();
     if (repoIds.length === 0) {
       return;
     }
@@ -2066,6 +2150,7 @@ export class LocalDatabase {
   }
 
   async deleteChunksByRepoIds(repoIds: number[]): Promise<void> {
+    await this.beginMutation();
     if (repoIds.length === 0) {
       return;
     }
@@ -2078,6 +2163,7 @@ export class LocalDatabase {
   }
 
   async upsertEmbeddings(embeddings: EmbeddingRecord[]): Promise<void> {
+    await this.beginMutation();
     const normalized = embeddings.map((embedding) => {
       const dimension = Number(embedding.dimension);
       const createdAt = Number(embedding.createdAt);
@@ -2137,6 +2223,7 @@ export class LocalDatabase {
   }
 
   async upsertIndexMeta(record: IndexMetaRecord): Promise<void> {
+    await this.beginMutation();
     const key = String(record.key ?? "").trim();
     const value = record.value == null ? "" : String(record.value);
     const now = normalizeTimestamp(Date.now(), 1);
@@ -2161,6 +2248,7 @@ export class LocalDatabase {
   }
 
   async upsertChatSession(session: ChatSessionRecord): Promise<void> {
+    await this.beginMutation();
     const id = String(session.id ?? "").trim();
     const query = session.query == null ? "" : String(session.query).trim();
     const now = normalizeTimestamp(Date.now(), 1);
@@ -2302,6 +2390,7 @@ export class LocalDatabase {
   }
 
   async addChatMessage(message: ChatMessageRecord): Promise<void> {
+    await this.beginMutation();
     const id = String(message.id ?? "").trim();
     const sessionId = String(message.sessionId ?? "").trim();
     const role: ChatMessageRecord["role"] =
@@ -2385,20 +2474,31 @@ export class LocalDatabase {
     await this.persist();
   }
 
-  async clearAllData(): Promise<void> {
-    this.db.close();
-    this.db = new this.sql.Database();
-    runSchema(this.db);
-    this.vectorIndexCache = null;
-    this.vectorIndexCacheCount = -1;
-    this.pendingEmbeddingsSinceCheckpoint = 0;
-    this.pendingEmbeddingsStartedAt = 0;
-    this.lastEmbeddingCheckpointAt = null;
+  clearAllData(): Promise<void> {
+    const priorDestructiveOperation = this.destructiveOperationBarrier;
+    const clearOperation = priorDestructiveOperation.then(async () => {
+      if (!(await this.writerLeaseAvailable)) {
+        throw new LocalDatabaseWriterLeaseError(this.scopeKey);
+      }
+      await this.enqueuePersistence(async () => {
+        this.db.close();
+        this.db = new this.sql.Database();
+        runSchema(this.db);
+        this.vectorIndexCache = null;
+        this.vectorIndexCacheCount = -1;
+        this.pendingEmbeddingsSinceCheckpoint = 0;
+        this.pendingEmbeddingsStartedAt = 0;
+        this.lastEmbeddingCheckpointAt = null;
 
-    await clearOpfsFile(this.scopeKey);
-    clearLocalStorageBytes(this.scopeKey);
-    await clearChatBackup();
-    await this.persist();
+        await clearOpfsFile(this.scopeKey);
+        clearLocalStorageBytes(this.scopeKey);
+        await clearChatBackup();
+        const bytes = this.db.export();
+        await this.writeSnapshot(bytes);
+      });
+    });
+    this.destructiveOperationBarrier = clearOperation.catch(() => undefined);
+    return clearOperation;
   }
 }
 
