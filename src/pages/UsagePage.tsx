@@ -23,6 +23,12 @@ import {
 import { fetchOllamaModelCatalog, type OllamaModelCatalog } from "../ollama/modelCatalog";
 import { float32ToBlob } from "../embeddings/vector";
 import {
+  EMBEDDING_DIMENSION_META_KEY,
+  EMBEDDING_MODEL_META_KEY,
+  EMBEDDING_REINDEX_REQUIRED_META_KEY,
+  type EmbeddingReadinessStatus,
+} from "../db/embeddingIntegrity";
+import {
   BROWSER_EMBEDDING_FALLBACK_MODEL,
   DEFAULT_BROWSER_EMBEDDING_MODEL,
   DEFAULT_OLLAMA_EMBEDDING_MODEL,
@@ -454,7 +460,6 @@ function scoreRepoForEmbeddingPriority(repo: RepoRecord): number {
 const OLLAMA_EMBEDDING_CONSENT_KEY_PREFIX = "gitstarrecall.embedding.ollama.consent";
 const OLLAMA_EMBEDDING_PREF_KEY_PREFIX = "gitstarrecall.embedding.ollama.pref";
 const EMBEDDING_BACKEND_META_KEY = "embedding_active_backend";
-const EMBEDDING_MODEL_META_KEY = "embedding_active_model";
 const BROWSER_EMBEDDING_MODEL = DEFAULT_BROWSER_EMBEDDING_MODEL;
 const BROWSER_EMBEDDING_MODEL_CANDIDATES_DEFAULT = [
   DEFAULT_BROWSER_EMBEDDING_MODEL,
@@ -686,6 +691,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const [sessionsExpanded, setSessionsExpanded] = useState(true);
   const [repoInventoryCount, setRepoInventoryCount] = useState(0);
   const [storedEmbeddingCount, setStoredEmbeddingCount] = useState(0);
+  const [embeddingReadiness, setEmbeddingReadiness] = useState<EmbeddingReadinessStatus>("empty");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
@@ -891,7 +897,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   }, [ensureBrowserEmbeddingRecommendation]);
 
   const activeResults = useMemo(() => activeSession?.results ?? [], [activeSession]);
-  const workspaceReady = repoInventoryCount > 0 && storedEmbeddingCount > 0;
+  const workspaceReady = repoInventoryCount > 0 && embeddingReadiness === "ready";
   const activeSessionMessages = useMemo(() => {
     if (!activeSessionId) {
       return [];
@@ -910,6 +916,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     if (!isAuthenticated) {
       setRepoInventoryCount(0);
       setStoredEmbeddingCount(0);
+      setEmbeddingReadiness("empty");
       return;
     }
 
@@ -921,6 +928,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
       setRepoInventoryCount(database.getRepoCount());
       setStoredEmbeddingCount(database.getEmbeddingCount());
+      setEmbeddingReadiness(database.getEmbeddingHealth().status);
     });
 
     return () => {
@@ -2154,6 +2162,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         value: activeEmbeddingModel,
         updatedAt: Date.now(),
       });
+      await database.upsertIndexMeta({
+        key: EMBEDDING_DIMENSION_META_KEY,
+        value: "",
+        updatedAt: Date.now(),
+      });
 
       const repoCount = database.getRepoCount();
       const largeLibraryMode = largeLibraryModeEnabled && repoCount > largeLibraryThreshold;
@@ -2458,6 +2471,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                 value: activeEmbeddingModel,
                 updatedAt: Date.now(),
               });
+              await database.upsertIndexMeta({
+                key: EMBEDDING_DIMENSION_META_KEY,
+                value: "",
+                updatedAt: Date.now(),
+              });
             }
             vectors = batchResults.map((item) => item.embedding);
           }
@@ -2527,6 +2545,24 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
       await flushEmbeddingBuffer(true);
+
+      const completedEmbeddingDimension = database.getEmbeddingHealth().dimension;
+      if (completedEmbeddingDimension !== null) {
+        await database.upsertIndexMeta({
+          key: EMBEDDING_DIMENSION_META_KEY,
+          value: String(completedEmbeddingDimension),
+          updatedAt: Date.now(),
+        });
+      }
+      if (!incrementalMode && database.getIndexMetaValue(EMBEDDING_REINDEX_REQUIRED_META_KEY)) {
+        const completedHealth = database.getEmbeddingHealth();
+        if (
+          completedHealth.issues.length === 1 &&
+          completedHealth.issues[0] === "reindex_required"
+        ) {
+          await database.clearIndexMetaValue(EMBEDDING_REINDEX_REQUIRED_META_KEY);
+        }
+      }
 
       const finalRepoCount = database.getRepoCount();
       const finalChunkCount = database.getChunkCount();
@@ -2658,6 +2694,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           updatedAt: Date.now(),
         });
         await database.upsertIndexMeta({
+          key: EMBEDDING_DIMENSION_META_KEY,
+          value: "",
+          updatedAt: Date.now(),
+        });
+        await database.upsertIndexMeta({
           key: "embedding_job_cursor",
           value: "",
           updatedAt: Date.now(),
@@ -2747,6 +2788,12 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           await database.upsertIndexMeta({
             key: EMBEDDING_MODEL_META_KEY,
             value: activeEmbeddingModel,
+            updatedAt: Date.now(),
+          });
+          const inferredDimension = database.getEmbeddingHealth().dimension;
+          await database.upsertIndexMeta({
+            key: EMBEDDING_DIMENSION_META_KEY,
+            value: inferredDimension === null ? "" : String(inferredDimension),
             updatedAt: Date.now(),
           });
         }
@@ -3190,7 +3237,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                       <span className="font-medium text-foreground">3. Generate embeddings</span>
                       <span className="mt-1 block">Build the semantic index used by Recall and chat context.</span>
                       <span className="mt-2 block text-xs">
-                        {storedEmbeddingCount > 0
+                        {embeddingReadiness === "ready"
                           ? `${storedEmbeddingCount} embeddings ready`
                           : isRebuildingEmbeddings || indexingStatus?.embeddingTarget
                             ? "In progress"

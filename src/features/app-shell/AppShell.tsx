@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 type WorkspaceStats = {
   repoCount: number;
   embeddingCount: number;
+  embeddingReady: boolean;
   sessionCount: number;
 };
 
@@ -80,6 +81,7 @@ export function AppShell() {
   const [stats, setStats] = useState<WorkspaceStats>({
     repoCount: 0,
     embeddingCount: 0,
+    embeddingReady: false,
     sessionCount: 0,
   });
   const shortcutPlatform = useMemo(() => detectClientShortcutPlatform(), []);
@@ -99,6 +101,7 @@ export function AppShell() {
       const nextStats = {
         repoCount: database.getRepoCount(),
         embeddingCount: database.getEmbeddingCount(),
+        embeddingReady: database.getEmbeddingHealth().status === "ready",
         sessionCount: database.listChatSessions().length,
       };
       if (!cancelled) {
@@ -155,9 +158,9 @@ export function AppShell() {
 
   const healthLabel = useMemo(() => {
     if (stats.repoCount === 0) return "Setup required";
-    if (stats.embeddingCount === 0) return "Indexing incomplete";
+    if (!stats.embeddingReady) return "Indexing incomplete";
     return "Ready";
-  }, [stats.embeddingCount, stats.repoCount]);
+  }, [stats.embeddingReady, stats.repoCount]);
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-foreground">
@@ -267,7 +270,7 @@ export function AppShell() {
                       <p className="mt-2">
                         {stats.repoCount === 0
                           ? "Indexing has not started yet."
-                          : stats.embeddingCount === 0
+                          : !stats.embeddingReady
                             ? "Stars are present, but embeddings still need to be generated."
                             : "The local index is ready for Recall, Library, and Sessions."}
                       </p>

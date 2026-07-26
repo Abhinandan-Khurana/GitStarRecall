@@ -2,8 +2,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./AppShell";
 
+const { getLocalDatabaseMock } = vi.hoisted(() => ({
+  getLocalDatabaseMock: vi.fn(),
+}));
+
 vi.mock("@/db/client", () => ({
-  getLocalDatabase: () => new Promise(() => {}),
+  getLocalDatabase: getLocalDatabaseMock,
 }));
 
 vi.mock("@/auth/useAuth", () => ({
@@ -56,6 +60,11 @@ function renderShell() {
 }
 
 describe("AppShell shortcuts", () => {
+  beforeEach(() => {
+    getLocalDatabaseMock.mockReset();
+    getLocalDatabaseMock.mockImplementation(() => new Promise(() => {}));
+  });
+
   it.each(["plain input", "plain textarea", "plain select", "editable", "dialog input"])(
     "ignores global shortcuts while typing in %s",
     (label) => {
@@ -97,5 +106,19 @@ describe("AppShell shortcuts", () => {
     expect(added.every((listener) => removed.includes(listener))).toBe(true);
     addSpy.mockRestore();
     removeSpy.mockRestore();
+  });
+
+  it("does not report ready from a positive embedding count when index health is degraded", async () => {
+    getLocalDatabaseMock.mockResolvedValue({
+      getRepoCount: () => 2,
+      getEmbeddingCount: () => 2,
+      getEmbeddingHealth: () => ({ status: "degraded" }),
+      listChatSessions: () => [],
+    });
+
+    renderShell();
+
+    expect(await screen.findByRole("button", { name: "Indexing incomplete" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ready" })).not.toBeInTheDocument();
   });
 });

@@ -6,6 +6,11 @@ import { reciprocalRankFusion } from "../search/fusion";
 import { lexicalOverlapScore, countRareLikeTokens } from "../search/lexical";
 import { mmrSelect, type DenseCandidate } from "../search/rerank";
 import { cosineSimilaritySafe } from "../search/vectorMath";
+import {
+  ensureEmbeddingIntegritySchema,
+  getEmbeddingHealth as readEmbeddingHealth,
+  type EmbeddingHealth,
+} from "./embeddingIntegrity";
 import type {
   ChatMessageRecord,
   ChatSessionRecord,
@@ -651,7 +656,7 @@ function ensureChatSchema(database: Database): void {
   normalizeChatRows(database);
 }
 
-export function runSchema(database: Database): void {
+export function runSchema(database: Database): boolean {
   database.run(DATABASE_SCHEMA_SQL);
   // Lightweight migration: older local DBs may not have new columns.
   const repoColumnsResult = database.exec("PRAGMA table_info(repos);");
@@ -674,57 +679,7 @@ export function runSchema(database: Database): void {
   }
 
   ensureChatSchema(database);
-
-  // Self-heal embeddings schema if an older local DB used incompatible column types.
-  const embeddingsColumnsResult = database.exec("PRAGMA table_info(embeddings);");
-  const embeddingsInfo =
-    embeddingsColumnsResult.length > 0
-      ? embeddingsColumnsResult[0].values.map((row) => ({
-          name: String(row[1]),
-          type: String(row[2]).toUpperCase(),
-        }))
-      : [];
-
-  const embeddingsTypeByName = new Map(embeddingsInfo.map((column) => [column.name, column.type]));
-  const embeddingsCompatible =
-    embeddingsTypeByName.get("id") === "TEXT" &&
-    embeddingsTypeByName.get("chunk_id") === "TEXT" &&
-    embeddingsTypeByName.get("model") === "TEXT" &&
-    embeddingsTypeByName.get("dimension") === "INTEGER" &&
-    embeddingsTypeByName.get("vector_blob") === "BLOB" &&
-    embeddingsTypeByName.get("created_at") === "INTEGER";
-
-  if (!embeddingsCompatible) {
-    database.run("DROP TABLE IF EXISTS embeddings;");
-    database.run(`
-      CREATE TABLE IF NOT EXISTS embeddings (
-        id TEXT PRIMARY KEY,
-        chunk_id TEXT NOT NULL,
-        model TEXT NOT NULL,
-        dimension INTEGER NOT NULL,
-        vector_blob BLOB NOT NULL,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY (chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
-      );
-    `);
-  }
-
-  // Self-heal index_meta shape if an older/corrupt local DB exists.
-  const indexMetaColumnsResult = database.exec("PRAGMA table_info(index_meta);");
-  const indexMetaColumns =
-    indexMetaColumnsResult.length > 0
-      ? new Set(indexMetaColumnsResult[0].values.map((row) => String(row[1])))
-      : new Set<string>();
-  if (!indexMetaColumns.has("key") || !indexMetaColumns.has("value") || !indexMetaColumns.has("updated_at")) {
-    database.run("DROP TABLE IF EXISTS index_meta;");
-    database.run(`
-      CREATE TABLE IF NOT EXISTS index_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-    `);
-  }
+  return ensureEmbeddingIntegritySchema(database);
 }
 
 function normalizeTimestamp(value: unknown, fallback: number): number {
@@ -1643,20 +1598,7 @@ export class LocalDatabase {
       LIMIT ${safeLimit};
     `;
 
-    let result;
-    try {
-      result = this.db.exec(query);
-    } catch (error) {
-      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-      if (!message.includes("datatype mismatch")) {
-        throw error;
-      }
-
-      // Some legacy local DBs can carry incompatible embeddings affinity.
-      // Recreate embeddings table and retry chunk selection once.
-      this.recreateEmbeddingsTable();
-      result = this.db.exec(query);
-    }
+    const result = this.db.exec(query);
 
     if (result.length === 0) {
       return [];
@@ -1699,6 +1641,10 @@ export class LocalDatabase {
     return Number(result[0].values[0][0]);
   }
 
+  getEmbeddingHealth(): EmbeddingHealth {
+    return readEmbeddingHealth(this.db);
+  }
+
   getDominantEmbeddingModel(): string | null {
     const result = this.db.exec(`
       SELECT model, COUNT(*) AS count
@@ -1726,22 +1672,6 @@ export class LocalDatabase {
     this.pendingEmbeddingsStartedAt = 0;
     this.lastEmbeddingCheckpointAt = null;
     await this.persist();
-  }
-
-  private recreateEmbeddingsTable(): void {
-    this.db.run("DROP TABLE IF EXISTS embeddings;");
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS embeddings (
-        id TEXT PRIMARY KEY,
-        chunk_id TEXT NOT NULL,
-        model TEXT NOT NULL,
-        dimension INTEGER NOT NULL,
-        vector_blob BLOB NOT NULL,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY (chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
-      );
-    `);
-    this.db.run("CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id);");
   }
 
   listPendingChunksForEmbedding(args?: { limit?: number; repoIds?: number[] }): ChunkRecord[] {
@@ -1815,26 +1745,6 @@ export class LocalDatabase {
 
   private rebuildChatTablesPreservingData(): void {
     rebuildChatTablesPreservingData(this.db);
-  }
-
-  private getEmbeddingsTableDiagnostic(): string {
-    const tableSqlResult = this.db.exec(
-      `SELECT sql FROM sqlite_master WHERE type='table' AND name='embeddings';`,
-    );
-    const tableSql =
-      tableSqlResult.length > 0 && tableSqlResult[0].values.length > 0
-        ? String(tableSqlResult[0].values[0][0] ?? "")
-        : "";
-
-    const columnsResult = this.db.exec("PRAGMA table_info(embeddings);");
-    const columns =
-      columnsResult.length > 0
-        ? columnsResult[0].values
-            .map((row) => `${String(row[1])}:${String(row[2])}`)
-            .join(",")
-        : "none";
-
-    return `embeddings_table_sql=${tableSql}; embeddings_columns=${columns}`;
   }
 
   private getChatSessionsTableDiagnostic(): string {
@@ -2012,8 +1922,8 @@ export class LocalDatabase {
     const statement = this.db.prepare(`
       INSERT INTO embeddings (id, chunk_id, model, dimension, vector_blob, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        chunk_id = excluded.chunk_id,
+      ON CONFLICT(chunk_id) DO UPDATE SET
+        id = excluded.id,
         model = excluded.model,
         dimension = excluded.dimension,
         vector_blob = excluded.vector_blob,
@@ -2172,12 +2082,16 @@ export class LocalDatabase {
           ? embedding.vectorBlob
           : new Uint8Array(embedding.vectorBlob);
 
-      if (!Number.isFinite(dimension) || dimension <= 0) {
+      if (!Number.isInteger(dimension) || dimension <= 0) {
         throw new Error(`Invalid embedding dimension for chunk ${embedding.chunkId}`);
       }
 
-      if (!Number.isFinite(createdAt) || createdAt <= 0) {
+      if (!Number.isInteger(createdAt) || createdAt <= 0) {
         throw new Error(`Invalid embedding created_at for chunk ${embedding.chunkId}`);
+      }
+
+      if (vectorBlob.byteLength !== dimension * Float32Array.BYTES_PER_ELEMENT) {
+        throw new Error(`Invalid embedding vector length for chunk ${embedding.chunkId}`);
       }
 
       return {
@@ -2192,27 +2106,7 @@ export class LocalDatabase {
       return;
     }
 
-    try {
-      this.runEmbeddingUpsert(normalized);
-    } catch (error) {
-      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-      const shouldHeal = message.includes("datatype mismatch") || message.includes("no such table");
-      if (!shouldHeal) {
-        throw error;
-      }
-
-      // Heal legacy/corrupt local schema and retry once.
-      this.recreateEmbeddingsTable();
-
-      try {
-        this.runEmbeddingUpsert(normalized);
-      } catch (retryError) {
-        const diagnostic = this.getEmbeddingsTableDiagnostic();
-        throw new Error(
-          `${retryError instanceof Error ? retryError.message : String(retryError)} | ${diagnostic}`,
-        );
-      }
-    }
+    this.runEmbeddingUpsert(normalized);
 
     this.vectorIndexCache = null;
     this.vectorIndexCacheCount = -1;
@@ -2244,6 +2138,16 @@ export class LocalDatabase {
       [key, value, updatedAt],
     );
 
+    await this.persist();
+  }
+
+  async clearIndexMetaValue(key: string): Promise<void> {
+    await this.beginMutation();
+    const normalizedKey = String(key ?? "").trim();
+    if (!normalizedKey) {
+      throw new Error("index_meta key is required");
+    }
+    this.db.run("DELETE FROM index_meta WHERE key = ?;", [normalizedKey]);
     await this.persist();
   }
 
@@ -2611,11 +2515,15 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
         let db: Database | null = null;
         try {
           db = new sql.Database(persistedSnapshot.bytes);
-          runSchema(db);
+          const embeddingDimensionBackfilled = runSchema(db);
+          let storageMode = persistedSnapshot.storageMode;
+          if (embeddingDimensionBackfilled) {
+            storageMode = await writePersistedScopeSnapshot(db.export(), scopeKey, storageMode);
+          }
           return new LocalDatabase({
             sql,
             db,
-            storageMode: persistedSnapshot.storageMode,
+            storageMode,
             scopeKey,
             embeddingCheckpointPolicy,
           });

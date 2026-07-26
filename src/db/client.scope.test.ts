@@ -99,9 +99,32 @@ function encodeBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+function decodeBase64(encoded: string): Uint8Array {
+  return Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+}
+
 function createSchemaFailureSnapshot(): Uint8Array {
   const rawDb = new SQL.Database();
   rawDb.run("CREATE VIEW repos AS SELECT 1 AS id;");
+  const bytes = rawDb.export();
+  rawDb.close();
+  return bytes;
+}
+
+function createEmbeddingSchemaFailureSnapshot(): Uint8Array {
+  const rawDb = new SQL.Database();
+  runSchema(rawDb);
+  rawDb.run("DROP TABLE embeddings;");
+  rawDb.run(`
+    CREATE TABLE embeddings (
+      id TEXT PRIMARY KEY,
+      chunk_id TEXT NOT NULL,
+      model TEXT NOT NULL,
+      dimension INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `);
+  rawDb.run("INSERT INTO embeddings VALUES ('keep-id', 'keep-chunk', 'keep-model', 4, 1);");
   const bytes = rawDb.export();
   rawDb.close();
   return bytes;
@@ -123,6 +146,48 @@ function createHealthySnapshot(repoId: number): Uint8Array {
       `checksum-${repoId}`,
     ],
   );
+  const bytes = rawDb.export();
+  rawDb.close();
+  return bytes;
+}
+
+function createPreV014EmbeddingSnapshot(): Uint8Array {
+  const rawDb = new SQL.Database();
+  runSchema(rawDb);
+  rawDb.run(
+    `INSERT INTO repos (id, full_name, name, topics_json, html_url, stars, forks, updated_at, last_synced_at)
+     VALUES (1, 'owner/repo', 'repo', '[]', 'https://github.com/owner/repo', 0, 0, '2026-01-01', 1);`,
+  );
+  rawDb.run(
+    "INSERT INTO chunks (id, repo_id, chunk_id, text, source, created_at) VALUES ('c-1', 1, 'c-1', 'text', 'readme', 1);",
+  );
+  rawDb.run(
+    "INSERT INTO embeddings (id, chunk_id, model, dimension, vector_blob, created_at) VALUES (?, ?, ?, ?, ?, ?);",
+    ["e-1", "c-1", "model-a", 4, new Uint8Array(new Float32Array([1, 2, 3, 4]).buffer), 1],
+  );
+  rawDb.run("INSERT INTO index_meta (key, value, updated_at) VALUES (?, ?, 1);", [
+    "embedding_active_model",
+    "model-a",
+  ]);
+  const bytes = rawDb.export();
+  rawDb.close();
+  return bytes;
+}
+
+function createNoncanonicalIndexMetaSnapshot(): Uint8Array {
+  const rawDb = new SQL.Database(createPreV014EmbeddingSnapshot());
+  rawDb.run("INSERT INTO index_meta (key, value, updated_at) VALUES (?, ?, 1);", [
+    "embedding_active_dimension",
+    "4",
+  ]);
+  rawDb.run("ALTER TABLE index_meta RENAME TO index_meta_canonical;");
+  rawDb.run(
+    "CREATE TABLE index_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);",
+  );
+  rawDb.run(
+    "INSERT INTO index_meta (key, value, updated_at) SELECT key, value, updated_at FROM index_meta_canonical;",
+  );
+  rawDb.run("DROP TABLE index_meta_canonical;");
   const bytes = rawDb.export();
   rawDb.close();
   return bytes;
@@ -398,6 +463,72 @@ describe("database scope naming", () => {
     localStorage.setItem(storageKey, encodeBase64(createHealthySnapshot(91)));
     const recovered = await getLocalDatabase();
     expect(recovered.listRepos().map((repo) => repo.id)).toEqual([91]);
+  });
+
+  it("persists an idempotent dimension backfill when opening a healthy pre-v0.14 index", async () => {
+    const scopeKey = "auth:github:pre-v014-embedding";
+    const storageKey = getScopedDatabaseStorageKey(scopeKey);
+    localStorage.setItem(storageKey, encodeBase64(createPreV014EmbeddingSnapshot()));
+    setLocalDatabaseScope(scopeKey);
+
+    const database = await getLocalDatabase();
+    expect(database.getEmbeddingHealth()).toMatchObject({
+      status: "ready",
+      dimension: 4,
+      expectedDimension: 4,
+      issues: [],
+    });
+
+    const persisted = localStorage.getItem(storageKey);
+    expect(persisted).not.toBeNull();
+    const reopened = new SQL.Database(decodeBase64(persisted!));
+    expect(runSchema(reopened)).toBe(false);
+    expect(
+      reopened.exec("SELECT value FROM index_meta WHERE key = 'embedding_active_dimension';")[0]
+        .values,
+    ).toEqual([["4"]]);
+    reopened.close();
+  });
+
+  it("persists an index-meta-only canonical rebuild exactly once", async () => {
+    const scopeKey = "auth:github:index-meta-rebuild";
+    const storageKey = getScopedDatabaseStorageKey(scopeKey);
+    const original = encodeBase64(createNoncanonicalIndexMetaSnapshot());
+    localStorage.setItem(storageKey, original);
+    setLocalDatabaseScope(scopeKey);
+
+    const database = await getLocalDatabase();
+    expect(database.getEmbeddingHealth()).toMatchObject({
+      status: "ready",
+      expectedDimension: 4,
+      issues: [],
+    });
+
+    const persisted = localStorage.getItem(storageKey);
+    expect(persisted).not.toBeNull();
+    expect(persisted).not.toBe(original);
+    const reopened = new SQL.Database(decodeBase64(persisted!));
+    const indexMetaColumns = reopened.exec("PRAGMA table_info(index_meta);")[0].values;
+    expect(indexMetaColumns.find((row) => row[1] === "updated_at")?.[2]).toBe("INTEGER");
+    expect(runSchema(reopened)).toBe(false);
+    expect(
+      reopened.exec("SELECT value FROM index_meta WHERE key = 'embedding_active_dimension';")[0]
+        .values,
+    ).toEqual([["4"]]);
+    reopened.close();
+  });
+
+  it("preserves exact persisted bytes when an embeddings table cannot be migrated safely", async () => {
+    const scopeKey = "auth:github:embedding-migration-failure-local";
+    const storageKey = getScopedDatabaseStorageKey(scopeKey);
+    const originalEncoded = encodeBase64(createEmbeddingSchemaFailureSnapshot());
+    localStorage.setItem(storageKey, originalEncoded);
+    setLocalDatabaseScope(scopeKey);
+
+    await expect(getLocalDatabase()).rejects.toThrow(
+      "Cannot safely migrate embeddings: missing required columns vector_blob",
+    );
+    expect(localStorage.getItem(storageKey)).toBe(originalEncoded);
   });
 
   it("preserves an OPFS snapshot when schema initialization fails", async () => {
