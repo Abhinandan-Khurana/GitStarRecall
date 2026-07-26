@@ -50,7 +50,7 @@ import {
   toPreviousReadmeStateByRepoId,
 } from "./readmeSyncOutcome";
 import { sortChatMessages } from "../chat/order";
-import { captureLocalError, captureLocalWarn } from "../observability/localLog";
+import { captureLocalError, captureLocalWarn, clearLocalLogs } from "../observability/localLog";
 import { SessionChat } from "../components/SessionChat";
 import { WebLLMDownloadDialog } from "../components/WebLLMDownloadDialog";
 import { SearchBar } from "../components/SearchBar";
@@ -1198,7 +1198,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
       await applyRestore({ restoreResult, source, database });
     } catch (err) {
-      captureLocalError("history_restore_failed", err);
+      captureLocalError(authScopeIdentity, "history_restore_failed", err);
       if (!restoreRequestTrackerRef.current.isCurrent(requestId)) {
         return;
       }
@@ -1224,7 +1224,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setHistoryLastRestoredAt(null);
       setHistoryLoadState("error");
     }
-  }, [activeSessionId, chatScopeKey]);
+  }, [activeSessionId, authScopeIdentity, chatScopeKey]);
 
   useEffect(() => {
     void restoreHistory();
@@ -1542,7 +1542,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setError(null);
       await beginOAuthLogin();
     } catch (err) {
-      captureLocalError("oauth_login_start_failed", err);
+      captureLocalError(authScopeIdentity, "oauth_login_start_failed", err);
       setError(err instanceof Error ? err.message : "Unable to start OAuth");
     }
   };
@@ -1962,7 +1962,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       const database = await getLocalDatabase();
       await syncStarsToLocal(database, "manual");
     } catch (err) {
-      captureLocalError("fetch_stars_failed", err);
+      captureLocalError(authScopeIdentity, "fetch_stars_failed", err);
       setIndexingStatus((previous) =>
         previous
           ? {
@@ -2011,7 +2011,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setStarsSummary("Rebuilding embeddings with current settings…");
       await generateEmbeddings(database);
     } catch (err) {
-      captureLocalError("rebuild_embeddings_failed", err);
+      captureLocalError(authScopeIdentity, "rebuild_embeddings_failed", err);
       setError(err instanceof Error ? err.message : "Failed to rebuild embeddings");
     } finally {
       setIsRebuildingEmbeddings(false);
@@ -2114,6 +2114,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           );
         } catch (ollamaError) {
           captureLocalWarn(
+            authScopeIdentity,
             "ollama_embedding_unavailable",
             ollamaError instanceof Error ? ollamaError.message : String(ollamaError),
           );
@@ -2207,6 +2208,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           queueCursor = foundIndex;
         } else if (foundIndex > 0) {
           captureLocalWarn(
+            authScopeIdentity,
             "embedding_resume_cursor_reset",
             `resetting cursor to pending head because ${foundIndex} pending chunks exist before cursor`,
           );
@@ -2426,6 +2428,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
               vectors = ollamaVectors;
             } catch (ollamaError) {
               captureLocalWarn(
+                authScopeIdentity,
                 "ollama_embedding_batch_failed",
                 ollamaError instanceof Error ? ollamaError.message : String(ollamaError),
               );
@@ -2474,7 +2477,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
               try {
                 vector = await embedder.embed(formatForEmbedding(item.text, activeRetrievalProfile.documentPrefix));
                 vectorModel = embedder.getRuntimeInfo().selectedModel ?? activeEmbeddingModel;
-                captureLocalWarn("embedding_batch_item_recovered", `chunk_id=${item.chunkId}`);
+                captureLocalWarn(authScopeIdentity, "embedding_batch_item_recovered", `chunk_id=${item.chunkId}`);
               } catch (singleErr) {
                 throw new Error(
                   `embedding batch item failed for chunk ${item.chunkId}; single_retry=${
@@ -2605,6 +2608,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setEmbeddingRunMetrics(finalMetrics);
       if (!incrementalMode) {
         captureLocalWarn(
+          authScopeIdentity,
           "embedding_instrumentation_run",
           JSON.stringify({
             backendIdentity: finalMetrics.backendIdentity,
@@ -2632,7 +2636,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         const msg = err instanceof Error ? err.message : String(err);
         if (import.meta.env.DEV) console.error("Embedding generation failed", err);
         else console.error("Embedding generation failed:", msg);
-        captureLocalError("embedding_generation_failed", err);
+        captureLocalError(authScopeIdentity, "embedding_generation_failed", err);
         setError(formatEmbeddingError(err));
       }
     } finally {
@@ -2661,7 +2665,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         setFetchPhase("Ollama unavailable. Restarting embedding generation with browser backend…");
         await generateEmbeddings(database, { forceBrowser: true });
       } catch (restartError) {
-        captureLocalError("ollama_restart_with_browser_failed", restartError);
+        captureLocalError(authScopeIdentity, "ollama_restart_with_browser_failed", restartError);
         setError(formatEmbeddingError(restartError));
       }
     }
@@ -2673,6 +2677,9 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       const database = await getLocalDatabase();
       await database.clearAllData();
       await clearWebLLMRuntimeCaches();
+      if (authScopeIdentity) {
+        clearLocalLogs(authScopeIdentity);
+      }
       setStarsSummary("Local database cleared.");
       setIndexingStatus(null);
       setSessions([]);
@@ -2685,7 +2692,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setDbStorageMode(database.storageMode);
       setError(null);
     } catch (err) {
-      captureLocalError("clear_local_data_failed", err);
+      captureLocalError(authScopeIdentity, "clear_local_data_failed", err);
       setError(err instanceof Error ? err.message : "Failed to clear local database");
     }
   };
@@ -2769,6 +2776,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           setOllamaConnectionMessage(`Search using Ollama model ${activeEmbeddingModel}.`);
         } catch (ollamaError) {
           captureLocalWarn(
+            authScopeIdentity,
             "ollama_query_embedding_failed",
             ollamaError instanceof Error ? ollamaError.message : String(ollamaError),
           );
@@ -2800,7 +2808,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         queryText: trimmedQuery,
         tuning: retrievalTuning,
         onDiagnostics: (payload) => {
-          captureLocalWarn("search_diagnostics", JSON.stringify({
+          captureLocalWarn(authScopeIdentity, "search_diagnostics", JSON.stringify({
             ...payload,
             topScores: payload.denseTopScores.map((score) => Number(score.toFixed(6))),
           }));
@@ -2881,7 +2889,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       const msg = err instanceof Error ? err.message : String(err);
       if (import.meta.env.DEV) console.error("Search failed", err);
       else console.error("Search failed:", msg);
-      captureLocalError("search_failed", err);
+      captureLocalError(authScopeIdentity, "search_failed", err);
       setIndexingStatus((previous) =>
         previous
           ? {
@@ -2960,7 +2968,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setSelectedWebLLMModel: setWebllmSelectedModel,
       setError: setLlmError,
       reportError: (error, failedProviderId) => {
-        captureLocalError("llm_generation_failed", error);
+        captureLocalError(authScopeIdentity, "llm_generation_failed", error);
         const providerKind = getProviderById(failedProviderId).definition.kind;
         setLlmError(formatProviderError(error, providerKind));
       },
@@ -3019,7 +3027,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           `filters={language:${languageFilter},topic:${topicFilter},updatedWithinDays:${updatedWithinDaysFilter}}; ` +
           `pass_counts={language:${debug.languagePassCount},topic:${debug.topicPassCount},recency:${debug.recencyPassCount},invalidUpdatedAt:${debug.invalidUpdatedAtCount}}. ` +
           "Select snippets from the result list or reset filters.";
-      captureLocalError("llm_no_context_available", new Error(debugMessage));
+      captureLocalError(authScopeIdentity, "llm_no_context_available", new Error(debugMessage));
       setLlmError(debugMessage);
       return;
     }
