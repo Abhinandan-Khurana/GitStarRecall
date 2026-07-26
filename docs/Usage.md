@@ -234,13 +234,14 @@ When enabled, advanced controls become available:
 - Numeric tuning fields commit on blur/Enter, so intermediate keystrokes are not clamped while typing.
 
 Warning behavior:
+
 - UI shows a red warning that advanced tuning may improve corpus-specific quality or reduce relevance/speed/efficiency.
 
 Recommended starting points:
 
 - <=30k chunks: `fetchK=120`, `topK=20`, `mmrLambda=0.72`, `maxChunksPerRepo=2`
 - 30k..120k chunks: `fetchK=150`, `topK=20`, `mmrLambda=0.72`, `maxChunksPerRepo=2`
-- >120k chunks: consider Ollama local embedding and increase `fetchK` gradually with latency checks
+- > 120k chunks: consider Ollama local embedding and increase `fetchK` gradually with latency checks
 
 ## 11) Data Storage and Reset
 
@@ -348,11 +349,13 @@ Reset actions in UI:
 ## In Depth Performance Tuning Guide:
 
 If embedding feels slow on your machine, tune these first:
+
 - `VITE_EMBEDDING_POOL_SIZE=1` on memory-constrained systems.
 - `VITE_EMBEDDING_WORKER_BATCH_SIZE=8` (or try `12`/`16`).
 - `VITE_EMBEDDING_BACKEND_PREFERRED=wasm` for backend stability diagnostics.
 
 The app exposes indexing telemetry in UI so you can see:
+
 - backend selection/fallback reason,
 - throughput,
 - checkpoint behavior,
@@ -360,6 +363,7 @@ The app exposes indexing telemetry in UI so you can see:
 - worker pool downshift events.
 
 README batching pipeline controls:
+
 - `VITE_README_BATCH_PIPELINE_V2=1` enables batched README ingestion with adaptive concurrency and incremental chunk writes.
 - `VITE_README_BATCH_SIZE` tunes mini-batch write size (higher improves throughput, lower reduces memory spikes).
 - `VITE_EMBED_TRIGGER_THRESHOLD` and `VITE_EMBED_WINDOW_SIZE` control rolling embedding windows during README ingestion.
@@ -375,7 +379,10 @@ README batching pipeline controls:
 
 ### Ollama Setup
 
-0. Start by exposing ollama to global CORS `export OLLAMA_ORIGINS="*"`
+0. Allow only the app origins you use. For local Vite development, run
+   `export OLLAMA_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"`. For a deployed app,
+   replace those values with its exact HTTPS origin (for example,
+   `export OLLAMA_ORIGINS="https://gitstarrecall.example.com"`).
 1. Then start Ollama locally: `ollama serve`
 2. Pull one recommended embedding model (for example `ollama pull qwen3-embedding:0.6b`; alternatives: `mxbai-embed-large`, `nomic-embed-text`)
 3. In the app, enable `Use Ollama for local embeddings`.
@@ -388,7 +395,7 @@ README batching pipeline controls:
 If connection fails from browser:
 
 - Ensure Ollama is running: `ollama serve`
-- Enable global CORS: `export OLLAMA_ORIGINS="*"`
+- Set `OLLAMA_ORIGINS` to the exact browser origin shown in the address bar; do not use `*`.
 - Restart Ollama, then click `Test connection` again
 
 ### Browser WebLLM Provider (Opt-in, Feature-Flagged)
@@ -428,6 +435,7 @@ If connection fails from browser:
 5. Resume from existing checkpoint instead of clearing local data.
 
 ### Important variables:
+
 - `VITE_GITHUB_CLIENT_ID`
 - `VITE_GITHUB_REDIRECT_URI`
 - `VITE_GITHUB_OAUTH_EXCHANGE_URL`

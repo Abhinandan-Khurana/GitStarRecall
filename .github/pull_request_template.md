@@ -29,6 +29,7 @@
 - [ ] Security or privacy behavior changes and is described below
 - Threat/data-flow notes:
 - Secret, token, log, storage-scope, or dependency impact:
+- [ ] Dependency changes include an explicit `package.json` and `pnpm-lock.yaml` review
 
 ## Performance Impact
 
