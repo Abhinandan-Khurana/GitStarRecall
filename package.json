@@ -3,15 +3,26 @@
   "private": true,
   "version": "0.11.0",
   "type": "module",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": "^22.0.0 || ^24.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:component": "vitest run --environment jsdom .test.tsx",
+    "test:e2e": "playwright test",
     "format": "prettier --write .",
-    "ci": "pnpm lint && pnpm test && pnpm build"
+    "format:check": "node scripts/check-format.mjs",
+    "check:coverage": "node scripts/check-coverage.mjs",
+    "check:bundle": "node scripts/check-bundle-size.mjs",
+    "ci": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test:component && pnpm test:coverage && pnpm check:coverage && pnpm build && pnpm check:bundle && pnpm test:e2e"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
@@ -40,17 +51,24 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
     "@eslint/js": "^9.39.2",
+    "@playwright/test": "^1.54.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@typescript-eslint/eslint-plugin": "^8.21.0",
     "@typescript-eslint/parser": "^8.21.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.16",
     "globals": "^15.14.0",
+    "jsdom": "^26.1.0",
     "postcss": "^8.4.49",
     "prettier": "^3.4.2",
     "tailwindcss": "^3.4.15",
