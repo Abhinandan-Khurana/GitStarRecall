@@ -141,6 +141,23 @@ describe("GitHub OAuth exchange API", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  test("accepts an exact 8 KiB streamed request", async () => {
+    const rawBody = JSON.stringify(validBody());
+    const padding = " ".repeat(8_192 - Buffer.byteLength(rawBody, "utf8"));
+    const exactBoundaryBody = Buffer.from(`${rawBody}${padding}`);
+
+    expect(exactBoundaryBody.byteLength).toBe(8_192);
+
+    const response = await invoke(
+      createRequest({
+        chunks: [exactBoundaryBody.subarray(0, 4_096), exactBoundaryBody.subarray(4_096)],
+      }),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   test("rejects an oversized pre-parsed body", async () => {
     const response = await invoke(createRequest({ body: validBody({ code: "x".repeat(8_192) }) }));
 
@@ -185,6 +202,16 @@ describe("GitHub OAuth exchange API", () => {
 
     expect(response.statusCode).toBe(500);
     expect(response.payload).toEqual({ error: "OAuth exchange is unavailable" });
+  });
+
+  test("returns a bounded unavailable response when the client secret is missing", async () => {
+    vi.stubEnv("GITHUB_OAUTH_CLIENT_SECRET", "");
+
+    const response = await invoke();
+
+    expect(response.statusCode).toBe(500);
+    expect(response.payload).toEqual({ error: "OAuth exchange is unavailable" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   test("aborts the GitHub exchange after ten seconds and returns 504", async () => {

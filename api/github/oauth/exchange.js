@@ -71,10 +71,10 @@ function validateBody(body, expectedClientId, expectedRedirectUri) {
     return false;
   }
 
-  const keys = Object.keys(body).sort();
+  const keys = Object.keys(body);
   if (
     keys.length !== REQUIRED_FIELDS.length ||
-    keys.some((key, index) => key !== REQUIRED_FIELDS[index])
+    !REQUIRED_FIELDS.every((field) => Object.hasOwn(body, field))
   ) {
     return false;
   }
