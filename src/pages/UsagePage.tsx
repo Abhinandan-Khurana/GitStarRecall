@@ -16,7 +16,10 @@ import type {
 import { chunkRepos } from "../chunking/chunker";
 import { Embedder, type EmbeddingBackendPreference } from "../embeddings/Embedder";
 import { EmbeddingWorkerPool } from "../embeddings/WorkerPool";
-import { OllamaEmbeddingClient, type OllamaEmbeddingRuntimeInfo } from "../embeddings/ollamaClient";
+import {
+  OllamaEmbeddingClient,
+  type OllamaEmbeddingRuntimeInfo,
+} from "../embeddings/ollamaClient";
 import { fetchOllamaModelCatalog, type OllamaModelCatalog } from "../ollama/modelCatalog";
 import { float32ToBlob } from "../embeddings/vector";
 import {
@@ -84,7 +87,11 @@ import { WebLLMProviderError } from "../llm/webllm/engine";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 type ContextAvailabilityDebug = {
@@ -215,7 +222,7 @@ function formatOllamaConnectionError(err: unknown): string {
     return [
       "Cannot reach Ollama from the browser.",
       "Ensure Ollama is running (`ollama serve`).",
-      'Enable global CORS (`export OLLAMA_ORIGINS="*"`) and restart Ollama.',
+      "Enable global CORS (`export OLLAMA_ORIGINS=\"*\"`) and restart Ollama.",
       "Then click Test again.",
     ].join(" ");
   }
@@ -311,9 +318,7 @@ function computeContextAvailabilityDebug(
 function safeParseStringArray(raw: string): string[] | null {
   try {
     const parsed = JSON.parse(raw) as string[];
-    return Array.isArray(parsed)
-      ? parsed.filter((value): value is string => typeof value === "string")
-      : null;
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : null;
   } catch {
     return null;
   }
@@ -466,9 +471,7 @@ const DEFAULT_RETRIEVAL_TUNING: RetrievalTuning = {
   lexicalTop5MeanThreshold: 0.18,
 };
 
-function normalizeRetrievalTuning(
-  input: Partial<RetrievalTuning> | null | undefined,
-): RetrievalTuning {
+function normalizeRetrievalTuning(input: Partial<RetrievalTuning> | null | undefined): RetrievalTuning {
   return {
     fetchK:
       Number.isFinite(input?.fetchK) && Number(input?.fetchK) > 0
@@ -478,19 +481,22 @@ function normalizeRetrievalTuning(
       Number.isFinite(input?.topK) && Number(input?.topK) > 0
         ? Math.max(10, Math.min(40, Math.trunc(Number(input?.topK))))
         : DEFAULT_RETRIEVAL_TUNING.topK,
-    mmrLambda: Number.isFinite(input?.mmrLambda)
-      ? Math.max(0.55, Math.min(0.9, Number(input?.mmrLambda)))
-      : DEFAULT_RETRIEVAL_TUNING.mmrLambda,
+    mmrLambda:
+      Number.isFinite(input?.mmrLambda)
+        ? Math.max(0.55, Math.min(0.9, Number(input?.mmrLambda)))
+        : DEFAULT_RETRIEVAL_TUNING.mmrLambda,
     maxChunksPerRepo:
       Number.isFinite(input?.maxChunksPerRepo) && Number(input?.maxChunksPerRepo) > 0
         ? Math.max(1, Math.min(5, Math.trunc(Number(input?.maxChunksPerRepo))))
         : DEFAULT_RETRIEVAL_TUNING.maxChunksPerRepo,
-    lexicalTop1Threshold: Number.isFinite(input?.lexicalTop1Threshold)
-      ? Math.max(0.05, Math.min(0.5, Number(input?.lexicalTop1Threshold)))
-      : DEFAULT_RETRIEVAL_TUNING.lexicalTop1Threshold,
-    lexicalTop5MeanThreshold: Number.isFinite(input?.lexicalTop5MeanThreshold)
-      ? Math.max(0.05, Math.min(0.5, Number(input?.lexicalTop5MeanThreshold)))
-      : DEFAULT_RETRIEVAL_TUNING.lexicalTop5MeanThreshold,
+    lexicalTop1Threshold:
+      Number.isFinite(input?.lexicalTop1Threshold)
+        ? Math.max(0.05, Math.min(0.5, Number(input?.lexicalTop1Threshold)))
+        : DEFAULT_RETRIEVAL_TUNING.lexicalTop1Threshold,
+    lexicalTop5MeanThreshold:
+      Number.isFinite(input?.lexicalTop5MeanThreshold)
+        ? Math.max(0.05, Math.min(0.5, Number(input?.lexicalTop5MeanThreshold)))
+        : DEFAULT_RETRIEVAL_TUNING.lexicalTop5MeanThreshold,
   };
 }
 
@@ -670,16 +676,8 @@ type UsagePageProps = {
 };
 
 export default function UsagePage({ view = "legacy" }: UsagePageProps) {
-  const {
-    accessToken,
-    authScopeIdentity,
-    isAuthenticated,
-    authMethod,
-    loginWithPat,
-    beginOAuthLogin,
-    oauthConfig,
-    logout,
-  } = useAuth();
+  const { accessToken, authScopeIdentity, isAuthenticated, authMethod, loginWithPat, beginOAuthLogin, oauthConfig, logout } =
+    useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [patToken, setPatToken] = useState("");
@@ -701,17 +699,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const [searchProgress, setSearchProgress] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SearchSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [selectedContextChunkIdsBySessionId, setSelectedContextChunkIdsBySessionId] = useState<
-    Record<string, string[]>
-  >({});
-  const [sessionMessagesById, setSessionMessagesById] = useState<
-    Record<string, ChatMessageRecord[]>
-  >({});
+  const [selectedContextChunkIdsBySessionId, setSelectedContextChunkIdsBySessionId] = useState<Record<string, string[]>>({});
+  const [sessionMessagesById, setSessionMessagesById] = useState<Record<string, ChatMessageRecord[]>>({});
   const [historyLoadState, setHistoryLoadState] = useState<HistoryLoadState>("idle");
   const [historyLastRestoredAt, setHistoryLastRestoredAt] = useState<number | null>(null);
-  const [historyDataSource, setHistoryDataSource] = useState<
-    "sqlite" | "indexeddb" | "local-storage" | null
-  >(null);
+  const [historyDataSource, setHistoryDataSource] = useState<"sqlite" | "indexeddb" | "local-storage" | null>(null);
   const [sessionMode, setSessionMode] = useState<"new" | "continue">("new");
   const [languageFilter, setLanguageFilter] = useState("all");
   const [topicFilter, setTopicFilter] = useState("all");
@@ -720,11 +712,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const [providerId, setProviderId] = useState<LLMProviderId>(defaultProviderId);
   const [providerBaseUrl, setProviderBaseUrl] = useState(
     providerDefinitions.find((provider) => provider.id === defaultProviderId)?.defaultBaseUrl ??
-      (defaultProviderId === "openai-compatible" ? "https://api.openai.com" : ""),
+    (defaultProviderId === "openai-compatible" ? "https://api.openai.com" : ""),
   );
   const [providerModel, setProviderModel] = useState(
     providerDefinitions.find((provider) => provider.id === defaultProviderId)?.defaultModel ??
-      (defaultProviderId === "webllm" ? WEBLLM_PRIMARY_MODEL_ID : "gpt-4o-mini"),
+    (defaultProviderId === "webllm" ? WEBLLM_PRIMARY_MODEL_ID : "gpt-4o-mini"),
   );
   const [providerApiKey, setProviderApiKey] = useState("");
   const [ollamaPreferredChatModel, setOllamaPreferredChatModel] = useState("llama3.1:8b");
@@ -734,9 +726,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const [webllmRuntimeState, setWebllmRuntimeState] = useState<
     "idle" | "probing" | "needs-consent" | "downloading" | "ready" | "failed"
   >("idle");
-  const [webllmRecommendation, setWebllmRecommendation] = useState<WebLLMRecommendation | null>(
-    null,
-  );
+  const [webllmRecommendation, setWebllmRecommendation] = useState<WebLLMRecommendation | null>(null);
   const [browserEmbeddingRecommendation, setBrowserEmbeddingRecommendation] =
     useState<BrowserEmbeddingRecommendation | null>(null);
   const [browserEmbeddingModelCandidates, setBrowserEmbeddingModelCandidates] = useState<string[]>(
@@ -755,8 +745,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const [ollamaCatalog, setOllamaCatalog] = useState<OllamaModelCatalog | null>(null);
   const [ollamaCatalogStatus, setOllamaCatalogStatus] = useState<OllamaCatalogStatus>("idle");
   const [ollamaCatalogError, setOllamaCatalogError] = useState<string | null>(null);
-  const [ollamaConnectionStatus, setOllamaConnectionStatus] =
-    useState<OllamaConnectionStatus>("idle");
+  const [ollamaConnectionStatus, setOllamaConnectionStatus] = useState<OllamaConnectionStatus>("idle");
   const [ollamaConnectionMessage, setOllamaConnectionMessage] = useState<string | null>(null);
   const [isSudoUser, setIsSudoUser] = useState(false);
   const [retrievalTuning, setRetrievalTuning] = useState<RetrievalTuning>(DEFAULT_RETRIEVAL_TUNING);
@@ -772,11 +761,8 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const ollamaEmbeddingModelManuallySetRef = useRef(false);
   const ollamaChatModelManuallySetRef = useRef(false);
   const searchEmbedderRef = useRef<Embedder | null>(null);
-  const searchEmbedderModelCandidatesRef = useRef<string[]>(
-    BROWSER_EMBEDDING_MODEL_CANDIDATES_DEFAULT,
-  );
-  const browserEmbeddingRecommendationPromiseRef =
-    useRef<Promise<BrowserEmbeddingRecommendation> | null>(null);
+  const searchEmbedderModelCandidatesRef = useRef<string[]>(BROWSER_EMBEDDING_MODEL_CANDIDATES_DEFAULT);
+  const browserEmbeddingRecommendationPromiseRef = useRef<Promise<BrowserEmbeddingRecommendation> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const restoreRequestTrackerRef = useRef(createRestoreRequestTracker());
   const webllmPreviousRecommendationRef = useRef<WebLLMRecommendation | null>(null);
@@ -802,19 +788,19 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const ollamaProviderDefinition = useMemo<LLMProviderDefinition | null>(() => {
     return providerDefinitions.find((provider) => provider.id === "ollama") ?? null;
   }, []);
-  const ollamaEmbeddingModelOptions = useMemo(
-    () => ollamaCatalog?.embedding ?? [],
-    [ollamaCatalog],
-  );
+  const ollamaEmbeddingModelOptions = useMemo(() => ollamaCatalog?.embedding ?? [], [ollamaCatalog]);
   const customEmbeddingModelWarning = useMemo(
     () => (ollamaModel.trim() ? getCustomModelWarning(ollamaModel) : null),
     [ollamaModel],
   );
   const showAdvancedTuning = isSudoUser;
 
-  const updateRetrievalTuning = useCallback((patch: Partial<RetrievalTuning>) => {
-    setRetrievalTuning((previous) => normalizeRetrievalTuning({ ...previous, ...patch }));
-  }, []);
+  const updateRetrievalTuning = useCallback(
+    (patch: Partial<RetrievalTuning>) => {
+      setRetrievalTuning((previous) => normalizeRetrievalTuning({ ...previous, ...patch }));
+    },
+    [],
+  );
   const ollamaChatModelOptions = useMemo(() => ollamaCatalog?.llm ?? [], [ollamaCatalog]);
   const ollamaChatRecommendedModel = useMemo(() => {
     const providerDefault = ollamaProviderDefinition?.defaultModel ?? "llama3.1:8b";
@@ -824,106 +810,96 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     return ollamaCatalog?.recommendedLlm ?? providerDefault;
   }, [ollamaCatalog, ollamaChatModelOptions, ollamaProviderDefinition]);
 
-  const refreshOllamaCatalog = useCallback(
-    async (baseUrlInput?: string): Promise<OllamaModelCatalog> => {
-      const normalizedBaseUrl = (baseUrlInput ?? ollamaBaseUrl).trim() || getDefaultOllamaBaseUrl();
-      const nextRequestId = ollamaCatalogRequestIdRef.current + 1;
-      ollamaCatalogRequestIdRef.current = nextRequestId;
+  const refreshOllamaCatalog = useCallback(async (baseUrlInput?: string): Promise<OllamaModelCatalog> => {
+    const normalizedBaseUrl = (baseUrlInput ?? ollamaBaseUrl).trim() || getDefaultOllamaBaseUrl();
+    const nextRequestId = ollamaCatalogRequestIdRef.current + 1;
+    ollamaCatalogRequestIdRef.current = nextRequestId;
 
-      setOllamaCatalogStatus("loading");
-      setOllamaCatalogError(null);
-      try {
-        const catalog = await fetchOllamaModelCatalog({
-          baseUrl: normalizedBaseUrl,
-          timeoutMs: getOllamaTimeoutMs(),
-          preferredLlmModel: ollamaProviderDefinition?.defaultModel ?? null,
-        });
-        if (ollamaCatalogRequestIdRef.current === nextRequestId) {
-          setOllamaCatalog(catalog);
-          setOllamaCatalogStatus("ready");
-        }
-        return catalog;
-      } catch (err) {
-        const formatted = formatOllamaConnectionError(err);
-        if (ollamaCatalogRequestIdRef.current === nextRequestId) {
-          setOllamaCatalogStatus("error");
-          setOllamaCatalogError(formatted);
-        }
-        throw new Error(formatted);
+    setOllamaCatalogStatus("loading");
+    setOllamaCatalogError(null);
+    try {
+      const catalog = await fetchOllamaModelCatalog({
+        baseUrl: normalizedBaseUrl,
+        timeoutMs: getOllamaTimeoutMs(),
+        preferredLlmModel: ollamaProviderDefinition?.defaultModel ?? null,
+      });
+      if (ollamaCatalogRequestIdRef.current === nextRequestId) {
+        setOllamaCatalog(catalog);
+        setOllamaCatalogStatus("ready");
       }
-    },
-    [ollamaBaseUrl, ollamaProviderDefinition],
-  );
+      return catalog;
+    } catch (err) {
+      const formatted = formatOllamaConnectionError(err);
+      if (ollamaCatalogRequestIdRef.current === nextRequestId) {
+        setOllamaCatalogStatus("error");
+        setOllamaCatalogError(formatted);
+      }
+      throw new Error(formatted);
+    }
+  }, [ollamaBaseUrl, ollamaProviderDefinition]);
 
   const handleEmbeddingModelChange = useCallback((value: string) => {
     ollamaEmbeddingModelManuallySetRef.current = true;
     setOllamaModel(value);
   }, []);
 
-  const handleProviderModelChange = useCallback(
-    (value: string) => {
-      if (providerId === "ollama") {
-        ollamaChatModelManuallySetRef.current = true;
-        setOllamaPreferredChatModel(value);
-      }
-      setProviderModel(value);
-      if (providerId === "webllm") {
-        setWebllmSelectedModel(resolveHermesModelSelection(value));
-        setWebllmModelManuallySet(true);
-      }
-    },
-    [providerId],
-  );
+  const handleProviderModelChange = useCallback((value: string) => {
+    if (providerId === "ollama") {
+      ollamaChatModelManuallySetRef.current = true;
+      setOllamaPreferredChatModel(value);
+    }
+    setProviderModel(value);
+    if (providerId === "webllm") {
+      setWebllmSelectedModel(resolveHermesModelSelection(value));
+      setWebllmModelManuallySet(true);
+    }
+  }, [providerId]);
 
-  const ensureBrowserEmbeddingRecommendation =
-    useCallback(async (): Promise<BrowserEmbeddingRecommendation> => {
-      if (browserEmbeddingRecommendation) {
-        return browserEmbeddingRecommendation;
-      }
-      if (browserEmbeddingRecommendationPromiseRef.current) {
-        return browserEmbeddingRecommendationPromiseRef.current;
-      }
+  const ensureBrowserEmbeddingRecommendation = useCallback(async (): Promise<BrowserEmbeddingRecommendation> => {
+    if (browserEmbeddingRecommendation) {
+      return browserEmbeddingRecommendation;
+    }
+    if (browserEmbeddingRecommendationPromiseRef.current) {
+      return browserEmbeddingRecommendationPromiseRef.current;
+    }
 
-      const pending = recommendBrowserEmbeddingModel({
-        previousRecommendation: browserEmbeddingRecommendation,
+    const pending = recommendBrowserEmbeddingModel({
+      previousRecommendation: browserEmbeddingRecommendation,
+    })
+      .then((recommendation) => {
+        setBrowserEmbeddingRecommendation(recommendation);
+        setBrowserEmbeddingModelCandidates((previous) =>
+          sameStringArray(previous, recommendation.modelCandidates)
+            ? previous
+            : recommendation.modelCandidates,
+        );
+        return recommendation;
       })
-        .then((recommendation) => {
-          setBrowserEmbeddingRecommendation(recommendation);
-          setBrowserEmbeddingModelCandidates((previous) =>
-            sameStringArray(previous, recommendation.modelCandidates)
-              ? previous
-              : recommendation.modelCandidates,
-          );
-          return recommendation;
-        })
-        .finally(() => {
-          browserEmbeddingRecommendationPromiseRef.current = null;
-        });
-      browserEmbeddingRecommendationPromiseRef.current = pending;
-      return pending;
-    }, [browserEmbeddingRecommendation]);
+      .finally(() => {
+        browserEmbeddingRecommendationPromiseRef.current = null;
+      });
+    browserEmbeddingRecommendationPromiseRef.current = pending;
+    return pending;
+  }, [browserEmbeddingRecommendation]);
 
-  const getSearchEmbedder = useCallback(
-    (modelCandidates?: string[]): Embedder => {
-      const nextCandidates = modelCandidates ?? browserEmbeddingModelCandidates;
-      if (!sameStringArray(searchEmbedderModelCandidatesRef.current, nextCandidates)) {
-        if (searchEmbedderRef.current) {
-          searchEmbedderRef.current.terminate();
-          searchEmbedderRef.current = null;
-        }
-        searchEmbedderModelCandidatesRef.current = [...nextCandidates];
+  const getSearchEmbedder = useCallback((modelCandidates?: string[]): Embedder => {
+    const nextCandidates = modelCandidates ?? browserEmbeddingModelCandidates;
+    if (!sameStringArray(searchEmbedderModelCandidatesRef.current, nextCandidates)) {
+      if (searchEmbedderRef.current) {
+        searchEmbedderRef.current.terminate();
+        searchEmbedderRef.current = null;
       }
+      searchEmbedderModelCandidatesRef.current = [...nextCandidates];
+    }
 
-      if (searchEmbedderRef.current == null) {
-        searchEmbedderRef.current = new Embedder({
-          modelCandidates: nextCandidates,
-        });
-        searchEmbedderModelCandidatesRef.current = [...nextCandidates];
-      }
-      return searchEmbedderRef.current;
-    },
-    [browserEmbeddingModelCandidates],
-  );
+    if (searchEmbedderRef.current == null) {
+      searchEmbedderRef.current = new Embedder({
+        modelCandidates: nextCandidates,
+      });
+      searchEmbedderModelCandidatesRef.current = [...nextCandidates];
+    }
+    return searchEmbedderRef.current;
+  }, [browserEmbeddingModelCandidates]);
 
   const resetSearchEmbedder = useCallback(() => {
     if (searchEmbedderRef.current) {
@@ -991,11 +967,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
   const availableLanguages = useMemo(() => {
     return Array.from(
-      new Set(
-        activeResults
-          .map((result) => result.language)
-          .filter((value): value is string => Boolean(value)),
-      ),
+      new Set(activeResults.map((result) => result.language).filter((value): value is string => Boolean(value))),
     ).sort((a, b) => a.localeCompare(b));
   }, [activeResults]);
 
@@ -1008,9 +980,9 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   }, [sessionMessagesById]);
 
   const availableTopics = useMemo(() => {
-    return Array.from(new Set(activeResults.flatMap((result) => result.topics))).sort((a, b) =>
-      a.localeCompare(b),
-    );
+    return Array.from(
+      new Set(activeResults.flatMap((result) => result.topics)),
+    ).sort((a, b) => a.localeCompare(b));
   }, [activeResults]);
 
   const filteredResults = useMemo(() => {
@@ -1051,58 +1023,43 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     setUpdatedWithinDaysFilter("all");
   }, []);
 
-  const persistSessionContextSelection = useCallback(
-    async (sessionId: string, chunkIds: string[]) => {
-      const database = await getLocalDatabase();
-      await database.upsertIndexMeta({
-        key: `session_context_ids:${sessionId}`,
-        value: JSON.stringify(chunkIds),
-        updatedAt: Date.now(),
-      });
-    },
-    [],
-  );
+  const persistSessionContextSelection = useCallback(async (sessionId: string, chunkIds: string[]) => {
+    const database = await getLocalDatabase();
+    await database.upsertIndexMeta({
+      key: `session_context_ids:${sessionId}`,
+      value: JSON.stringify(chunkIds),
+      updatedAt: Date.now(),
+    });
+  }, []);
 
-  const updateSelectedContextForSession = useCallback(
-    (sessionId: string, nextChunkIds: string[]) => {
-      setSelectedContextChunkIdsBySessionId((previous) => {
-        const current = previous[sessionId] ?? [];
-        if (sameStringArray(current, nextChunkIds)) {
-          return previous;
-        }
-        return {
-          ...previous,
-          [sessionId]: nextChunkIds,
-        };
-      });
-      void persistSessionContextSelection(sessionId, nextChunkIds);
-    },
-    [persistSessionContextSelection],
-  );
+  const updateSelectedContextForSession = useCallback((sessionId: string, nextChunkIds: string[]) => {
+    setSelectedContextChunkIdsBySessionId((previous) => {
+      const current = previous[sessionId] ?? [];
+      if (sameStringArray(current, nextChunkIds)) {
+        return previous;
+      }
+      return {
+        ...previous,
+        [sessionId]: nextChunkIds,
+      };
+    });
+    void persistSessionContextSelection(sessionId, nextChunkIds);
+  }, [persistSessionContextSelection]);
 
-  const toggleContextChunk = useCallback(
-    (chunkId: string) => {
-      if (!activeSessionId) {
-        return;
-      }
-      const selectedIds = new Set(selectedContextChunkIdsBySessionId[activeSessionId] ?? []);
-      if (selectedIds.has(chunkId)) {
-        selectedIds.delete(chunkId);
-      } else {
-        selectedIds.add(chunkId);
-      }
-      updateSelectedContextForSession(
-        activeSessionId,
-        activeResults.map((result) => result.chunkId).filter((id) => selectedIds.has(id)),
-      );
-    },
-    [
-      activeResults,
-      activeSessionId,
-      selectedContextChunkIdsBySessionId,
-      updateSelectedContextForSession,
-    ],
-  );
+  const toggleContextChunk = useCallback((chunkId: string) => {
+    if (!activeSessionId) {
+      return;
+    }
+    const selectedIds = new Set(selectedContextChunkIdsBySessionId[activeSessionId] ?? []);
+    if (selectedIds.has(chunkId)) {
+      selectedIds.delete(chunkId);
+    } else {
+      selectedIds.add(chunkId);
+    }
+    updateSelectedContextForSession(activeSessionId, activeResults
+      .map((result) => result.chunkId)
+      .filter((id) => selectedIds.has(id)));
+  }, [activeResults, activeSessionId, selectedContextChunkIdsBySessionId, updateSelectedContextForSession]);
 
   useEffect(() => {
     const requestedQuery = searchParams.get("query");
@@ -1125,9 +1082,8 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       const stored = database.getIndexMetaValue(`session_context_ids:${activeSessionId}`);
       const parsed = stored ? safeParseStringArray(stored) : null;
       const activeChunkIds = activeResults.map((result) => result.chunkId);
-      const nextSelection = (
-        parsed && parsed.length > 0 ? parsed : activeChunkIds.slice(0, 8)
-      ).filter((chunkId) => activeChunkIds.includes(chunkId));
+      const nextSelection = (parsed && parsed.length > 0 ? parsed : activeChunkIds.slice(0, 8))
+        .filter((chunkId) => activeChunkIds.includes(chunkId));
       setSelectedContextChunkIdsBySessionId((previous) => ({
         ...previous,
         [activeSessionId]: nextSelection,
@@ -1351,8 +1307,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       const savedProviderId =
         !webLLMEnabled && sync.providerId === "webllm" ? "openai-compatible" : sync.providerId;
       const savedProviderDefinition =
-        providerDefinitions.find((provider) => provider.id === savedProviderId) ??
-        providerDefinitions[0];
+        providerDefinitions.find((provider) => provider.id === savedProviderId) ?? providerDefinitions[0];
       setProviderId(savedProviderId);
       setProviderBaseUrl(sync.baseUrl || savedProviderDefinition.defaultBaseUrl);
       setProviderModel(sync.model || savedProviderDefinition.defaultModel);
@@ -1379,8 +1334,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       const savedProviderId =
         !webLLMEnabled && saved.providerId === "webllm" ? "openai-compatible" : saved.providerId;
       const savedProviderDefinition =
-        providerDefinitions.find((provider) => provider.id === savedProviderId) ??
-        providerDefinitions[0];
+        providerDefinitions.find((provider) => provider.id === savedProviderId) ?? providerDefinitions[0];
       setProviderId(savedProviderId);
       setProviderBaseUrl(saved.baseUrl || savedProviderDefinition.defaultBaseUrl);
       setProviderModel(saved.model || savedProviderDefinition.defaultModel);
@@ -1390,9 +1344,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setAllowLocalProvider(saved.allowLocalProvider);
       setWebllmConsent(saved.webllmConsent);
       if (savedProviderDefinition.id === "webllm") {
-        setWebllmSelectedModel(
-          saved.webllmPreferredModel || saved.model || WEBLLM_PRIMARY_MODEL_ID,
-        );
+        setWebllmSelectedModel(saved.webllmPreferredModel || saved.model || WEBLLM_PRIMARY_MODEL_ID);
         setWebllmModelManuallySet(Boolean(saved.webllmPreferredModel));
       } else {
         setWebllmSelectedModel(
@@ -1478,11 +1430,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       }
     }
 
-    if (
-      providerId === "ollama" &&
-      !ollamaChatModelManuallySetRef.current &&
-      ollamaCatalog.llm.length > 0
-    ) {
+    if (providerId === "ollama" && !ollamaChatModelManuallySetRef.current && ollamaCatalog.llm.length > 0) {
       const resolvedChatModel = resolveAutoModel({
         lastUsed: ollamaPreferredChatModel.trim(),
         recommended: ollamaChatRecommendedModel,
@@ -1536,9 +1484,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         setWebllmLastRecommendedModel(recommendation.modelId);
         const allowAutoSelect =
           !webllmModelManuallySet &&
-          (!webllmSelectedModel ||
+          (
+            !webllmSelectedModel ||
             webllmSelectedModel === WEBLLM_PRIMARY_MODEL_ID ||
-            webllmSelectedModel === webllmLastRecommendedModel);
+            webllmSelectedModel === webllmLastRecommendedModel
+          );
         if (allowAutoSelect) {
           setWebllmSelectedModel(recommendation.modelId);
           if (providerId === "webllm") {
@@ -1627,10 +1577,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
   useEffect(() => {
     try {
-      localStorage.setItem(
-        `gitstarrecall.sudo.${embeddingPreferenceScopeKey}`,
-        isSudoUser ? "1" : "0",
-      );
+      localStorage.setItem(`gitstarrecall.sudo.${embeddingPreferenceScopeKey}`, isSudoUser ? "1" : "0");
     } catch {
       // ignore local preference persistence errors
     }
@@ -1666,14 +1613,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
   const handleProviderChange = (nextProviderId: LLMProviderId) => {
     const nextProvider =
-      providerDefinitions.find((provider) => provider.id === nextProviderId) ??
-      providerDefinitions[0];
+      providerDefinitions.find((provider) => provider.id === nextProviderId) ?? providerDefinitions[0];
     setProviderId(nextProviderId);
     setProviderBaseUrl(nextProvider.defaultBaseUrl);
     if (nextProviderId === "webllm") {
-      const nextModel = resolveHermesModelSelection(
-        webllmSelectedModel || nextProvider.defaultModel,
-      );
+      const nextModel = resolveHermesModelSelection(webllmSelectedModel || nextProvider.defaultModel);
       setProviderModel(nextModel);
     } else if (nextProviderId === "ollama") {
       const nextModel = resolveAutoModel({
@@ -1794,15 +1738,15 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         setIndexingStatus((previous) =>
           previous
             ? {
-                ...previous,
-                phase: `Fetching starred repos (page ${progress.fetchedPages})`,
-                primaryStage: "fetch-stars",
-                readmeActive: false,
-                chunkingActive: false,
-                embeddingActive: false,
-                embeddingWindowed: false,
-                repoTotal: progress.totalReposSoFar,
-              }
+              ...previous,
+              phase: `Fetching starred repos (page ${progress.fetchedPages})`,
+              primaryStage: "fetch-stars",
+              readmeActive: false,
+              chunkingActive: false,
+              embeddingActive: false,
+              embeddingWindowed: false,
+              repoTotal: progress.totalReposSoFar,
+            }
             : previous,
         );
       },
@@ -1815,15 +1759,15 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     setIndexingStatus((previous) =>
       previous
         ? {
-            ...previous,
-            phase: "Diffing repos with checksum state",
-            primaryStage: "diff",
-            readmeActive: false,
-            chunkingActive: false,
-            embeddingActive: false,
-            embeddingWindowed: false,
-            repoTotal: starResult.repos.length,
-          }
+          ...previous,
+          phase: "Diffing repos with checksum state",
+          primaryStage: "diff",
+          readmeActive: false,
+          chunkingActive: false,
+          embeddingActive: false,
+          embeddingWindowed: false,
+          repoTotal: starResult.repos.length,
+        }
         : previous,
     );
 
@@ -1862,20 +1806,20 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     setIndexingStatus((previous) =>
       previous
         ? {
-            ...previous,
-            phase: getReadmePhaseLabel(isInitialSync, candidates.length),
-            primaryStage: "readmes",
-            readmeActive: true,
-            chunkingActive: false,
-            embeddingActive: false,
-            embeddingWindowed: false,
-            readmesTarget: candidates.length,
-            readmesCompleted: 0,
-            chunkingTarget: candidates.length,
-            chunkingCompleted: 0,
-            readmesMissing: 0,
-            readmesFailed: 0,
-          }
+          ...previous,
+          phase: getReadmePhaseLabel(isInitialSync, candidates.length),
+          primaryStage: "readmes",
+          readmeActive: true,
+          chunkingActive: false,
+          embeddingActive: false,
+          embeddingWindowed: false,
+          readmesTarget: candidates.length,
+          readmesCompleted: 0,
+          chunkingTarget: candidates.length,
+          chunkingCompleted: 0,
+          readmesMissing: 0,
+          readmesFailed: 0,
+        }
         : previous,
     );
 
@@ -2022,12 +1966,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
             await processReadmeBatch(records, progress.completed);
             lastReadmeStats = stats;
             setFetchPhase(
-              getReadmeProgressLabel(
-                isInitialSync,
-                progress.completed,
-                progress.total,
-                stats.p95LatencyMs,
-              ),
+              getReadmeProgressLabel(isInitialSync, progress.completed, progress.total, stats.p95LatencyMs),
             );
           }
         : undefined,
@@ -2080,44 +2019,41 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     const localRepoCount = database.getRepoCount();
     const localChunkCount = database.getChunkCount();
     const localEmbeddingCount = database.getEmbeddingCount();
-    const readmeCount =
-      readmeResult.records.length - readmeResult.missingCount - readmeResult.failedCount;
+    const readmeCount = readmeResult.records.length - readmeResult.missingCount - readmeResult.failedCount;
     const hasPendingEmbeddingChunks = database.getPendingEmbeddingChunkCount() > 0;
     setIndexingStatus((previous) =>
       previous
         ? {
-            ...previous,
-            phase: hasPendingEmbeddingChunks
-              ? "Preparing embeddings for unindexed chunks"
-              : "Sync complete",
-            primaryStage: hasPendingEmbeddingChunks ? "embedding-init" : "complete",
-            readmeActive: false,
-            chunkingActive: false,
-            embeddingActive: hasPendingEmbeddingChunks,
-            embeddingWindowed: false,
-            repoTotal: starResult.repos.length,
-            readmesTarget: candidates.length,
-            readmesCompleted: candidates.length,
-            chunkingTarget: candidates.length,
-            chunkingCompleted: candidates.length,
-            readmesMissing: readmeResult.missingCount,
-            readmesFailed: readmeResult.failedCount,
-            chunkTotal: localChunkCount,
-            embeddingsCreated: hasPendingEmbeddingChunks ? 0 : localEmbeddingCount,
-            embeddingTarget: 0,
-            elapsedSeconds: hasPendingEmbeddingChunks
-              ? undefined
-              : Math.max(1, Math.round((Date.now() - previous.startedAt) / 1000)),
-          }
+          ...previous,
+          phase: hasPendingEmbeddingChunks ? "Preparing embeddings for unindexed chunks" : "Sync complete",
+          primaryStage: hasPendingEmbeddingChunks ? "embedding-init" : "complete",
+          readmeActive: false,
+          chunkingActive: false,
+          embeddingActive: hasPendingEmbeddingChunks,
+          embeddingWindowed: false,
+          repoTotal: starResult.repos.length,
+          readmesTarget: candidates.length,
+          readmesCompleted: candidates.length,
+          chunkingTarget: candidates.length,
+          chunkingCompleted: candidates.length,
+          readmesMissing: readmeResult.missingCount,
+          readmesFailed: readmeResult.failedCount,
+          chunkTotal: localChunkCount,
+          embeddingsCreated: hasPendingEmbeddingChunks ? 0 : localEmbeddingCount,
+          embeddingTarget: 0,
+          elapsedSeconds: hasPendingEmbeddingChunks
+            ? undefined
+            : Math.max(1, Math.round((Date.now() - previous.startedAt) / 1000)),
+        }
         : previous,
     );
 
     setStarsSummary(
       `Sync complete: ${starResult.repos.length} stars scanned (${starResult.fetchedPages} pages), ` +
-        `${readmeResult.records.filter((record) => !record.notModified).length} changed/new, ${syncPlan.removedRepoIds.length} removed. ` +
-        `READMEs fetched: ${readmeCount}, missing: ${readmeResult.missingCount}, failed: ${readmeResult.failedCount}. ` +
-        `Local DB: ${localRepoCount} repos, ${localChunkCount} chunks, ${localEmbeddingCount} embeddings. ` +
-        `Pipeline: ${usePipelineV2 ? "batch-v2" : "legacy"} · README p95 ${Math.round(lastReadmeStats.p95LatencyMs)}ms.`,
+      `${readmeResult.records.filter((record) => !record.notModified).length} changed/new, ${syncPlan.removedRepoIds.length} removed. ` +
+      `READMEs fetched: ${readmeCount}, missing: ${readmeResult.missingCount}, failed: ${readmeResult.failedCount}. ` +
+      `Local DB: ${localRepoCount} repos, ${localChunkCount} chunks, ${localEmbeddingCount} embeddings. ` +
+      `Pipeline: ${usePipelineV2 ? "batch-v2" : "legacy"} · README p95 ${Math.round(lastReadmeStats.p95LatencyMs)}ms.`,
     );
 
     if (hasPendingEmbeddingChunks) {
@@ -2141,14 +2077,14 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setIndexingStatus((previous) =>
         previous
           ? {
-              ...previous,
-              phase: `Failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-              primaryStage: "failed",
-              readmeActive: false,
-              chunkingActive: false,
-              embeddingActive: false,
-              embeddingWindowed: false,
-            }
+            ...previous,
+            phase: `Failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+            primaryStage: "failed",
+            readmeActive: false,
+            chunkingActive: false,
+            embeddingActive: false,
+            embeddingWindowed: false,
+          }
           : previous,
       );
       setError(err instanceof Error ? err.message : "Failed to fetch starred repos");
@@ -2196,12 +2132,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
   const generateEmbeddings = async (
     database: Awaited<ReturnType<typeof getLocalDatabase>>,
-    options?: {
-      forceBrowser?: boolean;
-      maxChunks?: number;
-      repoIds?: number[];
-      incremental?: boolean;
-    },
+    options?: { forceBrowser?: boolean; maxChunks?: number; repoIds?: number[]; incremental?: boolean },
   ) => {
     let embedder: Embedder | null = null;
     let embeddingPool: EmbeddingWorkerPool | null = null;
@@ -2379,9 +2310,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           updatedAt: Date.now(),
         });
       }
-      const cursorChunkId = incrementalMode
-        ? null
-        : database.getIndexMetaValue("embedding_job_cursor");
+      const cursorChunkId = incrementalMode ? null : database.getIndexMetaValue("embedding_job_cursor");
       let queueCursor = 0;
       if (cursorChunkId) {
         const foundIndex = pendingChunks.findIndex((chunk) => chunk.id === cursorChunkId);
@@ -2431,25 +2360,25 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       }
       if (!incrementalMode) {
         setEmbeddingRunMetrics({
-          backendIdentity: formatEmbeddingBackendIdentity(backendIdentity),
-          configuredPoolSize: initialPoolStatus.configuredPoolSize,
-          activePoolSize: initialPoolStatus.activePoolSize,
-          poolDownshifted: initialPoolStatus.downshifted,
-          poolDownshiftReason: initialPoolStatus.downshiftReason,
-          batchCount: 0,
-          embeddingsProcessed: 0,
-          embeddingsPerSecond: 0,
-          avgBatchEmbedLatencyMs: 0,
-          lastBatchEmbedLatencyMs: 0,
-          avgDbCheckpointMs: 0,
-          lastDbCheckpointMs: 0,
-          checkpointEveryEmbeddings: initialCheckpointStatus.everyEmbeddings,
-          checkpointEveryMs: initialCheckpointStatus.everyMs,
-          pendingEmbeddingsSinceCheckpoint: initialCheckpointStatus.pendingEmbeddings,
-          lastCheckpointAt: initialCheckpointStatus.lastCheckpointAt,
-          queueDepth: peakQueueDepth,
-          peakQueueDepth,
-          updatedAt: Date.now(),
+        backendIdentity: formatEmbeddingBackendIdentity(backendIdentity),
+        configuredPoolSize: initialPoolStatus.configuredPoolSize,
+        activePoolSize: initialPoolStatus.activePoolSize,
+        poolDownshifted: initialPoolStatus.downshifted,
+        poolDownshiftReason: initialPoolStatus.downshiftReason,
+        batchCount: 0,
+        embeddingsProcessed: 0,
+        embeddingsPerSecond: 0,
+        avgBatchEmbedLatencyMs: 0,
+        lastBatchEmbedLatencyMs: 0,
+        avgDbCheckpointMs: 0,
+        lastDbCheckpointMs: 0,
+        checkpointEveryEmbeddings: initialCheckpointStatus.everyEmbeddings,
+        checkpointEveryMs: initialCheckpointStatus.everyMs,
+        pendingEmbeddingsSinceCheckpoint: initialCheckpointStatus.pendingEmbeddings,
+        lastCheckpointAt: initialCheckpointStatus.lastCheckpointAt,
+        queueDepth: peakQueueDepth,
+        peakQueueDepth,
+        updatedAt: Date.now(),
         });
       }
 
@@ -2483,7 +2412,9 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         const queueDepth = Math.max(pendingEmbeddingCount, 0);
         const checkpointStatus = database.getEmbeddingCheckpointStatus();
         const poolStatus = activeEmbeddingPool.getStatus();
-        const totalPendingEmbeddingCount = incrementalMode ? queueDepth : remaining;
+        const totalPendingEmbeddingCount = incrementalMode
+          ? queueDepth
+          : remaining;
         const displayEmbeddingTarget = incrementalMode
           ? processedCount + totalPendingEmbeddingCount
           : embeddingTarget;
@@ -2571,8 +2502,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
         const batchEmbedStart = performance.now();
         const uncachedItems: Array<{ chunkId: string; text: string }> = [];
-        const browserRuntimeModel =
-          activeEmbeddingPool.getStatus().selectedModel ?? activeEmbeddingModel;
+        const browserRuntimeModel = activeEmbeddingPool.getStatus().selectedModel ?? activeEmbeddingModel;
         const batchModel = ollamaClient ? resolvedOllamaModel : browserRuntimeModel;
 
         for (const chunk of chunks) {
@@ -2649,13 +2579,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
             const item = uncachedItems[i];
             let vector = vectors[i];
             let vectorModel = usedBrowserBatch
-              ? (activeEmbeddingPool.getStatus().selectedModel ?? activeEmbeddingModel)
+              ? activeEmbeddingPool.getStatus().selectedModel ?? activeEmbeddingModel
               : resolvedOllamaModel;
             if (!vector) {
               try {
-                vector = await embedder.embed(
-                  formatForEmbedding(item.text, activeRetrievalProfile.documentPrefix),
-                );
+                vector = await embedder.embed(formatForEmbedding(item.text, activeRetrievalProfile.documentPrefix));
                 vectorModel = embedder.getRuntimeInfo().selectedModel ?? activeEmbeddingModel;
                 captureLocalWarn("embedding_batch_item_recovered", `chunk_id=${item.chunkId}`);
               } catch (singleErr) {
@@ -2983,25 +2911,21 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         queryText: trimmedQuery,
         tuning: retrievalTuning,
         onDiagnostics: (payload) => {
-          captureLocalWarn(
-            "search_diagnostics",
-            JSON.stringify({
-              ...payload,
-              topScores: payload.denseTopScores.map((score) => Number(score.toFixed(6))),
-            }),
-          );
+          captureLocalWarn("search_diagnostics", JSON.stringify({
+            ...payload,
+            topScores: payload.denseTopScores.map((score) => Number(score.toFixed(6))),
+          }));
         },
       });
       const now = Date.now();
 
       const preferredSession =
         options?.preferredSessionId != null
-          ? (sessions.find((session) => session.id === options.preferredSessionId) ?? null)
+          ? sessions.find((session) => session.id === options.preferredSessionId) ?? null
           : null;
-      const continuingSession =
-        preferredSession ??
+      const continuingSession = preferredSession ??
         (sessionMode === "continue" && activeSessionId
-          ? (sessions.find((session) => session.id === activeSessionId) ?? null)
+          ? sessions.find((session) => session.id === activeSessionId) ?? null
           : null);
 
       let targetSessionId = continuingSession?.id ?? null;
@@ -3072,14 +2996,14 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setIndexingStatus((previous) =>
         previous
           ? {
-              ...previous,
-              phase: `Failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-              primaryStage: "failed",
-              readmeActive: false,
-              chunkingActive: false,
-              embeddingActive: false,
-              embeddingWindowed: false,
-            }
+            ...previous,
+            phase: `Failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+            primaryStage: "failed",
+            readmeActive: false,
+            chunkingActive: false,
+            embeddingActive: false,
+            embeddingWindowed: false,
+          }
           : previous,
       );
       setError(err instanceof Error ? "Search failed: " + err.message : "Search failed");
@@ -3121,71 +3045,65 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     });
   };
 
-  const canReachLocalProvider = useCallback(
-    async (provider: "ollama" | "lmstudio"): Promise<boolean> => {
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 2000);
-      try {
-        const url =
-          provider === "ollama"
-            ? `${(ollamaBaseUrl.trim() || "http://localhost:11434").replace(/\/+$/, "")}/api/tags`
-            : `${(
-                providerDefinitions.find((item) => item.id === "lmstudio")?.defaultBaseUrl ||
-                "http://localhost:1234"
-              ).replace(/\/+$/, "")}/v1/models`;
-        const response = await fetch(url, { method: "GET", signal: controller.signal });
-        return response.ok;
-      } catch {
-        return false;
-      } finally {
-        window.clearTimeout(timeout);
-      }
-    },
-    [ollamaBaseUrl],
-  );
+  const canReachLocalProvider = useCallback(async (provider: "ollama" | "lmstudio"): Promise<boolean> => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 2000);
+    try {
+      const url =
+        provider === "ollama"
+          ? `${(ollamaBaseUrl.trim() || "http://localhost:11434").replace(/\/+$/, "")}/api/tags`
+          : `${(
+              providerDefinitions.find((item) => item.id === "lmstudio")?.defaultBaseUrl ||
+              "http://localhost:1234"
+            ).replace(/\/+$/, "")}/v1/models`;
+      const response = await fetch(url, { method: "GET", signal: controller.signal });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }, [ollamaBaseUrl]);
 
-  const runProviderStream = useCallback(
-    async (args: {
-      provider: LLMProviderId;
-      model: string;
-      promptText: string;
-      snippets: string[];
-      controller: AbortController;
-      onToken: (token: string) => void;
-      allowModelDownload: boolean;
-    }): Promise<void> => {
-      const provider = getProviderById(args.provider);
-      const lmStudioDefaultBase =
-        providerDefinitions.find((item) => item.id === "lmstudio")?.defaultBaseUrl ||
-        "http://localhost:1234";
-      const providerBase =
-        args.provider === "ollama"
-          ? ollamaBaseUrl.trim() || "http://localhost:11434"
-          : args.provider === "lmstudio"
-            ? lmStudioDefaultBase
-            : providerBaseUrl.trim();
-      await provider.stream(
-        {
-          baseUrl: providerBase,
-          model: args.model,
-          apiKey: providerApiKey.trim(),
-          allowModelDownload: args.allowModelDownload,
+  const runProviderStream = useCallback(async (args: {
+    provider: LLMProviderId;
+    model: string;
+    promptText: string;
+    snippets: string[];
+    controller: AbortController;
+    onToken: (token: string) => void;
+    allowModelDownload: boolean;
+  }): Promise<void> => {
+    const provider = getProviderById(args.provider);
+    const lmStudioDefaultBase =
+      providerDefinitions.find((item) => item.id === "lmstudio")?.defaultBaseUrl ||
+      "http://localhost:1234";
+    const providerBase =
+      args.provider === "ollama"
+        ? (ollamaBaseUrl.trim() || "http://localhost:11434")
+        : args.provider === "lmstudio"
+          ? lmStudioDefaultBase
+          : providerBaseUrl.trim();
+    await provider.stream(
+      {
+        baseUrl: providerBase,
+        model: args.model,
+        apiKey: providerApiKey.trim(),
+        allowModelDownload: args.allowModelDownload,
+      },
+      {
+        prompt: args.promptText,
+        contextSnippets: args.snippets,
+        signal: args.controller.signal,
+        onToken: args.onToken,
+        onInitProgress: (progress, text) => {
+          setWebllmDownloadProgress(progress);
+          setWebllmProgressText(text);
+          setWebllmRuntimeState("downloading");
         },
-        {
-          prompt: args.promptText,
-          contextSnippets: args.snippets,
-          signal: args.controller.signal,
-          onToken: args.onToken,
-          onInitProgress: (progress, text) => {
-            setWebllmDownloadProgress(progress);
-            setWebllmProgressText(text);
-            setWebllmRuntimeState("downloading");
-          },
-        },
-      );
-    },
-    [ollamaBaseUrl, providerApiKey, providerBaseUrl],
-  );
+      },
+    );
+  }, [ollamaBaseUrl, providerApiKey, providerBaseUrl]);
 
   const handleGenerateAnswer = async () => {
     if (!activeSession) {
@@ -3239,13 +3157,13 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       const debugMessage =
         debug.totalResults === 0
           ? `No context available. Active session has 0 retrieved results. session_id=${activeSession.id}. ` +
-            "Run Search first to populate context."
+          "Run Search first to populate context."
           : "No context selected for chat. " +
-            `session_id=${activeSession.id}; total_results=${debug.totalResults}; ` +
-            `filtered_results=${debug.filteredResults}; ` +
-            `filters={language:${languageFilter},topic:${topicFilter},updatedWithinDays:${updatedWithinDaysFilter}}; ` +
-            `pass_counts={language:${debug.languagePassCount},topic:${debug.topicPassCount},recency:${debug.recencyPassCount},invalidUpdatedAt:${debug.invalidUpdatedAtCount}}. ` +
-            "Select snippets from the result list or reset filters.";
+          `session_id=${activeSession.id}; total_results=${debug.totalResults}; ` +
+          `filtered_results=${debug.filteredResults}; ` +
+          `filters={language:${languageFilter},topic:${topicFilter},updatedWithinDays:${updatedWithinDaysFilter}}; ` +
+          `pass_counts={language:${debug.languagePassCount},topic:${debug.topicPassCount},recency:${debug.recencyPassCount},invalidUpdatedAt:${debug.invalidUpdatedAtCount}}. ` +
+          "Select snippets from the result list or reset filters.";
       captureLocalError("llm_no_context_available", new Error(debugMessage));
       setLlmError(debugMessage);
       return;
@@ -3285,9 +3203,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         setLlmAnswer((previous) => previous + token);
       };
 
-      const activeModel = resolveHermesModelSelection(
-        providerModel.trim() || WEBLLM_PRIMARY_MODEL_ID,
-      );
+      const activeModel = resolveHermesModelSelection(providerModel.trim() || WEBLLM_PRIMARY_MODEL_ID);
       let effectiveProviderId = providerId;
       let effectiveModel = activeModel;
 
@@ -3338,8 +3254,8 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
           if (streamedAnswer.trim().length === 0) {
             const fallbackProviderId = resolveProviderFallback({
-              canUseOllama: allowLocalProvider && (await canReachLocalProvider("ollama")),
-              canUseLmStudio: allowLocalProvider && (await canReachLocalProvider("lmstudio")),
+              canUseOllama: allowLocalProvider && await canReachLocalProvider("ollama"),
+              canUseLmStudio: allowLocalProvider && await canReachLocalProvider("lmstudio"),
               canUseOpenAICompatible: allowRemoteProvider && providerApiKey.trim().length > 0,
             });
             if (fallbackProviderId == null) {
@@ -3353,9 +3269,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
             setProviderId(fallbackProviderId);
             setProviderModel(fallbackModel);
             setProviderBaseUrl(fallbackDefinition?.defaultBaseUrl ?? providerBaseUrl);
-            setLlmError(
-              `WebLLM failed, switched to ${fallbackDefinition?.label ?? fallbackProviderId}.`,
-            );
+            setLlmError(`WebLLM failed, switched to ${fallbackDefinition?.label ?? fallbackProviderId}.`);
 
             await runProviderStream({
               provider: fallbackProviderId,
@@ -3466,8 +3380,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       {dbStorageMode === "memory" && (
         <Alert variant="destructive" className="animate-fade-in">
           <AlertDescription>
-            Local persistence quota was exceeded. Running in memory-only mode for this tab; data may
-            be lost on refresh.
+            Local persistence quota was exceeded. Running in memory-only mode for this tab; data may be lost on refresh.
           </AlertDescription>
         </Alert>
       )}
@@ -3479,18 +3392,12 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
               <CardHeader className="border-b border-border/60 pb-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="font-display text-xl font-semibold text-foreground">
-                      Build your local workspace
-                    </p>
+                    <p className="font-display text-xl font-semibold text-foreground">Build your local workspace</p>
                     <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-                      Import your stars, fetch README content, and generate embeddings so Recall can
-                      work against a local index.
+                      Import your stars, fetch README content, and generate embeddings so Recall can work against a local index.
                     </p>
                   </div>
-                  <Badge
-                    variant={workspaceReady ? "secondary" : "outline"}
-                    className="rounded-md px-3 py-1"
-                  >
+                  <Badge variant={workspaceReady ? "secondary" : "outline"} className="rounded-md px-3 py-1">
                     {workspaceReady ? "Ready" : indexingStatus ? indexingStatus.phase : "Setup"}
                   </Badge>
                 </div>
@@ -3498,28 +3405,16 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
               <CardContent className="space-y-5 pt-5">
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-md border border-border/60 bg-background/70 p-4">
-                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                      Connected
-                    </p>
-                    <p className="mt-2 text-lg font-semibold text-foreground">
-                      {authMethod === "oauth" ? "GitHub OAuth" : "Personal token"}
-                    </p>
+                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Connected</p>
+                    <p className="mt-2 text-lg font-semibold text-foreground">{authMethod === "oauth" ? "GitHub OAuth" : "Personal token"}</p>
                   </div>
                   <div className="rounded-md border border-border/60 bg-background/70 p-4">
-                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                      Indexed repos
-                    </p>
-                    <p className="mt-2 text-lg font-semibold text-foreground">
-                      {repoInventoryCount}
-                    </p>
+                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Indexed repos</p>
+                    <p className="mt-2 text-lg font-semibold text-foreground">{repoInventoryCount}</p>
                   </div>
                   <div className="rounded-md border border-border/60 bg-background/70 p-4">
-                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                      Embeddings
-                    </p>
-                    <p className="mt-2 text-lg font-semibold text-foreground">
-                      {storedEmbeddingCount}
-                    </p>
+                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Embeddings</p>
+                    <p className="mt-2 text-lg font-semibold text-foreground">{storedEmbeddingCount}</p>
                   </div>
                 </div>
 
@@ -3528,22 +3423,14 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                   <ol className="mt-3 space-y-3 text-sm text-muted-foreground">
                     <li className="rounded-md border border-border/50 bg-background/70 px-3 py-3">
                       <span className="font-medium text-foreground">1. Import stars</span>
-                      <span className="mt-1 block">
-                        Pull your starred repos into the local database.
-                      </span>
+                      <span className="mt-1 block">Pull your starred repos into the local database.</span>
                       <span className="mt-2 block text-xs">
-                        {repoInventoryCount > 0
-                          ? "Complete"
-                          : fetchingStars
-                            ? "In progress"
-                            : "Pending"}
+                        {repoInventoryCount > 0 ? "Complete" : fetchingStars ? "In progress" : "Pending"}
                       </span>
                     </li>
                     <li className="rounded-md border border-border/50 bg-background/70 px-3 py-3">
                       <span className="font-medium text-foreground">2. Fetch READMEs</span>
-                      <span className="mt-1 block">
-                        Download repo documentation for search context.
-                      </span>
+                      <span className="mt-1 block">Download repo documentation for search context.</span>
                       <span className="mt-2 block text-xs">
                         {indexingStatus?.readmesCompleted && indexingStatus.readmesCompleted > 0
                           ? `${indexingStatus.readmesCompleted} fetched`
@@ -3554,9 +3441,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                     </li>
                     <li className="rounded-md border border-border/50 bg-background/70 px-3 py-3">
                       <span className="font-medium text-foreground">3. Generate embeddings</span>
-                      <span className="mt-1 block">
-                        Build the semantic index used by Recall and chat context.
-                      </span>
+                      <span className="mt-1 block">Build the semantic index used by Recall and chat context.</span>
                       <span className="mt-2 block text-xs">
                         {storedEmbeddingCount > 0
                           ? `${storedEmbeddingCount} embeddings ready`
@@ -3582,16 +3467,8 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                 />
 
                 <div className="flex flex-wrap gap-3">
-                  <Button
-                    onClick={() => void handleFetchStars()}
-                    disabled={fetchingStars || isRebuildingEmbeddings}
-                    className="rounded-md"
-                  >
-                    {fetchingStars
-                      ? "Syncing..."
-                      : workspaceReady
-                        ? "Run sync again"
-                        : "Start sync"}
+                  <Button onClick={() => void handleFetchStars()} disabled={fetchingStars || isRebuildingEmbeddings} className="rounded-md">
+                    {fetchingStars ? "Syncing..." : workspaceReady ? "Run sync again" : "Start sync"}
                   </Button>
                   <Button
                     variant="outline"
@@ -3616,29 +3493,18 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
             <div className="space-y-4">
               <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
                 <CardHeader className="border-b border-border/60 pb-4">
-                  <p className="font-display text-lg font-semibold text-foreground">
-                    Local-first by default
-                  </p>
+                  <p className="font-display text-lg font-semibold text-foreground">Local-first by default</p>
                 </CardHeader>
                 <CardContent className="space-y-3 pt-5 text-sm text-muted-foreground">
-                  <p>
-                    Your stars, README content, sessions, and embeddings stay in the browser-local
-                    database unless you explicitly use a remote provider.
-                  </p>
-                  <p>
-                    Use the recommended local path first. You can customize the embedding runtime
-                    later without blocking the first run.
-                  </p>
+                  <p>Your stars, README content, sessions, and embeddings stay in the browser-local database unless you explicitly use a remote provider.</p>
+                  <p>Use the recommended local path first. You can customize the embedding runtime later without blocking the first run.</p>
                 </CardContent>
               </Card>
 
               <Collapsible>
                 <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
                   <CollapsibleTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      className="w-full justify-between rounded-none px-6 py-4 text-left font-medium"
-                    >
+                    <Button variant="ghost" className="w-full justify-between rounded-none px-6 py-4 text-left font-medium">
                       <span>Customize indexing</span>
                       <span className="text-xs text-muted-foreground">Advanced</span>
                     </Button>
@@ -3675,9 +3541,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
             <div className="space-y-4">
               <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
                 <CardHeader className="border-b border-border/60 pb-4">
-                  <p className="font-display text-lg font-semibold text-foreground">
-                    Sync and indexing
-                  </p>
+                  <p className="font-display text-lg font-semibold text-foreground">Sync and indexing</p>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-5">
                   <SyncStatusBar
@@ -3693,11 +3557,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                     onRetryHistory={() => void restoreHistory()}
                   />
                   <div className="flex flex-wrap gap-3">
-                    <Button
-                      onClick={() => void handleFetchStars()}
-                      disabled={fetchingStars}
-                      className="rounded-md"
-                    >
+                    <Button onClick={() => void handleFetchStars()} disabled={fetchingStars} className="rounded-md">
                       {fetchingStars ? "Syncing..." : "Run sync now"}
                     </Button>
                     <Button
@@ -3714,9 +3574,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
               <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
                 <CardHeader className="border-b border-border/60 pb-4">
-                  <p className="font-display text-lg font-semibold text-foreground">
-                    Embedding engine
-                  </p>
+                  <p className="font-display text-lg font-semibold text-foreground">Embedding engine</p>
                 </CardHeader>
                 <CardContent className="pt-5">
                   <OllamaConfigPanel
@@ -3743,9 +3601,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
               <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
                 <CardHeader className="border-b border-border/60 pb-4">
-                  <p className="font-display text-lg font-semibold text-foreground">
-                    Developer and retrieval
-                  </p>
+                  <p className="font-display text-lg font-semibold text-foreground">Developer and retrieval</p>
                 </CardHeader>
                 <CardContent className="pt-5">
                   <DeveloperModePanel
@@ -3766,16 +3622,13 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
             <div className="space-y-4">
               <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
                 <CardHeader className="border-b border-border/60 pb-4">
-                  <p className="font-display text-lg font-semibold text-foreground">
-                    Chat provider defaults
-                  </p>
+                  <p className="font-display text-lg font-semibold text-foreground">Chat provider defaults</p>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-5 text-sm text-muted-foreground">
                   <div className="rounded-md border border-border/60 bg-background/70 p-4">
                     <p className="text-sm font-medium text-foreground">Default chat route</p>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      Configure provider, endpoint, model, and consent here. Recall now uses these
-                      defaults instead of hiding them inside the composer.
+                      Configure provider, endpoint, model, and consent here. Recall now uses these defaults instead of hiding them inside the composer.
                     </p>
                   </div>
                   <ProviderSettingsForm
@@ -3802,24 +3655,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                     }}
                   />
                   <div className="rounded-md border border-border/60 bg-background/70 p-4">
-                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                      Permissions
-                    </p>
-                    <p className="mt-2">
-                      Remote providers:{" "}
-                      <span className="font-medium text-foreground">
-                        {allowRemoteProvider ? "enabled" : "disabled"}
-                      </span>
-                    </p>
+                    <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Permissions</p>
+                    <p className="mt-2">Remote providers: <span className="font-medium text-foreground">{allowRemoteProvider ? "enabled" : "disabled"}</span></p>
+                    <p className="mt-1">Local providers: <span className="font-medium text-foreground">{allowLocalProvider ? "enabled" : "disabled"}</span></p>
                     <p className="mt-1">
-                      Local providers:{" "}
-                      <span className="font-medium text-foreground">
-                        {allowLocalProvider ? "enabled" : "disabled"}
-                      </span>
-                    </p>
-                    <p className="mt-1">
-                      WebLLM runtime:{" "}
-                      <span className="font-medium text-foreground">{webllmRuntimeState}</span>
+                      WebLLM runtime: <span className="font-medium text-foreground">{webllmRuntimeState}</span>
                       {webllmRuntimeState === "downloading"
                         ? ` · ${Math.round(webllmDownloadProgress)}% downloaded`
                         : ""}
@@ -3831,46 +3671,31 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
               <Card className="border-border/60 bg-[var(--app-panel)] shadow-none">
                 <CardHeader className="border-b border-border/60 pb-4">
-                  <p className="font-display text-lg font-semibold text-foreground">
-                    Account and local data
-                  </p>
+                  <p className="font-display text-lg font-semibold text-foreground">Account and local data</p>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-5">
                   {authMethod === "pat" ? (
                     <Alert>
                       <AlertDescription>
-                        You are using a Personal Access Token. OAuth remains the recommended path
-                        for long-term use.
+                        You are using a Personal Access Token. OAuth remains the recommended path for long-term use.
                       </AlertDescription>
                     </Alert>
                   ) : null}
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-md border border-border/60 bg-background/70 p-4">
-                      <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                        Storage mode
-                      </p>
-                      <p className="mt-2 text-sm font-semibold text-foreground">
-                        {dbStorageMode ?? "Unknown"}
-                      </p>
+                      <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Storage mode</p>
+                      <p className="mt-2 text-sm font-semibold text-foreground">{dbStorageMode ?? "Unknown"}</p>
                     </div>
                     <div className="rounded-md border border-border/60 bg-background/70 p-4">
-                      <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                        History restore
-                      </p>
-                      <p className="mt-2 text-sm font-semibold text-foreground">
-                        {historyLoadState}
-                      </p>
+                      <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">History restore</p>
+                      <p className="mt-2 text-sm font-semibold text-foreground">{historyLoadState}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-3">
                     <Button variant="outline" className="rounded-md" onClick={logout}>
                       {authMethod === "oauth" ? "Sign out of GitHub" : "Clear PAT session"}
                     </Button>
-                    <Button
-                      variant="destructive"
-                      className="rounded-md"
-                      onClick={() => void handleClearLocalData()}
-                    >
+                    <Button variant="destructive" className="rounded-md" onClick={() => void handleClearLocalData()}>
                       Delete local data
                     </Button>
                   </div>
@@ -3916,8 +3741,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                         {activeSession ? activeSession.title : "Recall results"}
                       </p>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        Search by memory, then inspect the strongest matches before sending chat
-                        context.
+                        Search by memory, then inspect the strongest matches before sending chat context.
                       </p>
                     </div>
                     <Badge variant="secondary" className="rounded-md">
@@ -3981,12 +3805,9 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                     </>
                   ) : (
                     <div className="rounded-md border border-dashed border-border/60 bg-background/60 p-8 text-center">
-                      <p className="font-display text-lg font-semibold text-foreground">
-                        Start with a memory, not a repo name
-                      </p>
+                      <p className="font-display text-lg font-semibold text-foreground">Start with a memory, not a repo name</p>
                       <p className="mt-2 text-sm text-muted-foreground">
-                        Try: "browser-based vector database", "TypeScript auth starter", or "GraphQL
-                        security toolkit".
+                        Try: "browser-based vector database", "TypeScript auth starter", or "GraphQL security toolkit".
                       </p>
                     </div>
                   )}
@@ -4006,9 +3827,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                 <CardHeader className="border-b border-border/60 py-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="font-display text-lg font-semibold text-foreground">
-                        Chat context
-                      </p>
+                      <p className="font-display text-lg font-semibold text-foreground">Chat context</p>
                       <p className="mt-1 text-sm text-muted-foreground">
                         Review and select the snippets that should be sent with your prompt.
                       </p>
@@ -4030,14 +3849,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                               variant="outline"
                               size="sm"
                               className="rounded-md"
-                              onClick={() =>
-                                activeSessionId
-                                  ? updateSelectedContextForSession(
-                                      activeSessionId,
-                                      filteredResults.slice(0, 8).map((result) => result.chunkId),
-                                    )
-                                  : undefined
-                              }
+                              onClick={() => activeSessionId ? updateSelectedContextForSession(activeSessionId, filteredResults.slice(0, 8).map((result) => result.chunkId)) : undefined}
                             >
                               Select top matches
                             </Button>
@@ -4046,14 +3858,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                               variant="outline"
                               size="sm"
                               className="rounded-md"
-                              onClick={() =>
-                                activeSessionId
-                                  ? updateSelectedContextForSession(
-                                      activeSessionId,
-                                      filteredResults.map((result) => result.chunkId),
-                                    )
-                                  : undefined
-                              }
+                              onClick={() => activeSessionId ? updateSelectedContextForSession(activeSessionId, filteredResults.map((result) => result.chunkId)) : undefined}
                             >
                               Select filtered
                             </Button>
@@ -4062,11 +3867,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                               variant="ghost"
                               size="sm"
                               className="rounded-md"
-                              onClick={() =>
-                                activeSessionId
-                                  ? updateSelectedContextForSession(activeSessionId, [])
-                                  : undefined
-                              }
+                              onClick={() => activeSessionId ? updateSelectedContextForSession(activeSessionId, []) : undefined}
                             >
                               Clear
                             </Button>
@@ -4122,260 +3923,246 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           </div>
         ) : (
           <div className="space-y-5">
-            {/* Search & Controls */}
-            <div className="space-y-3">
-              <SearchBar
-                query={searchQuery}
-                onQueryChange={setSearchQuery}
-                onSearch={() => void handleSearch()}
-                isSearching={isSearching}
-                onFetchStars={() => void handleFetchStars()}
-                isFetching={fetchingStars}
-                fetchPhase={fetchPhase}
-                searchProgress={searchProgress}
-              />
+          {/* Search & Controls */}
+          <div className="space-y-3">
+            <SearchBar
+              query={searchQuery}
+              onQueryChange={setSearchQuery}
+              onSearch={() => void handleSearch()}
+              isSearching={isSearching}
+              onFetchStars={() => void handleFetchStars()}
+              isFetching={fetchingStars}
+              fetchPhase={fetchPhase}
+              searchProgress={searchProgress}
+            />
 
-              <div className="flex items-center gap-2">
-                <OllamaConfigPanel
-                  allowOllamaEmbedding={allowOllamaEmbedding}
-                  onAllowOllamaChange={setAllowOllamaEmbedding}
-                  ollamaBaseUrl={ollamaBaseUrl}
-                  onBaseUrlChange={setOllamaBaseUrl}
-                  ollamaModel={ollamaModel}
-                  onModelChange={handleEmbeddingModelChange}
-                  embeddingModelOptions={ollamaEmbeddingModelOptions}
-                  embeddingModelStatus={ollamaCatalogStatus}
-                  embeddingModelError={ollamaCatalogError}
-                  customModelWarning={customEmbeddingModelWarning}
-                  browserEmbeddingRecommendation={browserEmbeddingRecommendation}
-                  onRefreshModels={() => {
-                    void refreshOllamaCatalog();
-                  }}
-                  ollamaConnectionStatus={ollamaConnectionStatus}
-                  ollamaConnectionMessage={ollamaConnectionMessage}
-                  onTestConnection={() => void handleTestOllamaConnection()}
-                />
-              </div>
-              <DeveloperModePanel
-                isSudoUser={isSudoUser}
-                onSudoChange={setIsSudoUser}
-                showAdvancedTuning={showAdvancedTuning}
-                advancedTuningOpen={advancedTuningOpen}
-                onAdvancedTuningOpenChange={setAdvancedTuningOpen}
-                retrievalTuning={retrievalTuning}
-                onUpdateRetrievalTuning={updateRetrievalTuning}
-                onRebuildEmbeddings={() => void handleRebuildEmbeddings(true)}
-                isRebuilding={isRebuildingEmbeddings}
-              />
-
-              <SyncStatusBar
-                indexingStatus={indexingStatus}
-                embeddingRunMetrics={embeddingRunMetrics}
-                starsSummary={starsSummary}
-                dbStorageMode={dbStorageMode}
-                indexDetailsExpanded={indexDetailsExpanded}
-                onToggleDetails={() => setIndexDetailsExpanded((e) => !e)}
-                historyLoadState={historyLoadState}
-                historyDataSource={historyDataSource}
-                historyLastRestoredAt={historyLastRestoredAt}
-                onRetryHistory={() => void restoreHistory()}
+            <div className="flex items-center gap-2">
+              <OllamaConfigPanel
+                allowOllamaEmbedding={allowOllamaEmbedding}
+                onAllowOllamaChange={setAllowOllamaEmbedding}
+                ollamaBaseUrl={ollamaBaseUrl}
+                onBaseUrlChange={setOllamaBaseUrl}
+                ollamaModel={ollamaModel}
+                onModelChange={handleEmbeddingModelChange}
+                embeddingModelOptions={ollamaEmbeddingModelOptions}
+                embeddingModelStatus={ollamaCatalogStatus}
+                embeddingModelError={ollamaCatalogError}
+                customModelWarning={customEmbeddingModelWarning}
+                browserEmbeddingRecommendation={browserEmbeddingRecommendation}
+                onRefreshModels={() => {
+                  void refreshOllamaCatalog();
+                }}
+                ollamaConnectionStatus={ollamaConnectionStatus}
+                ollamaConnectionMessage={ollamaConnectionMessage}
+                onTestConnection={() => void handleTestOllamaConnection()}
               />
             </div>
+            <DeveloperModePanel
+              isSudoUser={isSudoUser}
+              onSudoChange={setIsSudoUser}
+              showAdvancedTuning={showAdvancedTuning}
+              advancedTuningOpen={advancedTuningOpen}
+              onAdvancedTuningOpenChange={setAdvancedTuningOpen}
+              retrievalTuning={retrievalTuning}
+              onUpdateRetrievalTuning={updateRetrievalTuning}
+              onRebuildEmbeddings={() => void handleRebuildEmbeddings(true)}
+              isRebuilding={isRebuildingEmbeddings}
+            />
 
-            {/* Session results + filters */}
-            {activeSession && (
-              <div className="animate-fade-in space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-display text-sm font-semibold text-foreground">
-                    {activeSession.title}
-                  </h2>
-                </div>
+            <SyncStatusBar
+              indexingStatus={indexingStatus}
+              embeddingRunMetrics={embeddingRunMetrics}
+              starsSummary={starsSummary}
+              dbStorageMode={dbStorageMode}
+              indexDetailsExpanded={indexDetailsExpanded}
+              onToggleDetails={() => setIndexDetailsExpanded((e) => !e)}
+              historyLoadState={historyLoadState}
+              historyDataSource={historyDataSource}
+              historyLastRestoredAt={historyLastRestoredAt}
+              onRetryHistory={() => void restoreHistory()}
+            />
+          </div>
 
-                {activeSession.results.length === 0 ? (
-                  <div className="rounded-lg border border-border/50 bg-secondary/20 p-4 text-center">
-                    <p className="text-sm text-muted-foreground">
-                      This session has no results in memory. Run the same search again to
-                      repopulate.
-                    </p>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="mt-3"
-                      onClick={() => void handleRehydrateSession()}
-                    >
-                      Re-run search
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <FilterBar
-                      sessionMode={sessionMode}
-                      onSessionModeChange={(mode) => setSessionMode(mode)}
-                      activeSessionId={activeSessionId}
-                      languageFilter={languageFilter}
-                      onLanguageChange={setLanguageFilter}
-                      topicFilter={topicFilter}
-                      onTopicChange={setTopicFilter}
-                      updatedWithinDaysFilter={updatedWithinDaysFilter}
-                      onUpdatedWithinDaysChange={setUpdatedWithinDaysFilter}
-                      availableLanguages={availableLanguages}
-                      availableTopics={availableTopics}
-                      filteredCount={filteredResults.length}
-                      totalCount={activeSession.results.length}
-                      onResetFilters={resetResultFilters}
-                    />
-
-                    <div className="max-h-[min(50vh,24rem)] space-y-1.5 overflow-auto rounded-lg border border-border/30 bg-background/30 p-2">
-                      {filteredResults.map((result) => (
-                        <RepoResultCard
-                          key={result.chunkId}
-                          chunkId={result.chunkId}
-                          repoFullName={result.repoFullName}
-                          repoUrl={result.repoUrl}
-                          repoDescription={result.repoDescription}
-                          language={result.language}
-                          topics={result.topics}
-                          score={result.score}
-                          text={result.text}
-                          selected={selectedContextChunkIds.includes(result.chunkId)}
-                          onToggleSelect={toggleContextChunk}
-                        />
-                      ))}
-                    </div>
-                  </>
-                )}
+          {/* Session results + filters */}
+          {activeSession && (
+            <div className="animate-fade-in space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-display text-sm font-semibold text-foreground">
+                  {activeSession.title}
+                </h2>
               </div>
-            )}
 
-            {/* Chat section: sidebar + main chat */}
-            <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
-              <SessionSidebar
-                sessions={sessions}
-                activeSessionId={activeSessionId}
-                onSelectSession={handleSelectSession}
-                onClearActive={handleClearActiveSession}
-              />
-
-              {/* Main chat area */}
-              <div className="min-w-0 flex-1">
-                {activeSession ? (
-                  <Card className="flex h-full flex-col border-border/50 bg-card/50">
-                    <CardHeader className="py-3">
-                      <p className="text-sm font-medium text-foreground">Chat</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        Selected snippets are sent as context.
-                      </p>
-                      {providerId === "webllm" && (
-                        <p className="text-[11px] text-muted-foreground">
-                          WebLLM: {webllmRuntimeState}
-                          {webllmRuntimeState === "downloading"
-                            ? ` -- ${Math.round(webllmDownloadProgress)}% downloaded`
-                            : ""}
-                          {webllmProgressText ? ` -- ${webllmProgressText}` : ""}
-                        </p>
-                      )}
-                    </CardHeader>
-                    <CardContent className="flex min-h-0 flex-1 flex-col pt-0">
-                      <SessionChat
-                        messages={activeSessionMessages}
-                        isGenerating={isGenerating}
-                        streamingContent={llmAnswer}
-                        prompt={llmPrompt}
-                        onPromptChange={setLlmPrompt}
-                        onSend={() => void handleGenerateAnswer()}
-                        onCancel={handleCancelGeneration}
-                        error={llmError}
-                        canSend={selectedContextResults.length > 0}
-                        noResultsHint={selectedContextResults.length === 0}
-                        messagesEndRef={messagesEndRef}
-                        providerId={providerId}
-                        providerBaseUrl={providerBaseUrl}
-                        providerModel={providerModel}
-                        providerApiKey={providerApiKey}
-                        onProviderIdChange={(id) => handleProviderChange(id)}
-                        onProviderBaseUrlChange={setProviderBaseUrl}
-                        onProviderModelChange={handleProviderModelChange}
-                        onProviderApiKeyChange={setProviderApiKey}
-                        selectedProvider={selectedProvider}
-                        providerDefinitions={providerDefinitions}
-                        allowRemoteProvider={allowRemoteProvider}
-                        allowLocalProvider={allowLocalProvider}
-                        onAllowRemoteChange={setAllowRemoteProvider}
-                        onAllowLocalChange={setAllowLocalProvider}
-                        webllmModels={webLLMModels}
-                        ollamaModels={ollamaChatModelOptions}
-                        ollamaModelsStatus={ollamaCatalogStatus}
-                        ollamaModelsError={ollamaCatalogError}
-                        onRefreshOllamaModels={() => {
-                          void refreshOllamaCatalog();
-                        }}
-                      />
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <Card className="border-border/50 bg-card/50">
-                    <CardContent className="p-0">
-                      <EmptyState type="no-session" />
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </div>
-
-            {/* Account section */}
-            <Collapsible open={sessionsExpanded} onOpenChange={setSessionsExpanded}>
-              <Card className="border-border/50 bg-card/30">
-                <CollapsibleTrigger asChild>
+              {activeSession.results.length === 0 ? (
+                <div className="rounded-lg border border-border/50 bg-secondary/20 p-4 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    This session has no results in memory. Run the same search again to repopulate.
+                  </p>
                   <Button
-                    variant="ghost"
-                    className="w-full justify-between px-4 py-2.5 font-normal"
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => void handleRehydrateSession()}
                   >
-                    <span className="text-sm">Account</span>
-                    <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-                      <span className="hidden sm:inline">{authMethod}</span>
-                      <span>{sessionsExpanded ? "\u2212" : "+"}</span>
-                    </span>
+                    Re-run search
                   </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <CardContent className="border-t border-border/30 pt-4">
-                    {authMethod === "pat" && (
-                      <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
-                        {"You are using a Personal Access Token. For better security, prefer "}
-                        <Button
-                          variant="link"
-                          className="h-auto p-0 text-xs font-medium text-amber-200 underline"
-                          onClick={() => void handleOAuth()}
-                        >
-                          GitHub OAuth
-                        </Button>
-                        .
+                </div>
+              ) : (
+                <>
+                  <FilterBar
+                    sessionMode={sessionMode}
+                    onSessionModeChange={(mode) => setSessionMode(mode)}
+                    activeSessionId={activeSessionId}
+                    languageFilter={languageFilter}
+                    onLanguageChange={setLanguageFilter}
+                    topicFilter={topicFilter}
+                    onTopicChange={setTopicFilter}
+                    updatedWithinDaysFilter={updatedWithinDaysFilter}
+                    onUpdatedWithinDaysChange={setUpdatedWithinDaysFilter}
+                    availableLanguages={availableLanguages}
+                    availableTopics={availableTopics}
+                    filteredCount={filteredResults.length}
+                    totalCount={activeSession.results.length}
+                    onResetFilters={resetResultFilters}
+                  />
+
+                  <div className="max-h-[min(50vh,24rem)] space-y-1.5 overflow-auto rounded-lg border border-border/30 bg-background/30 p-2">
+                    {filteredResults.map((result) => (
+                      <RepoResultCard
+                        key={result.chunkId}
+                        chunkId={result.chunkId}
+                        repoFullName={result.repoFullName}
+                        repoUrl={result.repoUrl}
+                        repoDescription={result.repoDescription}
+                        language={result.language}
+                        topics={result.topics}
+                        score={result.score}
+                        text={result.text}
+                        selected={selectedContextChunkIds.includes(result.chunkId)}
+                        onToggleSelect={toggleContextChunk}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Chat section: sidebar + main chat */}
+          <div className="flex flex-col gap-4 md:flex-row md:items-stretch">
+            <SessionSidebar
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              onSelectSession={handleSelectSession}
+              onClearActive={handleClearActiveSession}
+            />
+
+            {/* Main chat area */}
+            <div className="min-w-0 flex-1">
+              {activeSession ? (
+                <Card className="flex h-full flex-col border-border/50 bg-card/50">
+                  <CardHeader className="py-3">
+                    <p className="text-sm font-medium text-foreground">Chat</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Selected snippets are sent as context.
+                    </p>
+                    {providerId === "webllm" && (
+                      <p className="text-[11px] text-muted-foreground">
+                        WebLLM: {webllmRuntimeState}
+                        {webllmRuntimeState === "downloading"
+                          ? ` -- ${Math.round(webllmDownloadProgress)}% downloaded`
+                          : ""}
+                        {webllmProgressText ? ` -- ${webllmProgressText}` : ""}
                       </p>
                     )}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 rounded-lg text-xs"
-                        onClick={logout}
-                      >
-                        Clear token
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="h-7 rounded-lg text-xs"
-                        onClick={() => void handleClearLocalData()}
-                      >
-                        Delete local data
-                      </Button>
-                    </div>
+                  </CardHeader>
+                  <CardContent className="flex min-h-0 flex-1 flex-col pt-0">
+                    <SessionChat
+                      messages={activeSessionMessages}
+                      isGenerating={isGenerating}
+                      streamingContent={llmAnswer}
+                      prompt={llmPrompt}
+                      onPromptChange={setLlmPrompt}
+                      onSend={() => void handleGenerateAnswer()}
+                      onCancel={handleCancelGeneration}
+                      error={llmError}
+                      canSend={selectedContextResults.length > 0}
+                      noResultsHint={selectedContextResults.length === 0}
+                      messagesEndRef={messagesEndRef}
+                      providerId={providerId}
+                      providerBaseUrl={providerBaseUrl}
+                      providerModel={providerModel}
+                      providerApiKey={providerApiKey}
+                      onProviderIdChange={(id) => handleProviderChange(id)}
+                      onProviderBaseUrlChange={setProviderBaseUrl}
+                      onProviderModelChange={handleProviderModelChange}
+                      onProviderApiKeyChange={setProviderApiKey}
+                      selectedProvider={selectedProvider}
+                      providerDefinitions={providerDefinitions}
+                      allowRemoteProvider={allowRemoteProvider}
+                      allowLocalProvider={allowLocalProvider}
+                      onAllowRemoteChange={setAllowRemoteProvider}
+                      onAllowLocalChange={setAllowLocalProvider}
+                      webllmModels={webLLMModels}
+                      ollamaModels={ollamaChatModelOptions}
+                      ollamaModelsStatus={ollamaCatalogStatus}
+                      ollamaModelsError={ollamaCatalogError}
+                      onRefreshOllamaModels={() => {
+                        void refreshOllamaCatalog();
+                      }}
+                    />
                   </CardContent>
-                </CollapsibleContent>
-              </Card>
-            </Collapsible>
+                </Card>
+              ) : (
+                <Card className="border-border/50 bg-card/50">
+                  <CardContent className="p-0">
+                    <EmptyState type="no-session" />
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           </div>
+
+          {/* Account section */}
+          <Collapsible open={sessionsExpanded} onOpenChange={setSessionsExpanded}>
+            <Card className="border-border/50 bg-card/30">
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" className="w-full justify-between px-4 py-2.5 font-normal">
+                  <span className="text-sm">Account</span>
+                  <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                    <span className="hidden sm:inline">{authMethod}</span>
+                    <span>{sessionsExpanded ? "\u2212" : "+"}</span>
+                  </span>
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent className="border-t border-border/30 pt-4">
+                  {authMethod === "pat" && (
+                    <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+                      {"You are using a Personal Access Token. For better security, prefer "}
+                      <Button variant="link" className="h-auto p-0 text-xs font-medium text-amber-200 underline" onClick={() => void handleOAuth()}>
+                        GitHub OAuth
+                      </Button>.
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" size="sm" className="h-7 rounded-lg text-xs" onClick={logout}>
+                      Clear token
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="h-7 rounded-lg text-xs"
+                      onClick={() => void handleClearLocalData()}
+                    >
+                      Delete local data
+                    </Button>
+                  </div>
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+        </div>
         )
       ) : (
         <LoginCard
