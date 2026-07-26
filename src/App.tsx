@@ -12,6 +12,7 @@ import SessionsPage from "./pages/app/SessionsPage";
 import SettingsPage from "./pages/app/SettingsPage";
 import SetupPage from "./pages/app/SetupPage";
 import LandingPage from "./pages/LandingPage";
+import NotFoundPage from "./pages/NotFoundPage";
 
 export default function App() {
   return (
@@ -33,6 +34,8 @@ export default function App() {
               <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Route>
+
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </ThemeProvider>
     </AuthProvider>
