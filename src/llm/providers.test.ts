@@ -38,6 +38,25 @@ function responseFromChunks(chunks: Uint8Array[]): Response {
   );
 }
 
+function trackedResponse(chunks: Uint8Array[]): { response: Response; wasCanceled: () => boolean } {
+  let canceled = false;
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+      cancel() {
+        canceled = true;
+      },
+    }),
+    { status: 200 },
+  );
+  return { response, wasCanceled: () => canceled };
+}
+
 function everyTwoChunkSplit(value: string): Uint8Array[][] {
   const bytes = encoder.encode(value);
   const splits = Array.from({ length: bytes.length + 1 }, (_, index) =>
@@ -125,6 +144,57 @@ describe("provider transports", () => {
         `${JSON.stringify({ done: true })}\n${JSON.stringify({ response: "must-not-emit" })}\n`,
       ),
     ).resolves.toEqual([]);
+  });
+
+  test("LM Studio SSE cancels the reader when the done sentinel precedes stream end", async () => {
+    const tracked = trackedResponse([
+      encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "hi" } }] })}\n`),
+      encoder.encode("data: [DONE]\n"),
+      encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "leaked" } }] })}\n`),
+    ]);
+    vi.mocked(fetch).mockResolvedValueOnce(tracked.response);
+    const tokens: string[] = [];
+
+    await getProviderById("lmstudio").stream(
+      { baseUrl: "http://localhost:1234", model: "test-model" },
+      streamRequest((token) => tokens.push(token)),
+    );
+
+    expect(tokens).toEqual(["hi"]);
+    expect(tracked.wasCanceled()).toBe(true);
+  });
+
+  test("Ollama JSONL cancels the reader when the done record precedes stream end", async () => {
+    const tracked = trackedResponse([
+      encoder.encode(`${JSON.stringify({ message: { content: "hi" }, done: true })}\n`),
+      encoder.encode(`${JSON.stringify({ response: "leaked" })}\n`),
+    ]);
+    vi.mocked(fetch).mockResolvedValueOnce(tracked.response);
+    const tokens: string[] = [];
+
+    await getProviderById("ollama").stream(
+      { baseUrl: "http://localhost:11434", model: "test-model" },
+      streamRequest((token) => tokens.push(token)),
+    );
+
+    expect(tokens).toEqual(["hi"]);
+    expect(tracked.wasCanceled()).toBe(true);
+  });
+
+  test("SSE reaching end of stream without a terminal record does not cancel the reader", async () => {
+    const tracked = trackedResponse([
+      encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "hi" } }] })}\n`),
+    ]);
+    vi.mocked(fetch).mockResolvedValueOnce(tracked.response);
+    const tokens: string[] = [];
+
+    await getProviderById("lmstudio").stream(
+      { baseUrl: "http://localhost:1234", model: "test-model" },
+      streamRequest((token) => tokens.push(token)),
+    );
+
+    expect(tokens).toEqual(["hi"]);
+    expect(tracked.wasCanceled()).toBe(false);
   });
 
   test.each([

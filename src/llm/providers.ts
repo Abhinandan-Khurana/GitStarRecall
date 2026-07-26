@@ -91,6 +91,9 @@ async function parseSseStream(response: Response, onToken: (token: string) => vo
     buffer = lines.pop() ?? "";
     for (const line of lines) {
       if (consume(line)) {
+        // Release the underlying transport instead of leaving the connection
+        // draining after the terminal record has already been observed.
+        await reader.cancel().catch(() => undefined);
         return;
       }
     }
@@ -161,6 +164,9 @@ async function parseJsonLineStream(
     buffer = lines.pop() ?? "";
     for (const line of lines) {
       if (consume(line)) {
+        // Release the underlying transport instead of leaving the connection
+        // draining after the terminal record has already been observed.
+        await reader.cancel().catch(() => undefined);
         return;
       }
     }

@@ -81,7 +81,9 @@ import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
 import {
   cancelPendingGeneration,
   createSelectedProviderGeneration,
+  resolveLmStudioPolicyUrl,
   resumePendingWebLLMGeneration,
+  shouldResetRuntimeAfterEmptyResume,
   type PendingGeneration,
 } from "../llm/generationState";
 import { executeUsageGeneration } from "../llm/usageGenerationAdapter";
@@ -3041,7 +3043,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         allowRemoteProvider,
         webllmConsent,
         ollamaBaseUrl: ollamaBaseUrl.trim(),
-        lmStudioBaseUrl: providerBaseUrl.trim(),
+        lmStudioBaseUrl: resolveLmStudioPolicyUrl(providerId, providerBaseUrl),
       },
     });
 
@@ -3067,7 +3069,13 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       resolveHermesModelSelection(webllmSelectedModel),
     );
     pendingWebllmGenerationRef.current = resumed.nextPending;
-    if (!resumed.generation) return;
+    if (!resumed.generation) {
+      setWebllmDialogOpen(false);
+      if (shouldResetRuntimeAfterEmptyResume(generationControllerRef.current?.signal ?? null)) {
+        setWebllmRuntimeState("idle");
+      }
+      return;
+    }
     setWebllmConsent(true);
     setWebllmAllowModelDownload(true);
     setProviderId("webllm");

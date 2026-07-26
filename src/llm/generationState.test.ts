@@ -9,7 +9,9 @@ import {
   createSelectedProviderGeneration,
   getGenerationStartPlan,
   markPendingUserMessagePersisted,
+  resolveLmStudioPolicyUrl,
   resumePendingWebLLMGeneration,
+  shouldResetRuntimeAfterEmptyResume,
   throwIfGenerationCancelled,
   updatePendingExecutionPolicy,
   updatePendingProviderConfig,
@@ -82,6 +84,49 @@ describe("generation request state", () => {
         apiKey: "",
       }).baseUrl,
     ).toBe("http://localhost:11434");
+  });
+
+  it("falls back to safe defaults when configured URLs are whitespace-only", () => {
+    expect(
+      buildSelectedProviderRequestConfig({
+        providerId: "ollama",
+        providerBaseUrl: "http://stale-selected.invalid",
+        ollamaBaseUrl: "   ",
+        model: "llama3.2",
+        apiKey: "",
+        allowModelDownload: false,
+      }).baseUrl,
+    ).toBe("http://localhost:11434");
+
+    expect(
+      buildFallbackProviderRequestConfig({
+        providerId: "ollama",
+        providerDefinition: ollamaDefinition,
+        providerBaseUrl: "http://stale-selected.invalid",
+        ollamaBaseUrl: "  \t ",
+        apiKey: "",
+      }).baseUrl,
+    ).toBe("http://localhost:11434");
+
+    expect(
+      buildFallbackProviderRequestConfig({
+        providerId: "lmstudio",
+        providerDefinition: lmStudioDefinition,
+        providerBaseUrl: "   ",
+        ollamaBaseUrl: "http://localhost:11434",
+        apiKey: "",
+      }).baseUrl,
+    ).toBe("http://localhost:1234");
+  });
+
+  it("derives the LM Studio policy URL only from an actual LM Studio selection", () => {
+    expect(resolveLmStudioPolicyUrl("lmstudio", " http://127.0.0.1:2345/v1 ")).toBe(
+      "http://127.0.0.1:2345/v1",
+    );
+    expect(resolveLmStudioPolicyUrl("webllm", "http://webllm-injected.invalid")).toBe("");
+    expect(resolveLmStudioPolicyUrl("openai-compatible", "https://api.openai.com/v1")).toBe("");
+    expect(resolveLmStudioPolicyUrl("ollama", "http://127.0.0.1:11434")).toBe("");
+    expect(resolveLmStudioPolicyUrl("lmstudio", "   ")).toBe("");
   });
 
   it("builds fallback transport from the fallback definition instead of stale selected state", () => {
@@ -265,6 +310,21 @@ describe("generation request state", () => {
       executionPolicy,
       userMessagePersisted: false,
     });
+  });
+
+  it("keeps the active runtime after an empty resume but idles when no live generation exists", () => {
+    // Rapid double-confirm: the first click consumed the pending request and
+    // started a live generation, so the second (empty) resume must not idle it.
+    const active = new AbortController();
+    expect(shouldResetRuntimeAfterEmptyResume(active.signal)).toBe(false);
+
+    // No controller has ever been created (nothing to protect) -> idle.
+    expect(shouldResetRuntimeAfterEmptyResume(null)).toBe(true);
+
+    // A cancelled/aborted generation is no longer live -> idle.
+    const cancelled = new AbortController();
+    cancelled.abort();
+    expect(shouldResetRuntimeAfterEmptyResume(cancelled.signal)).toBe(true);
   });
 
   it("discards a cancelled pending generation", () => {

@@ -199,6 +199,7 @@ export class WebLLMEngineManager {
 
     const engine = this.engine;
     let interrupted = false;
+    let completed = false;
     let iterator: AsyncIterator<ChatCompletionChunk> | null = null;
     const interrupt = () => {
       if (interrupted) {
@@ -231,6 +232,7 @@ export class WebLLMEngineManager {
       while (true) {
         const result = await waitWithAbort(iterator.next(), signal);
         if (result.done) {
+          completed = true;
           break;
         }
         throwIfAborted(signal);
@@ -248,11 +250,14 @@ export class WebLLMEngineManager {
       throw new WebLLMProviderError("WEBLLM_STREAM_FAILED", `WebLLM stream failed: ${message}`);
     } finally {
       signal.removeEventListener("abort", onAbort);
-      if (signal.aborted && iterator?.return) {
+      // Close the underlying generator whenever iteration exits abnormally (abort,
+      // a rejected read, or a throwing token sink) so its resources are released.
+      // Normal completion already exhausts the iterator, so return() is skipped.
+      if (!completed && iterator?.return) {
         try {
           void Promise.resolve(iterator.return()).catch(() => undefined);
         } catch {
-          // The abort result remains authoritative even if iterator cleanup fails.
+          // The stream failure remains authoritative even if iterator cleanup fails.
         }
       }
     }

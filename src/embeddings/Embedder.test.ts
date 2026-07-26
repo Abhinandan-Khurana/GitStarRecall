@@ -319,7 +319,7 @@ describe("Embedder batch API", () => {
     }
   });
 
-  test("times out a stalled request and ignores its late response", async () => {
+  test("times out a stalled request, ignores its late response, and keeps the worker alive", async () => {
     vi.useFakeTimers();
     try {
       const worker = new ManualWorker();
@@ -341,6 +341,22 @@ describe("Embedder batch API", () => {
       });
 
       expect(vi.getTimerCount()).toBe(0);
+
+      // A timeout must not tear down the worker: it was never terminated and it
+      // still serves a subsequent request on the same live worker.
+      expect(worker.terminateCalls).toBe(0);
+      const followUp = embedder.embedBatch(["fresh"]);
+      const followUpRequest = worker.posted[1] as { id: string };
+      expect(followUpRequest.id).not.toBe(request.id);
+      worker.respond({
+        id: followUpRequest.id,
+        status: "complete",
+        embeddings: [Float32Array.from([2])],
+        errors: [null],
+      });
+
+      await expect(followUp).resolves.toEqual([{ embedding: Float32Array.from([2]), error: null }]);
+      expect(worker.terminateCalls).toBe(0);
     } finally {
       vi.useRealTimers();
     }

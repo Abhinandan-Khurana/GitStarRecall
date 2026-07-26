@@ -44,6 +44,7 @@ export type UsageGenerationBindings = {
 export function createUsageGenerationDependencies(
   bindings: UsageGenerationBindings,
 ): GenerationExecutionDependencies {
+  bindings.controllerRef.current?.abort();
   const controller = new AbortController();
   bindings.controllerRef.current = controller;
 

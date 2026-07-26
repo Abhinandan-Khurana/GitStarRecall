@@ -175,6 +175,8 @@ describe("generation execution", () => {
       allowModelDownload: false,
     });
     let liveLmStudioBaseUrl = "http://changed-live-state.invalid";
+    const preReassignmentLiveUrl = liveLmStudioBaseUrl;
+    const probedBaseUrls: string[] = [];
     const stream = vi
       .fn<GenerationExecutionDependencies["stream"]>()
       .mockRejectedValueOnce(webLLMError("WEBLLM_INIT_FAILED"))
@@ -186,7 +188,11 @@ describe("generation execution", () => {
     const canReachLocalProvider = vi.fn(
       async (provider: "ollama" | "lmstudio", baseUrl: string) => {
         if (provider === "ollama") return false;
+        probedBaseUrls.push(baseUrl);
         expect(baseUrl).toBe("http://127.0.0.3:1234");
+        // The snapshot must be used regardless of live mutations both before
+        // (preReassignmentLiveUrl) and after (liveLmStudioBaseUrl) generation().
+        expect(baseUrl).not.toBe(preReassignmentLiveUrl);
         expect(baseUrl).not.toBe(liveLmStudioBaseUrl);
         return true;
       },
@@ -198,6 +204,9 @@ describe("generation execution", () => {
     await expect(executeGeneration(pending, dependencies)).resolves.toBe("completed");
 
     expect(stream).toHaveBeenCalledTimes(3);
+    expect(probedBaseUrls).toEqual(["http://127.0.0.3:1234"]);
+    expect(preReassignmentLiveUrl).toBe("http://changed-live-state.invalid");
+    expect(liveLmStudioBaseUrl).toBe("http://another-live-change.invalid");
     expect(dependencies.onProviderFallback).toHaveBeenCalledWith(fallbackConfig, "LM Studio");
     expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
     expect(messages.at(-1)?.content).toBe("fallback answer");
@@ -247,6 +256,53 @@ describe("generation execution", () => {
     expect(messages.filter((message) => message.role === "assistant")).toHaveLength(0);
     expect(dependencies.canReachLocalProvider).not.toHaveBeenCalled();
     expect(dependencies.onError).toHaveBeenCalledOnce();
+  });
+
+  it("clears a partial WebLLM attempt before retrying its fallback model", async () => {
+    const stream = vi
+      .fn<GenerationExecutionDependencies["stream"]>()
+      .mockImplementationOnce(async ({ onToken }) => {
+        onToken("stale partial ");
+        throw webLLMError("WEBLLM_INIT_FAILED");
+      })
+      .mockImplementationOnce(async ({ onToken }) => onToken("clean answer"));
+    const { dependencies, messages } = harness({ stream });
+
+    await expect(executeGeneration(generation(), dependencies)).resolves.toBe("completed");
+
+    expect(messages.at(-1)).toMatchObject({ role: "assistant", content: "clean answer" });
+    expect(dependencies.onResetAnswer).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears whitespace tokens before a provider fallback so they cannot prefix the answer", async () => {
+    const stream = vi
+      .fn<GenerationExecutionDependencies["stream"]>()
+      .mockImplementationOnce(async ({ onToken }) => {
+        onToken("  \n ");
+        throw webLLMError("WEBLLM_STREAM_FAILED");
+      })
+      .mockImplementationOnce(async ({ onToken }) => onToken("fallback answer"));
+    const { dependencies, messages } = harness({ stream });
+
+    await expect(
+      executeGeneration(
+        generation({
+          providerConfig: createProviderRequestConfig({
+            providerId: "webllm",
+            baseUrl: "",
+            model: "fallback-web-model",
+            apiKey: "sk-snapshot",
+            allowModelDownload: true,
+          }),
+        }),
+        dependencies,
+      ),
+    ).resolves.toBe("completed");
+
+    expect(stream).toHaveBeenCalledTimes(2);
+    expect(dependencies.onProviderFallback).toHaveBeenCalledOnce();
+    expect(messages.at(-1)).toMatchObject({ role: "assistant", content: "fallback answer" });
+    expect(dependencies.onResetAnswer).toHaveBeenCalledTimes(2);
   });
 
   it("cancels during database acquisition before prompt clear or user write", async () => {

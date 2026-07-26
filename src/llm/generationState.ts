@@ -45,7 +45,7 @@ export function buildSelectedProviderRequestConfig(input: {
     providerId: input.providerId,
     baseUrl:
       input.providerId === "ollama"
-        ? input.ollamaBaseUrl || "http://localhost:11434"
+        ? input.ollamaBaseUrl.trim() || "http://localhost:11434"
         : input.providerBaseUrl,
     model: input.model,
     apiKey: input.apiKey,
@@ -64,14 +64,21 @@ export function buildFallbackProviderRequestConfig(input: {
     providerId: input.providerId,
     baseUrl:
       input.providerId === "ollama"
-        ? input.ollamaBaseUrl || "http://localhost:11434"
+        ? input.ollamaBaseUrl.trim() || "http://localhost:11434"
         : input.providerId === "lmstudio"
-          ? input.providerBaseUrl || input.providerDefinition.defaultBaseUrl
+          ? input.providerBaseUrl.trim() || input.providerDefinition.defaultBaseUrl
           : input.providerDefinition.defaultBaseUrl,
     model: input.providerDefinition.defaultModel,
     apiKey: input.apiKey,
     allowModelDownload: false,
   });
+}
+
+export function resolveLmStudioPolicyUrl(
+  providerId: LLMProviderId,
+  providerBaseUrl: string,
+): string {
+  return providerId === "lmstudio" ? providerBaseUrl.trim() : "";
 }
 
 export function createPendingGeneration(input: PendingGeneration): PendingGeneration {
@@ -160,6 +167,10 @@ export function resumePendingWebLLMGeneration(
     ),
     nextPending: null,
   };
+}
+
+export function shouldResetRuntimeAfterEmptyResume(activeSignal: AbortSignal | null): boolean {
+  return activeSignal === null || activeSignal.aborted;
 }
 
 export function throwIfGenerationCancelled(signal: AbortSignal): void {

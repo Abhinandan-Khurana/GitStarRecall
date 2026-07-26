@@ -150,6 +150,18 @@ describe("usage generation adapter", () => {
     expect(bindings.setAllowModelDownload).toHaveBeenCalledWith(false);
   });
 
+  it("aborts a stale controller before installing a new one", () => {
+    const { bindings } = createBindings();
+    const staleController = new AbortController();
+    bindings.controllerRef.current = staleController;
+
+    const dependencies = createUsageGenerationDependencies(bindings);
+
+    expect(staleController.signal.aborted).toBe(true);
+    expect(bindings.controllerRef.current).toBe(dependencies.controller);
+    expect(bindings.controllerRef.current).not.toBe(staleController);
+  });
+
   it("executes a complete generation through the adapter", async () => {
     const { bindings, sessionMessages } = createBindings();
 

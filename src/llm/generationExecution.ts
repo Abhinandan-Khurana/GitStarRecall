@@ -253,6 +253,8 @@ export async function executeGeneration(
           allowModelDownload: true,
         });
         dependencies.onWebLLMModelFallback(effectiveConfig.model);
+        streamedAnswer = "";
+        dependencies.onResetAnswer();
         try {
           dependencies.onRuntimeState("downloading");
           await dependencies.stream({
@@ -277,6 +279,8 @@ export async function executeGeneration(
           const fallback = await resolveFallbackConfig(activeGeneration, dependencies);
           throwIfGenerationCancelled(controller.signal);
           if (!fallback) throw streamError;
+          streamedAnswer = "";
+          dependencies.onResetAnswer();
           dependencies.onProviderFallback(fallback.config, fallback.label);
           errorProviderId = fallback.config.providerId;
           await dependencies.stream({

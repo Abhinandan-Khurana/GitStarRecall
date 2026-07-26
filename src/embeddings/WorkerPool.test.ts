@@ -220,6 +220,10 @@ describe("EmbeddingWorkerPool", () => {
   test("removes the exact crashed embedder and retains the healthy worker during downshift", async () => {
     const callCounts = [0, 0, 0];
     const terminationCounts = [0, 0, 0];
+    // Raw invocations are counted before the worker's own idempotency guard so
+    // the pool's retirement call is observable independently of the worker
+    // self-terminating on crash.
+    const terminateInvocations = [0, 0, 0];
     const terminated = [false, false, false];
     let nextWorkerId = 0;
     const pool = new EmbeddingWorkerPool({
@@ -230,6 +234,7 @@ describe("EmbeddingWorkerPool", () => {
         const workerId = nextWorkerId;
         nextWorkerId += 1;
         const terminate = () => {
+          terminateInvocations[workerId] += 1;
           if (terminated[workerId]) {
             return;
           }
@@ -272,6 +277,10 @@ describe("EmbeddingWorkerPool", () => {
     );
     expect(pool.getStatus().activePoolSize).toBe(1);
     expect(terminationCounts).toEqual([1, 0, 0]);
+    // The pool retired the crashed worker itself: terminate() was invoked a
+    // second time on worker 0 during retirement, over and above its self-crash
+    // termination, while the healthy worker was never touched.
+    expect(terminateInvocations).toEqual([2, 0, 0]);
 
     const downshiftedResult = await pool.embedBatch(["still healthy"]);
     expect(downshiftedResult[0]?.embedding).toEqual(Float32Array.from([1]));

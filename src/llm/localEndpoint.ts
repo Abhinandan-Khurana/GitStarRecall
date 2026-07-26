@@ -11,6 +11,11 @@ function isExplicitIpv4Loopback(hostname: string): boolean {
   return values[0] === 127 && values.every((value) => value >= 0 && value <= 255);
 }
 
+// Security-maintenance: validate the raw authority as written, never the parsed
+// URL.hostname. WHATWG URL parsing canonicalizes alternate loopback spellings
+// (e.g. "127.1", "0x7f.1", "2130706433") into "127.0.0.1", which would smuggle
+// non-explicit forms past this allowlist. Matching the raw text keeps only the
+// literal loopback authorities we intend to permit.
 function isExplicitLoopbackAuthority(value: string): boolean {
   const authority = /^https?:\/\/([^/?#]+)/iu.exec(value)?.[1];
   if (!authority) {

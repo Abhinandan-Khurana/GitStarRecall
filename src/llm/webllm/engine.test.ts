@@ -199,6 +199,98 @@ describe("WebLLMEngineManager", () => {
     expect(engine.interruptGenerate).not.toHaveBeenCalled();
   });
 
+  test("closes the iterator via return when an iterator read rejects", async () => {
+    const engine = mockEngine();
+    const iterator = {
+      next: vi.fn().mockRejectedValue(new Error("stream boom")),
+      return: vi.fn(async () => ({ done: true, value: undefined })),
+    };
+    vi.mocked(engine.chat.completions.create).mockResolvedValue({
+      [Symbol.asyncIterator]: () => iterator,
+    } as never);
+    vi.mocked(CreateMLCEngine).mockResolvedValue(engine);
+    const manager = new WebLLMEngineManager();
+    await manager.ensureReady("test-model", {
+      allowDownload: true,
+      signal: new AbortController().signal,
+    });
+
+    await expect(
+      manager.stream(
+        "test-model",
+        [{ role: "user", content: "hello" }],
+        new AbortController().signal,
+        vi.fn(),
+      ),
+    ).rejects.toMatchObject({ code: "WEBLLM_STREAM_FAILED" });
+    expect(iterator.return).toHaveBeenCalledOnce();
+    expect(engine.interruptGenerate).not.toHaveBeenCalled();
+  });
+
+  test("closes the iterator via return when the token sink throws", async () => {
+    const engine = mockEngine();
+    const iterator = {
+      next: vi
+        .fn()
+        .mockResolvedValue({ done: false, value: { choices: [{ delta: { content: "tok" } }] } }),
+      return: vi.fn(async () => ({ done: true, value: undefined })),
+    };
+    vi.mocked(engine.chat.completions.create).mockResolvedValue({
+      [Symbol.asyncIterator]: () => iterator,
+    } as never);
+    vi.mocked(CreateMLCEngine).mockResolvedValue(engine);
+    const manager = new WebLLMEngineManager();
+    await manager.ensureReady("test-model", {
+      allowDownload: true,
+      signal: new AbortController().signal,
+    });
+    const onToken = vi.fn(() => {
+      throw new Error("sink boom");
+    });
+
+    await expect(
+      manager.stream(
+        "test-model",
+        [{ role: "user", content: "hello" }],
+        new AbortController().signal,
+        onToken,
+      ),
+    ).rejects.toMatchObject({ code: "WEBLLM_STREAM_FAILED" });
+    expect(onToken).toHaveBeenCalledOnce();
+    expect(iterator.return).toHaveBeenCalledOnce();
+  });
+
+  test("does not close the iterator via return after normal completion", async () => {
+    const engine = mockEngine();
+    const iterator = {
+      next: vi
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: { choices: [{ delta: { content: "tok" } }] } })
+        .mockResolvedValueOnce({ done: true, value: undefined }),
+      return: vi.fn(async () => ({ done: true, value: undefined })),
+    };
+    vi.mocked(engine.chat.completions.create).mockResolvedValue({
+      [Symbol.asyncIterator]: () => iterator,
+    } as never);
+    vi.mocked(CreateMLCEngine).mockResolvedValue(engine);
+    const manager = new WebLLMEngineManager();
+    await manager.ensureReady("test-model", {
+      allowDownload: true,
+      signal: new AbortController().signal,
+    });
+    const onToken = vi.fn();
+
+    await manager.stream(
+      "test-model",
+      [{ role: "user", content: "hello" }],
+      new AbortController().signal,
+      onToken,
+    );
+
+    expect(onToken).toHaveBeenCalledExactlyOnceWith("tok");
+    expect(iterator.return).not.toHaveBeenCalled();
+  });
+
   test("interrupt rejection cannot replace AbortError or become unhandled", async () => {
     const engine = mockEngine();
     const read = deferred<IteratorResult<never>>();
