@@ -284,6 +284,95 @@ describe("EmbeddingWorkerPool", () => {
     expect(terminationCounts).toEqual([1, 0, 0]);
   });
 
+  test("drains queued jobs with a replacement when the sole downshifted worker fatally exits", async () => {
+    const callCounts = [0, 0];
+    const terminationCounts = [0, 0];
+    let nextWorkerId = 0;
+    const pool = new EmbeddingWorkerPool({
+      poolSize: 2,
+      workerBatchSize: 1,
+      createEmbedder: () => {
+        const workerId = nextWorkerId;
+        nextWorkerId += 1;
+        return {
+          embedBatch: async (texts: string[]) => {
+            callCounts[workerId] += 1;
+            if (workerId === 0) {
+              throw new EmbeddingWorkerError("worker_error", "sole worker crashed");
+            }
+            return texts.map(() => ({ embedding: Float32Array.from([workerId]), error: null }));
+          },
+          terminate: () => {
+            terminationCounts[workerId] += 1;
+          },
+        };
+      },
+    });
+
+    // Downshift to a single worker before the batch runs.
+    pool.setConcurrency(1);
+    expect(pool.getStatus().activePoolSize).toBe(1);
+
+    const results = await pool.embedBatch(["crash", "queued-1", "queued-2"]);
+
+    // The affected job keeps its typed failure...
+    expect(results[0]).toEqual({ embedding: null, error: "sole worker crashed" });
+    // ...and later queued jobs are drained by a healthy replacement instead of
+    // being left as "embedding job was not executed".
+    expect(results.slice(1).map((item) => Array.from(item.embedding ?? []))).toEqual([[1], [1]]);
+    expect(results.some((item) => item.error === "embedding job was not executed")).toBe(false);
+    // The crashed worker is retired and the healthy replacement survives.
+    expect(nextWorkerId).toBe(2);
+    expect(terminationCounts).toEqual([1, 0]);
+    expect(pool.getStatus().activePoolSize).toBe(1);
+  });
+
+  test("drains the queue across repeated fatal replacements without leaving unexecuted jobs", async () => {
+    const callCounts = [0, 0, 0];
+    const terminationCounts = [0, 0, 0];
+    let nextWorkerId = 0;
+    const pool = new EmbeddingWorkerPool({
+      poolSize: 2,
+      workerBatchSize: 1,
+      createEmbedder: () => {
+        const workerId = nextWorkerId;
+        nextWorkerId += 1;
+        return {
+          embedBatch: async (texts: string[]) => {
+            callCounts[workerId] += 1;
+            // The original sole worker and its first replacement both crash
+            // fatally; only the second replacement is healthy.
+            if (workerId <= 1) {
+              throw new EmbeddingWorkerError("worker_error", `worker ${workerId} crashed`);
+            }
+            return texts.map(() => ({ embedding: Float32Array.from([workerId]), error: null }));
+          },
+          terminate: () => {
+            terminationCounts[workerId] += 1;
+          },
+        };
+      },
+    });
+
+    // A single live runner so every fatal exit forces an in-line replacement.
+    pool.setConcurrency(1);
+    expect(pool.getStatus().activePoolSize).toBe(1);
+
+    const results = await pool.embedBatch(["crash-0", "crash-1", "healthy"]);
+
+    // Each crashed job keeps its typed failure...
+    expect(results[0]).toEqual({ embedding: null, error: "worker 0 crashed" });
+    expect(results[1]).toEqual({ embedding: null, error: "worker 1 crashed" });
+    // ...and the trailing job is still drained by the healthy replacement, never
+    // left as an unexecuted sentinel (which would also indicate a hang).
+    expect(results[2]?.embedding).toEqual(Float32Array.from([2]));
+    expect(results.some((item) => item.error === "embedding job was not executed")).toBe(false);
+    // Two replacements were created; both crashed embedders are retired.
+    expect(nextWorkerId).toBe(3);
+    expect(terminationCounts).toEqual([1, 1, 0]);
+    expect(pool.getStatus().activePoolSize).toBe(1);
+  });
+
   test("turns a batch-length mismatch into item errors and threshold downshifts", async () => {
     const terminationCounts = [0, 0];
     let nextWorkerId = 0;

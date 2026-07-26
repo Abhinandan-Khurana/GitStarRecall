@@ -210,10 +210,12 @@ export class EmbeddingWorkerPool {
       }
       let cursor = 0;
       const workerCount = Math.min(this.activePoolSize, jobs.length);
+      let liveRunners = workerCount;
 
       const runWorker = async (workerIndex: number) => {
-        const embedder = this.embedders[workerIndex];
+        let embedder = this.embedders[workerIndex];
         if (!embedder) {
+          liveRunners -= 1;
           return;
         }
 
@@ -268,10 +270,22 @@ export class EmbeddingWorkerPool {
               this.downshiftToSingle(message);
             }
             if (workerIsFatal) {
-              break;
+              const jobsRemain = cursor < jobs.length;
+              if (jobsRemain && liveRunners === 1) {
+                // The sole runner hit a fatal worker error while jobs are still
+                // queued. Retire the crashed embedder (already marked unusable)
+                // and continue draining with a healthy replacement so later jobs
+                // don't fall through as "embedding job was not executed".
+                embedder = this.createEmbedder();
+                this.embedders.push(embedder);
+                continue;
+              }
+              liveRunners -= 1;
+              return;
             }
           }
         }
+        liveRunners -= 1;
       };
 
       await Promise.all(Array.from({ length: workerCount }, (_, index) => runWorker(index)));

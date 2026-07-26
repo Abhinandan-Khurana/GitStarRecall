@@ -63,6 +63,21 @@ export class WebLLMEngineManager {
 
   private loadingPromise: Promise<void> | null = null;
 
+  private readonly progressListeners = new Set<
+    (modelId: string, progress: number, text: string) => void
+  >();
+
+  private emitProgress(modelId: string, progress: number, text: string): void {
+    for (const listener of this.progressListeners) {
+      try {
+        listener(modelId, progress, text);
+      } catch {
+        // A misbehaving progress sink must neither abort the shared load nor
+        // prevent the remaining listeners from observing progress.
+      }
+    }
+  }
+
   private supportsWebGPU(): boolean {
     const nav = navigator as Navigator & { gpu?: object };
     return typeof nav.gpu !== "undefined";
@@ -96,59 +111,75 @@ export class WebLLMEngineManager {
       );
     }
 
-    if (this.loadingPromise) {
-      await waitWithAbort(this.loadingPromise, options.signal);
-      throwIfAborted(options.signal);
-      if (this.engine && this.activeModelId === modelId) {
-        return;
+    // Every caller that waits on the shared load registers its own progress
+    // sink. The engine forwards a single progress stream (see emitProgress) to
+    // all live waiters, so a caller that joins an in-flight load still receives
+    // ongoing progress even after the caller that started the load aborts. Each
+    // sink is scoped to the model it is waiting for: a waiter queued for model B
+    // ignores model A's progress while A loads, and starts receiving progress
+    // once B's reload begins — the shared load is never restarted. The listener
+    // is removed once this caller stops waiting, keeping cleanup deterministic
+    // and preventing forwarding to an aborted caller.
+    const listener = (loadedModelId: string, progress: number, text: string) => {
+      if (loadedModelId === modelId && !options.signal.aborted) {
+        options.onProgress?.(progress, text);
       }
-    }
+    };
+    this.progressListeners.add(listener);
 
-    throwIfAborted(options.signal);
-    const loadingPromise = (async () => {
-      try {
-        if (!this.engine) {
-          this.engine = await CreateMLCEngine(modelId, {
-            initProgressCallback: (report) => {
-              const next = this.toProgress(report);
-              if (!options.signal.aborted) {
-                options.onProgress?.(next.progress, next.text);
-              }
-            },
-            logLevel: "INFO",
-          });
-          this.activeModelId = modelId;
+    try {
+      if (this.loadingPromise) {
+        await waitWithAbort(this.loadingPromise, options.signal);
+        throwIfAborted(options.signal);
+        if (this.engine && this.activeModelId === modelId) {
           return;
         }
-
-        this.engine.setInitProgressCallback((report) => {
-          const next = this.toProgress(report);
-          if (!options.signal.aborted) {
-            options.onProgress?.(next.progress, next.text);
-          }
-        });
-        await this.engine.reload(modelId);
-        this.activeModelId = modelId;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new WebLLMProviderError("WEBLLM_INIT_FAILED", `WebLLM init failed: ${message}`);
       }
-    })();
-    this.loadingPromise = loadingPromise;
-    void loadingPromise.then(
-      () => {
-        if (this.loadingPromise === loadingPromise) {
-          this.loadingPromise = null;
-        }
-      },
-      () => {
-        if (this.loadingPromise === loadingPromise) {
-          this.loadingPromise = null;
-        }
-      },
-    );
 
-    await waitWithAbort(loadingPromise, options.signal);
+      throwIfAborted(options.signal);
+      const loadingPromise = (async () => {
+        try {
+          if (!this.engine) {
+            this.engine = await CreateMLCEngine(modelId, {
+              initProgressCallback: (report) => {
+                const next = this.toProgress(report);
+                this.emitProgress(modelId, next.progress, next.text);
+              },
+              logLevel: "INFO",
+            });
+            this.activeModelId = modelId;
+            return;
+          }
+
+          this.engine.setInitProgressCallback((report) => {
+            const next = this.toProgress(report);
+            this.emitProgress(modelId, next.progress, next.text);
+          });
+          await this.engine.reload(modelId);
+          this.activeModelId = modelId;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new WebLLMProviderError("WEBLLM_INIT_FAILED", `WebLLM init failed: ${message}`);
+        }
+      })();
+      this.loadingPromise = loadingPromise;
+      void loadingPromise.then(
+        () => {
+          if (this.loadingPromise === loadingPromise) {
+            this.loadingPromise = null;
+          }
+        },
+        () => {
+          if (this.loadingPromise === loadingPromise) {
+            this.loadingPromise = null;
+          }
+        },
+      );
+
+      await waitWithAbort(loadingPromise, options.signal);
+    } finally {
+      this.progressListeners.delete(listener);
+    }
   }
 
   async stream(

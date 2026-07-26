@@ -1,5 +1,5 @@
 import { CreateMLCEngine } from "@mlc-ai/web-llm";
-import type { MLCEngine } from "@mlc-ai/web-llm";
+import type { InitProgressReport, MLCEngine } from "@mlc-ai/web-llm";
 import { WebLLMEngineManager } from "./engine";
 
 vi.mock("@mlc-ai/web-llm", () => ({
@@ -262,6 +262,131 @@ describe("WebLLMEngineManager", () => {
     expect(onProgress).toHaveBeenNthCalledWith(1, 1, "initializing");
     expect(onProgress).toHaveBeenNthCalledWith(2, 0, "Preparing model");
     expect(engine.reload).toHaveBeenCalledWith("model-b");
+  });
+
+  test("forwards ongoing initialization progress to a joined waiter after the initiator aborts", async () => {
+    const engine = mockEngine();
+    const initialization = deferred<MLCEngine>();
+    let emitProgress: ((report: InitProgressReport) => void) | undefined;
+    vi.mocked(CreateMLCEngine).mockImplementation(async (_modelId, options) => {
+      emitProgress = options?.initProgressCallback;
+      return initialization.promise;
+    });
+    const manager = new WebLLMEngineManager();
+    const initiator = new AbortController();
+    const joiner = new AbortController();
+    const initiatorProgress = vi.fn();
+    const joinerProgress = vi.fn();
+
+    const initiatorWaiter = manager.ensureReady("test-model", {
+      allowDownload: true,
+      signal: initiator.signal,
+      onProgress: initiatorProgress,
+    });
+    const joinerWaiter = manager.ensureReady("test-model", {
+      allowDownload: true,
+      signal: joiner.signal,
+      onProgress: joinerProgress,
+    });
+
+    // The caller that started the shared load abandons it before it finishes.
+    initiator.abort();
+    await expect(initiatorWaiter).rejects.toMatchObject({ name: "AbortError" });
+
+    // The joined waiter must still receive ongoing initialization progress from
+    // the shared load, which is not restarted.
+    emitProgress?.({ progress: 0.5, text: "loading shards", timeElapsed: 0 });
+    expect(joinerProgress).toHaveBeenCalledWith(0.5, "loading shards");
+    expect(initiatorProgress).not.toHaveBeenCalled();
+
+    initialization.resolve(engine);
+    await expect(joinerWaiter).resolves.toBeUndefined();
+    expect(CreateMLCEngine).toHaveBeenCalledOnce();
+  });
+
+  test("scopes shared-load progress to the loading model so a queued waiter for another model is not fed the first model's progress", async () => {
+    const engine = mockEngine();
+    const initialization = deferred<MLCEngine>();
+    let emitInitProgress: ((report: InitProgressReport) => void) | undefined;
+    vi.mocked(CreateMLCEngine).mockImplementation(async (_modelId, options) => {
+      emitInitProgress = options?.initProgressCallback;
+      return initialization.promise;
+    });
+    const reloadStarted = deferred<void>();
+    vi.mocked(engine.reload).mockImplementation(async () => {
+      const reloadProgress = vi.mocked(engine.setInitProgressCallback).mock.calls[0]?.[0];
+      reloadProgress?.({ progress: 0.8, text: "loading model-b", timeElapsed: 0 });
+      reloadStarted.resolve();
+    });
+    const manager = new WebLLMEngineManager();
+    const aProgress = vi.fn();
+    const bProgress = vi.fn();
+
+    const aWaiter = manager.ensureReady("model-a", {
+      allowDownload: true,
+      signal: new AbortController().signal,
+      onProgress: aProgress,
+    });
+    // A waiter for a different model joins while model-a's shared load is in flight.
+    const bWaiter = manager.ensureReady("model-b", {
+      allowDownload: true,
+      signal: new AbortController().signal,
+      onProgress: bProgress,
+    });
+
+    // model-a's progress must reach only the model-a waiter, never the queued
+    // model-b waiter.
+    emitInitProgress?.({ progress: 0.5, text: "loading model-a", timeElapsed: 0 });
+    expect(aProgress).toHaveBeenCalledWith(0.5, "loading model-a");
+    expect(bProgress).not.toHaveBeenCalled();
+
+    // model-a finishes without being restarted; the model-b waiter then drives
+    // the reload to model-b and must still receive its own progress.
+    initialization.resolve(engine);
+    await aWaiter;
+    await reloadStarted.promise;
+    await bWaiter;
+
+    expect(bProgress).toHaveBeenCalledWith(0.8, "loading model-b");
+    expect(aProgress).toHaveBeenCalledTimes(1);
+    expect(engine.reload).toHaveBeenCalledWith("model-b");
+    expect(CreateMLCEngine).toHaveBeenCalledOnce();
+  });
+
+  test("a throwing progress listener neither breaks initialization nor starves other listeners", async () => {
+    const engine = mockEngine();
+    const boom = vi.fn(() => {
+      throw new Error("listener boom");
+    });
+    const healthy = vi.fn();
+    vi.mocked(CreateMLCEngine).mockImplementation(async (_modelId, options) => {
+      // Defer emission by a microtask so both waiters register before progress
+      // fans out, then emit as WebLLM would during initialization.
+      await Promise.resolve();
+      options?.initProgressCallback?.({ progress: 0.5, text: "loading", timeElapsed: 0 });
+      return engine;
+    });
+    const manager = new WebLLMEngineManager();
+
+    const throwingWaiter = manager.ensureReady("test-model", {
+      allowDownload: true,
+      signal: new AbortController().signal,
+      onProgress: boom,
+    });
+    const healthyWaiter = manager.ensureReady("test-model", {
+      allowDownload: true,
+      signal: new AbortController().signal,
+      onProgress: healthy,
+    });
+
+    // A misbehaving listener must not fail the shared initialization for either
+    // caller, and must not prevent the healthy listener from observing progress.
+    await expect(Promise.all([throwingWaiter, healthyWaiter])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(boom).toHaveBeenCalledWith(0.5, "loading");
+    expect(healthy).toHaveBeenCalledWith(0.5, "loading");
   });
 
   test("clears a rejected initialization so a later attempt can recover", async () => {
