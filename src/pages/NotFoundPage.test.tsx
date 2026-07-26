@@ -1,12 +1,27 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import NotFoundPage from "./NotFoundPage";
+import App from "../App";
 
-describe("NotFoundPage", () => {
-  it("offers a route back to the public home page", () => {
+describe("App not-found route", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("routes an unknown path to a page with a link back home", () => {
     render(
       <MemoryRouter initialEntries={["/missing"]}>
-        <NotFoundPage />
+        <App />
       </MemoryRouter>,
     );
 

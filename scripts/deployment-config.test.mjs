@@ -34,6 +34,8 @@ describe("production deployment configuration", () => {
   });
 
   it("sets the required browser security headers", () => {
+    expect(deployment.headers[0].source).toBe("/(.*)");
+
     const headers = Object.fromEntries(
       deployment.headers[0].headers.map(({ key, value }) => [key, value]),
     );
