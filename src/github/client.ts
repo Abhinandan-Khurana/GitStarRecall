@@ -665,7 +665,7 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
           return { record, latencyMs, failed: false, rateLimited };
         }
 
-        const payload = (await response.json()) as GitHubReadmePayload;
+        const payload = (await response.json()) as unknown;
         assertReadmePayload(payload);
         const readmeText = decodeBase64Utf8(payload.content);
         const readmeSha256 = await sha256Hex(readmeText);
