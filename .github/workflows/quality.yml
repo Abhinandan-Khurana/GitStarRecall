@@ -6,6 +6,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      base_ref:
+        description: Base ref for changed-file and coverage checks
+        required: false
+        default: origin/main
+        type: string
 
 permissions:
   contents: read
@@ -48,7 +54,7 @@ jobs:
 
       - name: Check formatting
         env:
-          FORMAT_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+          FORMAT_BASE_REF: ${{ inputs.base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
         run: pnpm format:check
 
       - name: Lint
@@ -65,7 +71,7 @@ jobs:
 
       - name: Enforce coverage quality gates
         env:
-          COVERAGE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+          COVERAGE_BASE_REF: ${{ inputs.base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
         run: pnpm check:coverage
 
       - name: Build production application
