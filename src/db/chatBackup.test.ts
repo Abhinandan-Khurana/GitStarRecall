@@ -96,21 +96,30 @@ describe("chat backup fallback storage", () => {
 
   it("prunes message backup to bounded size", async () => {
     await backupChatSession(session());
-    for (let i = 0; i < 5100; i += 1) {
-      await backupChatMessage(
-        message({
-          id: `m-${i}`,
-          sequence: i + 1,
-          createdAt: 1700000002000 + i,
-          content: `message-${i}`,
-        }),
-      );
-    }
+    const seededMessages = Array.from({ length: 5000 }, (_, index) =>
+      message({
+        id: `m-${index}`,
+        sequence: index + 1,
+        createdAt: 1700000002000 + index,
+        content: `message-${index}`,
+      }),
+    );
+    localStorage.setItem("gitstarrecall.chat.backup.messages.v1", JSON.stringify(seededMessages));
+
+    await backupChatMessage(
+      message({
+        id: "m-5000",
+        sequence: 5001,
+        createdAt: 1700000007000,
+        content: "message-5000",
+      }),
+    );
 
     const snapshot = await loadChatBackup();
     const restoredMessages = snapshot.messagesBySessionId["s-1"] ?? [];
-    expect(restoredMessages.length).toBeLessThanOrEqual(5000);
-    expect(restoredMessages[0]?.id).toBe("m-100");
+    expect(restoredMessages).toHaveLength(5000);
+    expect(restoredMessages[0]?.id).toBe("m-1");
+    expect(restoredMessages.at(-1)?.id).toBe("m-5000");
   });
 
   it("clears backup data", async () => {
