@@ -41,13 +41,16 @@ export type FetchStarsProgress = {
   latestPageCount: number;
 };
 
+export type RepoReadmeFetchOutcome = "success" | "not_modified" | "not_found" | "transient_failure";
+
 export type RepoReadmeRecord = {
   repoId: number;
+  outcome: RepoReadmeFetchOutcome;
   readmeUrl: string | null;
   readmeText: string | null;
   readmeEtag: string | null;
   readmeLastModified: string | null;
-  checksum: string;
+  checksum: string | null;
   missingReadme: boolean;
   notModified: boolean;
 };

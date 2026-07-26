@@ -4,3 +4,6 @@ dist
 
 # Remove this legacy-file exemption during the planned UsagePage refactor.
 src/pages/UsagePage.tsx
+
+# Remove this legacy-file exemption when LocalDatabase is intentionally normalized or refactored.
+src/db/client.ts

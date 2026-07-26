@@ -655,6 +655,9 @@ export function runSchema(database: Database): void {
   if (!repoColumns.has("readme_last_modified")) {
     database.run("ALTER TABLE repos ADD COLUMN readme_last_modified TEXT;");
   }
+  if (!repoColumns.has("readme_retry_required")) {
+    database.run("ALTER TABLE repos ADD COLUMN readme_retry_required INTEGER NOT NULL DEFAULT 0;");
+  }
 
   ensureChatSchema(database);
 
@@ -1402,8 +1405,9 @@ export class LocalDatabase {
     const statement = this.db.prepare(`
       INSERT INTO repos (
         id, full_name, name, description, topics_json, language, html_url, stars, forks,
-        updated_at, readme_url, readme_text, readme_etag, readme_last_modified, checksum, last_synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        updated_at, readme_url, readme_text, readme_etag, readme_last_modified, checksum,
+        readme_retry_required, last_synced_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         full_name = excluded.full_name,
         name = excluded.name,
@@ -1414,11 +1418,12 @@ export class LocalDatabase {
         stars = excluded.stars,
         forks = excluded.forks,
         updated_at = excluded.updated_at,
-        readme_url = excluded.readme_url,
-        readme_text = excluded.readme_text,
-        readme_etag = excluded.readme_etag,
-        readme_last_modified = excluded.readme_last_modified,
-        checksum = excluded.checksum,
+        readme_url = CASE WHEN excluded.readme_retry_required = 1 THEN repos.readme_url ELSE excluded.readme_url END,
+        readme_text = CASE WHEN excluded.readme_retry_required = 1 THEN repos.readme_text ELSE excluded.readme_text END,
+        readme_etag = CASE WHEN excluded.readme_retry_required = 1 THEN repos.readme_etag ELSE excluded.readme_etag END,
+        readme_last_modified = CASE WHEN excluded.readme_retry_required = 1 THEN repos.readme_last_modified ELSE excluded.readme_last_modified END,
+        checksum = CASE WHEN excluded.readme_retry_required = 1 THEN repos.checksum ELSE excluded.checksum END,
+        readme_retry_required = excluded.readme_retry_required,
         last_synced_at = excluded.last_synced_at;
     `);
 
@@ -1442,6 +1447,7 @@ export class LocalDatabase {
           repo.readmeEtag ?? null,
           repo.readmeLastModified ?? null,
           repo.checksum,
+          repo.readmeRetryRequired ? 1 : 0,
           repo.lastSyncedAt,
         ]);
       });
@@ -1461,7 +1467,8 @@ export class LocalDatabase {
     const result = this.db.exec(`
       SELECT
         id, full_name, name, description, topics_json, language, html_url, stars, forks,
-        updated_at, readme_url, readme_text, readme_etag, readme_last_modified, checksum, last_synced_at
+        updated_at, readme_url, readme_text, readme_etag, readme_last_modified, checksum,
+        readme_retry_required, last_synced_at
       FROM repos
       ORDER BY id ASC;
     `);
@@ -1487,13 +1494,15 @@ export class LocalDatabase {
       readmeEtag: row[12] == null ? null : String(row[12]),
       readmeLastModified: row[13] == null ? null : String(row[13]),
       checksum: row[14] == null ? null : String(row[14]),
-      lastSyncedAt: Number(row[15]),
+      readmeRetryRequired: Number(row[15]) === 1,
+      lastSyncedAt: Number(row[16]),
     }));
   }
 
   listRepoSyncState(): RepoSyncState[] {
     const result = this.db.exec(`
-      SELECT id, full_name, description, topics_json, language, updated_at, readme_etag, readme_last_modified, checksum
+      SELECT id, full_name, description, topics_json, language, updated_at, stars, forks,
+        readme_url, readme_text, readme_etag, readme_last_modified, checksum, readme_retry_required
       FROM repos
       ORDER BY id ASC;
     `);
@@ -1510,9 +1519,14 @@ export class LocalDatabase {
       topics: JSON.parse(String(row[3] ?? "[]")) as string[],
       language: row[4] == null ? null : String(row[4]),
       updatedAt: String(row[5]),
-      readmeEtag: row[6] == null ? null : String(row[6]),
-      readmeLastModified: row[7] == null ? null : String(row[7]),
-      checksum: row[8] == null ? null : String(row[8]),
+      stars: Number(row[6]),
+      forks: Number(row[7]),
+      readmeUrl: row[8] == null ? null : String(row[8]),
+      readmeText: row[9] == null ? null : String(row[9]),
+      readmeEtag: row[10] == null ? null : String(row[10]),
+      readmeLastModified: row[11] == null ? null : String(row[11]),
+      checksum: row[12] == null ? null : String(row[12]),
+      readmeRetryRequired: Number(row[13]) === 1,
     }));
   }
 
@@ -2494,8 +2508,9 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
 
       const persistedSnapshot = await readPersistedScopeSnapshot(scopeKey);
       if (persistedSnapshot) {
+        let db: Database | null = null;
         try {
-          const db = new sql.Database(persistedSnapshot.bytes);
+          db = new sql.Database(persistedSnapshot.bytes);
           runSchema(db);
           return new LocalDatabase({
             sql,
@@ -2504,13 +2519,12 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
             scopeKey,
             embeddingCheckpointPolicy,
           });
-        } catch {
-          if (persistedSnapshot.storageMode === "opfs") {
-            await clearOpfsFile(scopeKey);
-          } else {
-            clearLocalStorageBytes(scopeKey);
-          }
-          return createFreshDatabase();
+        } catch (error) {
+          db?.close();
+          throw new Error(
+            `Failed to open or migrate the local database. Stored data was preserved: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
+          );
         }
       }
 
@@ -2518,5 +2532,12 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
     })();
 
   dbPromiseByScope.set(scopeKey, promise);
-  return promise;
+  try {
+    return await promise;
+  } catch (error) {
+    if (dbPromiseByScope.get(scopeKey) === promise) {
+      dbPromiseByScope.delete(scopeKey);
+    }
+    throw error;
+  }
 }

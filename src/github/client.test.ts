@@ -150,6 +150,7 @@ describe("github client integration", () => {
     const client = createGitHubApiClient({
       accessToken: "token",
       fetchImpl,
+      maxRetries: 0,
       logger: {
         debug: () => undefined,
         warn: () => undefined,
@@ -161,9 +162,307 @@ describe("github client integration", () => {
     expect(result.missingCount).toBe(1);
     expect(result.failedCount).toBe(1);
     expect(result.records.some((record) => (record.readmeText ?? "").includes("hello"))).toBe(true);
-    expect(result.records.filter((record) => record.missingReadme)).toHaveLength(2);
+    expect(result.records.filter((record) => record.missingReadme)).toHaveLength(1);
     expect(result.records.every((record) => record.notModified === false)).toBe(true);
     expect(result.records.every((record) => "readmeEtag" in record)).toBe(true);
+    expect(
+      Object.fromEntries(result.records.map((record) => [record.repoId, record.outcome])),
+    ).toEqual({
+      1: "success",
+      2: "not_found",
+      3: "transient_failure",
+    });
+  });
+
+  test("fetchReadmes retries a transient server failure and honors Retry-After", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ message: "Unavailable" }, { status: 503, headers: { "retry-after": "0" } }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          content: btoa("recovered"),
+          encoding: "base64",
+          html_url: "https://github.com/owner/repo-20/blob/main/README.md",
+        }),
+      );
+    const client = createGitHubApiClient({
+      accessToken: "token",
+      fetchImpl,
+      maxRetries: 1,
+      logger: { debug: () => undefined, warn: () => undefined },
+    });
+
+    const result = await client.fetchReadmes([makeRepo(20)], {
+      concurrency: 1,
+      minConcurrency: 1,
+      maxConcurrency: 1,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(result.records[0]?.outcome).toBe("success");
+    expect(result.records[0]?.readmeText).toBe("recovered");
+  });
+
+  test("fetchReadmes honors an HTTP-date Retry-After value", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    try {
+      const warn = vi.fn();
+      const retryAt = new Date(Date.now() + 2_000).toUTCString();
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          jsonResponse(
+            { message: "Unavailable" },
+            { status: 503, headers: { "retry-after": retryAt } },
+          ),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            content: btoa("date retry recovered"),
+            encoding: "base64",
+            html_url: "https://github.com/owner/repo-25/blob/main/README.md",
+          }),
+        );
+      const client = createGitHubApiClient({
+        accessToken: "token",
+        fetchImpl,
+        maxRetries: 1,
+        logger: { debug: () => undefined, warn },
+      });
+
+      const resultPromise = client.fetchReadmes([makeRepo(25)]);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(warn).toHaveBeenCalledWith(
+        "transient GitHub response, backing off",
+        expect.objectContaining({ waitMs: 2_000 }),
+      );
+      expect(result.records[0]?.outcome).toBe("success");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("fetchReadmes honors the rate-limit reset header when Retry-After is absent", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    try {
+      const warn = vi.fn();
+      const resetSeconds = Math.floor((Date.now() + 2_000) / 1_000);
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          jsonResponse(
+            { message: "Unavailable" },
+            { status: 503, headers: { "x-ratelimit-reset": String(resetSeconds) } },
+          ),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            content: btoa("rate reset recovered"),
+            encoding: "base64",
+            html_url: "https://github.com/owner/repo-26/blob/main/README.md",
+          }),
+        );
+      const client = createGitHubApiClient({
+        accessToken: "token",
+        fetchImpl,
+        maxRetries: 1,
+        logger: { debug: () => undefined, warn },
+      });
+
+      const resultPromise = client.fetchReadmes([makeRepo(26)]);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(warn).toHaveBeenCalledWith(
+        "transient GitHub response, backing off",
+        expect.objectContaining({ waitMs: 2_500 }),
+      );
+      expect(result.records[0]?.outcome).toBe("success");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("fetchReadmes preserves previous README state after transient retry exhaustion", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ message: "Unavailable" }, { status: 503 }));
+    const client = createGitHubApiClient({
+      accessToken: "token",
+      fetchImpl,
+      maxRetries: 0,
+      logger: { debug: () => undefined, warn: () => undefined },
+    });
+
+    const result = await client.fetchReadmes([makeRepo(21)], {
+      previousSyncStateByRepoId: new Map([
+        [
+          21,
+          {
+            checksum: "known-checksum",
+            readmeUrl: "https://github.com/owner/repo-21/blob/main/README.md",
+            readmeText: "known-good README",
+            readmeEtag: '"known-etag"',
+            readmeLastModified: "Mon, 23 Feb 2026 00:00:00 GMT",
+          },
+        ],
+      ]),
+    });
+
+    expect(result.failedCount).toBe(1);
+    expect(result.missingCount).toBe(0);
+    expect(result.records[0]).toMatchObject({
+      outcome: "transient_failure",
+      readmeUrl: "https://github.com/owner/repo-21/blob/main/README.md",
+      readmeText: "known-good README",
+      readmeEtag: '"known-etag"',
+      readmeLastModified: "Mon, 23 Feb 2026 00:00:00 GMT",
+      checksum: "known-checksum",
+      missingReadme: false,
+    });
+  });
+
+  test("fetchReadmes turns a 404 into stable known-empty state", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ message: "Not Found" }, { status: 404 }));
+    const client = createGitHubApiClient({
+      accessToken: "token",
+      fetchImpl,
+      maxRetries: 0,
+      logger: { debug: () => undefined, warn: () => undefined },
+    });
+
+    const result = await client.fetchReadmes([makeRepo(24)], {
+      previousSyncStateByRepoId: new Map([
+        [
+          24,
+          {
+            checksum: "old-checksum",
+            readmeUrl: "https://github.com/owner/repo-24/blob/main/README.md",
+            readmeText: "removed README",
+            readmeEtag: '"old-etag"',
+            readmeLastModified: "Mon, 23 Feb 2026 00:00:00 GMT",
+          },
+        ],
+      ]),
+    });
+
+    expect(result.missingCount).toBe(1);
+    expect(result.failedCount).toBe(0);
+    expect(result.records[0]).toMatchObject({
+      outcome: "not_found",
+      readmeUrl: null,
+      readmeText: null,
+      readmeEtag: null,
+      readmeLastModified: null,
+      missingReadme: true,
+      notModified: false,
+    });
+    expect(result.records[0]?.checksum).not.toBe("old-checksum");
+  });
+
+  test("fetchReadmes treats a malformed success payload as transient and preserves prior data", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ message: "unexpected" }));
+    const client = createGitHubApiClient({
+      accessToken: "token",
+      fetchImpl,
+      maxRetries: 0,
+      logger: { debug: () => undefined, warn: () => undefined },
+    });
+
+    const result = await client.fetchReadmes([makeRepo(23)], {
+      previousSyncStateByRepoId: new Map([
+        [
+          23,
+          {
+            checksum: "known-checksum",
+            readmeUrl: "https://github.com/owner/repo-23/blob/main/README.md",
+            readmeText: "known-good README",
+            readmeEtag: '"known-etag"',
+            readmeLastModified: "Mon, 23 Feb 2026 00:00:00 GMT",
+          },
+        ],
+      ]),
+    });
+
+    expect(result.failedCount).toBe(1);
+    expect(result.records[0]).toMatchObject({
+      outcome: "transient_failure",
+      readmeText: "known-good README",
+      checksum: "known-checksum",
+    });
+  });
+
+  test("fetchReadmes retries a transient network failure within the configured bound", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockRejectedValueOnce(new TypeError("connection reset"))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            content: btoa("network recovered"),
+            encoding: "base64",
+            html_url: "https://github.com/owner/repo-22/blob/main/README.md",
+          }),
+        );
+      const client = createGitHubApiClient({
+        accessToken: "token",
+        fetchImpl,
+        maxRetries: 1,
+        logger: { debug: () => undefined, warn: () => undefined },
+      });
+
+      const resultPromise = client.fetchReadmes([makeRepo(22)]);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(result.records[0]?.outcome).toBe("success");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("fetchReadmes preserves prior data when a network failure exhausts retries", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("connection reset"));
+    const client = createGitHubApiClient({
+      accessToken: "token",
+      fetchImpl,
+      maxRetries: 0,
+      logger: { debug: () => undefined, warn: () => undefined },
+    });
+
+    const result = await client.fetchReadmes([makeRepo(27)], {
+      previousSyncStateByRepoId: new Map([
+        [
+          27,
+          {
+            checksum: "known-checksum",
+            readmeUrl: "https://github.com/owner/repo-27/blob/main/README.md",
+            readmeText: "known-good README",
+            readmeEtag: '"known-etag"',
+            readmeLastModified: "Thu, 01 Jan 2026 00:00:00 GMT",
+          },
+        ],
+      ]),
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(result.records[0]).toMatchObject({
+      outcome: "transient_failure",
+      checksum: "known-checksum",
+      readmeText: "known-good README",
+    });
   });
 
   test("fetchReadmes supports conditional revalidation and batch callbacks", async () => {
@@ -215,6 +514,8 @@ describe("github client integration", () => {
           10,
           {
             checksum: "previous-checksum",
+            readmeUrl: "https://github.com/owner/repo-10/blob/main/README.md",
+            readmeText: "previous readme",
             readmeEtag: '"etag-10"',
             readmeLastModified: "Mon, 22 Feb 2026 00:00:00 GMT",
           },
@@ -230,9 +531,12 @@ describe("github client integration", () => {
     const notModified = result.records.find((record) => record.repoId === 10);
     expect(notModified?.notModified).toBe(true);
     expect(notModified?.checksum).toBe("previous-checksum");
+    expect(notModified?.outcome).toBe("not_modified");
+    expect(notModified?.readmeText).toBe("previous readme");
     expect(notModified?.readmeEtag).toBe('"etag-10"');
     const modified = result.records.find((record) => record.repoId === 11);
     expect(modified?.notModified).toBe(false);
+    expect(modified?.outcome).toBe("success");
     expect(modified?.readmeText).toContain("fresh readme");
   });
 });

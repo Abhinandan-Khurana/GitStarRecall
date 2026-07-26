@@ -23,6 +23,8 @@ export function repoMetadataChanged(local: RepoSyncState, remote: GitHubStarredR
     local.description !== remote.description ||
     local.language !== remote.language ||
     local.updatedAt !== remote.updated_at ||
+    (local.stars !== undefined && local.stars !== remote.stargazers_count) ||
+    (local.forks !== undefined && local.forks !== remote.forks_count) ||
     !equalTopics(local.topics, remote.topics ?? [])
   );
 }
@@ -32,13 +34,14 @@ export type SyncPlan = {
   candidateRepoIds: number[];
 };
 
-export function buildSyncPlan(localRepos: RepoSyncState[], remoteRepos: GitHubStarredRepo[]): SyncPlan {
+export function buildSyncPlan(
+  localRepos: RepoSyncState[],
+  remoteRepos: GitHubStarredRepo[],
+): SyncPlan {
   const localById = new Map(localRepos.map((repo) => [repo.id, repo]));
   const remoteIds = new Set(remoteRepos.map((repo) => repo.id));
 
-  const removedRepoIds = localRepos
-    .map((repo) => repo.id)
-    .filter((id) => !remoteIds.has(id));
+  const removedRepoIds = localRepos.map((repo) => repo.id).filter((id) => !remoteIds.has(id));
 
   const candidateRepoIds = remoteRepos
     .filter((repo) => {
@@ -48,6 +51,10 @@ export function buildSyncPlan(localRepos: RepoSyncState[], remoteRepos: GitHubSt
       }
 
       if (!local.checksum) {
+        return true;
+      }
+
+      if (local.readmeRetryRequired) {
         return true;
       }
 
