@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearSettings,
+  clearSettingsStrict,
   createDefaultProviderSettings,
   deriveHydratedProviderSettingsView,
   getProviderSettingsStatusMessage,
@@ -15,7 +16,9 @@ import type { LLMProviderDefinition } from "../llm/types";
 
 class MemoryStorage implements Storage {
   private entries = new Map<string, string>();
+  failNextRemove = false;
   failNextSet = false;
+  lieAboutRemovalFor: string | null = null;
 
   get length(): number {
     return this.entries.size;
@@ -34,6 +37,11 @@ class MemoryStorage implements Storage {
   }
 
   removeItem(key: string): void {
+    if (this.failNextRemove) {
+      this.failNextRemove = false;
+      throw new Error("simulated removal failure");
+    }
+    if (this.lieAboutRemovalFor === key) return;
     this.entries.delete(key);
   }
 
@@ -379,6 +387,168 @@ describe("llm provider settings", () => {
     expect(await loadSettingsAsync(scopeIdentity)).not.toBeNull();
     clearSettings(scopeIdentity);
     expect(await loadSettingsAsync(scopeIdentity)).toBeNull();
+  });
+
+  it("strictly clears current and historical settings for only the selected scope", async () => {
+    const otherScope = "github:84";
+    const currentKey = scopeStorageKey(scopeIdentity);
+    const historicalKey = historicalScopeStorageKey(scopeIdentity);
+    const otherCurrentKey = scopeStorageKey(otherScope);
+    const otherHistoricalKey = historicalScopeStorageKey(otherScope);
+    const otherCurrentValue = JSON.stringify(makeSettings({ model: "account-b-current" }));
+    const otherHistoricalValue = JSON.stringify(makeSettings({ model: "account-b-history" }));
+
+    storage.seed(currentKey, JSON.stringify(makeSettings({ model: "account-a-current" })));
+    storage.seed(historicalKey, JSON.stringify(makeSettings({ model: "account-a-history" })));
+    storage.seed(otherCurrentKey, otherCurrentValue);
+    storage.seed(otherHistoricalKey, otherHistoricalValue);
+
+    await expect(clearSettingsStrict(scopeIdentity)).resolves.toBeUndefined();
+
+    expect(storage.getItem(currentKey)).toBeNull();
+    expect(storage.getItem(historicalKey)).toBeNull();
+    expect(storage.getItem(otherCurrentKey)).toBe(otherCurrentValue);
+    expect(storage.getItem(otherHistoricalKey)).toBe(otherHistoricalValue);
+    await expect(clearSettingsStrict("   ")).rejects.toThrow("Provider settings scope is required");
+  });
+
+  it("waits for a pending save and prevents it from resurrecting strictly cleared settings", async () => {
+    vi.stubEnv("VITE_LLM_SETTINGS_ENCRYPTION_KEY", "test-secret");
+    await providerSettingsStore.hydrate(scopeIdentity);
+    const originalEncrypt = crypto.subtle.encrypt.bind(crypto.subtle);
+    let releaseEncryption: (() => void) | undefined;
+    const encryptionGate = new Promise<void>((resolve) => {
+      releaseEncryption = resolve;
+    });
+    vi.spyOn(crypto.subtle, "encrypt").mockImplementation(async (algorithm, key, data) => {
+      await encryptionGate;
+      return originalEncrypt(algorithm, key, data);
+    });
+
+    const pendingSave = providerSettingsStore.save(
+      scopeIdentity,
+      makeSettings({ apiKey: "sk-must-not-return" }),
+    );
+    await vi.waitFor(() => expect(crypto.subtle.encrypt).toHaveBeenCalledOnce());
+    const strictClear = clearSettingsStrict(scopeIdentity);
+    let clearSettled = false;
+    void strictClear.finally(() => {
+      clearSettled = true;
+    });
+    await Promise.resolve();
+    expect(clearSettled).toBe(false);
+
+    releaseEncryption?.();
+    await expect(pendingSave).resolves.toBeUndefined();
+    await expect(strictClear).resolves.toBeUndefined();
+    expect(await loadSettingsAsync(scopeIdentity)).toBeNull();
+  });
+
+  it("invalidates hydration that was already in flight when strict clearing starts", async () => {
+    vi.stubEnv("VITE_LLM_SETTINGS_ENCRYPTION_KEY", "test-secret");
+    const apiKeyEncrypted = await encryptApiKey(scopeIdentity, "test-secret", "sk-stale");
+    storage.seed(
+      scopeStorageKey(scopeIdentity),
+      JSON.stringify({
+        ...makeSettings({ apiKey: "" }),
+        apiKey: undefined,
+        apiKeyEncrypted,
+      }),
+    );
+    const originalDecrypt = crypto.subtle.decrypt.bind(crypto.subtle);
+    let releaseDecryption: (() => void) | undefined;
+    const decryptionGate = new Promise<void>((resolve) => {
+      releaseDecryption = resolve;
+    });
+    vi.spyOn(crypto.subtle, "decrypt").mockImplementation(async (algorithm, key, data) => {
+      await decryptionGate;
+      return originalDecrypt(algorithm, key, data);
+    });
+
+    const pendingHydration = providerSettingsStore.hydrate(scopeIdentity);
+    await vi.waitFor(() => expect(crypto.subtle.decrypt).toHaveBeenCalledOnce());
+    await clearSettingsStrict(scopeIdentity);
+    releaseDecryption?.();
+
+    await expect(pendingHydration).resolves.toBeNull();
+    await expect(
+      providerSettingsStore.save(scopeIdentity, makeSettings({ model: "stale-save" })),
+    ).rejects.toThrow("Provider settings are still loading");
+    expect(await loadSettingsAsync(scopeIdentity)).toBeNull();
+  });
+
+  it("revokes hydration that completes while strict clearing waits for a save", async () => {
+    vi.stubEnv("VITE_LLM_SETTINGS_ENCRYPTION_KEY", "test-secret");
+    storage.seed(
+      scopeStorageKey(scopeIdentity),
+      JSON.stringify(makeSettings({ model: "stored-before-clear" })),
+    );
+    await providerSettingsStore.hydrate(scopeIdentity);
+    const originalEncrypt = crypto.subtle.encrypt.bind(crypto.subtle);
+    let releaseEncryption: (() => void) | undefined;
+    const encryptionGate = new Promise<void>((resolve) => {
+      releaseEncryption = resolve;
+    });
+    vi.spyOn(crypto.subtle, "encrypt").mockImplementation(async (algorithm, key, data) => {
+      await encryptionGate;
+      return originalEncrypt(algorithm, key, data);
+    });
+
+    const pendingSave = providerSettingsStore.save(
+      scopeIdentity,
+      makeSettings({ apiKey: "sk-pending" }),
+    );
+    await vi.waitFor(() => expect(crypto.subtle.encrypt).toHaveBeenCalledOnce());
+    const strictClear = clearSettingsStrict(scopeIdentity);
+
+    await expect(providerSettingsStore.hydrate(scopeIdentity)).resolves.toMatchObject({
+      model: "stored-before-clear",
+    });
+    releaseEncryption?.();
+    await expect(pendingSave).resolves.toBeUndefined();
+    await expect(strictClear).resolves.toBeUndefined();
+
+    await expect(
+      providerSettingsStore.save(scopeIdentity, makeSettings({ model: "stale-hydration-save" })),
+    ).rejects.toThrow("Provider settings are still loading");
+    await expect(providerSettingsStore.hydrate(scopeIdentity)).resolves.toBeNull();
+    await expect(
+      providerSettingsStore.save(scopeIdentity, makeSettings({ model: "fresh-hydration-save" })),
+    ).resolves.toBeUndefined();
+    expect((await loadSettingsAsync(scopeIdentity))?.model).toBe("fresh-hydration-save");
+  });
+
+  it("propagates strict-clear storage errors and detects storage that lies about removal", async () => {
+    const currentKey = scopeStorageKey(scopeIdentity);
+    const historicalKey = historicalScopeStorageKey(scopeIdentity);
+    storage.seed(currentKey, JSON.stringify(makeSettings()));
+    storage.seed(historicalKey, JSON.stringify(makeSettings({ model: "historical" })));
+    storage.failNextRemove = true;
+
+    await expect(clearSettingsStrict(scopeIdentity)).rejects.toThrow("simulated removal failure");
+    expect(storage.getItem(historicalKey)).toBeNull();
+
+    storage.seed(currentKey, JSON.stringify(makeSettings()));
+    storage.lieAboutRemovalFor = currentKey;
+    await expect(clearSettingsStrict(scopeIdentity)).rejects.toThrow(
+      `Provider settings key was not removed: ${currentKey}`,
+    );
+  });
+
+  it("allows a fresh hydration and later saves after a strict clear", async () => {
+    await providerSettingsStore.hydrate(scopeIdentity);
+    await providerSettingsStore.save(scopeIdentity, makeSettings({ model: "before-clear" }));
+
+    await clearSettingsStrict(scopeIdentity);
+    await expect(
+      providerSettingsStore.save(scopeIdentity, makeSettings({ model: "too-early" })),
+    ).rejects.toThrow("Provider settings are still loading");
+    await expect(providerSettingsStore.hydrate(scopeIdentity)).resolves.toBeNull();
+    await expect(
+      providerSettingsStore.save(scopeIdentity, makeSettings({ model: "after-clear" })),
+    ).resolves.toBeUndefined();
+
+    expect((await loadSettingsAsync(scopeIdentity))?.model).toBe("after-clear");
   });
 
   it("uses clean defaults when a newly hydrated account has no saved settings", async () => {

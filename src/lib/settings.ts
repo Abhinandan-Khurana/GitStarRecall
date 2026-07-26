@@ -387,9 +387,7 @@ export function resetProviderSettingsStoreForTests(): void {
   persistenceRevisionByScope.clear();
 }
 
-export function clearSettings(scopeIdentity: string | null): void {
-  if (!scopeIdentity) return;
-
+function invalidateProviderSettingsScope(scopeIdentity: string): void {
   persistenceRevisionByScope.set(
     scopeIdentity,
     (persistenceRevisionByScope.get(scopeIdentity) ?? 0) + 1,
@@ -399,6 +397,12 @@ export function clearSettings(scopeIdentity: string | null): void {
     (hydrationRevisionByScope.get(scopeIdentity) ?? 0) + 1,
   );
   hydratedScopes.delete(scopeIdentity);
+}
+
+export function clearSettings(scopeIdentity: string | null): void {
+  if (!scopeIdentity) return;
+
+  invalidateProviderSettingsScope(scopeIdentity);
 
   try {
     const key = getStorageKey(scopeIdentity);
@@ -406,6 +410,49 @@ export function clearSettings(scopeIdentity: string | null): void {
     clearHistoricalScopeStorageKey(scopeIdentity);
   } catch {
     // Ignore errors
+  }
+}
+
+export async function clearSettingsStrict(scopeIdentity: string): Promise<void> {
+  if (scopeIdentity.trim().length === 0) {
+    throw new Error("Provider settings scope is required");
+  }
+
+  invalidateProviderSettingsScope(scopeIdentity);
+
+  // A save that already started may still be encrypting. Its captured persistence
+  // revision prevents it from writing, but wait for the queue before removing an
+  // older value that may already have reached storage.
+  await (saveQueueByScope.get(scopeIdentity) ?? Promise.resolve());
+  // Hydration may have started after the first invalidation while the save queue
+  // was draining. Revoke that stale eligibility at the deletion boundary.
+  invalidateProviderSettingsScope(scopeIdentity);
+
+  const keys = Array.from(
+    new Set([getStorageKey(scopeIdentity), getHistoricalScopeStorageKey(scopeIdentity)]),
+  );
+  let storageFailure: unknown;
+
+  for (const key of keys) {
+    try {
+      localStorage.removeItem(key);
+    } catch (error) {
+      storageFailure ??= error;
+    }
+  }
+
+  for (const key of keys) {
+    try {
+      if (localStorage.getItem(key) !== null) {
+        storageFailure ??= new Error(`Provider settings key was not removed: ${key}`);
+      }
+    } catch (error) {
+      storageFailure ??= error;
+    }
+  }
+
+  if (storageFailure) {
+    throw storageFailure;
   }
 }
 
