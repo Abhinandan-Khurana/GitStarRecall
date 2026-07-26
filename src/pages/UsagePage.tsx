@@ -58,6 +58,7 @@ import { SyncStatusBar } from "../components/SyncStatusBar";
 import { OllamaConfigPanel } from "../components/OllamaConfigPanel";
 import { DeveloperModePanel, type RetrievalTuning } from "../components/DeveloperModePanel";
 import { ProviderSettingsForm } from "../components/ProviderSettingsForm";
+import { ProviderSettingsStatus } from "../components/ProviderSettingsStatus";
 import { FilterBar } from "../components/FilterBar";
 import { RepoResultCard } from "../components/RepoResultCard";
 import { SessionSidebar } from "../components/SessionSidebar";
@@ -3536,8 +3537,10 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                       void refreshOllamaCatalog();
                     }}
                   />
-                  <p aria-live="polite" className={`text-xs ${providerSettingsSaveState === "error" ? "text-destructive" : "text-muted-foreground"}`}>
-                    {providerSettingsStatusMessage}</p>
+                  <ProviderSettingsStatus
+                    saveState={providerSettingsSaveState}
+                    message={providerSettingsStatusMessage}
+                  />
                   <div className="rounded-md border border-border/60 bg-background/70 p-4">
                     <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Permissions</p>
                     <p className="mt-2">Remote providers: <span className="font-medium text-foreground">{allowRemoteProvider ? "enabled" : "disabled"}</span></p>
@@ -3797,6 +3800,10 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                           void refreshOllamaCatalog();
                         }}
                       />
+                      <ProviderSettingsStatus
+                        saveState={providerSettingsSaveState}
+                        message={providerSettingsStatusMessage}
+                      />
                     </>
                   ) : (
                     <EmptyState type="no-session" />
@@ -3994,6 +4001,10 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                       onRefreshOllamaModels={() => {
                         void refreshOllamaCatalog();
                       }}
+                    />
+                    <ProviderSettingsStatus
+                      saveState={providerSettingsSaveState}
+                      message={providerSettingsStatusMessage}
                     />
                   </CardContent>
                 </Card>
