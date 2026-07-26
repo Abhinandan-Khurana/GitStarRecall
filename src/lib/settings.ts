@@ -70,13 +70,14 @@ export function deriveHydratedProviderSettingsView(input: {
     input.saved,
     createDefaultProviderSettings(input.webLLMEnabled, input.webLLMPrimaryModel),
   );
-  const providerId =
+  const requestedProviderId =
     !input.webLLMEnabled && hydrated.providerId === "webllm"
       ? "openai-compatible"
       : hydrated.providerId;
   const provider =
-    input.providerDefinitions.find((definition) => definition.id === providerId) ??
+    input.providerDefinitions.find((definition) => definition.id === requestedProviderId) ??
     input.providerDefinitions[0];
+  const providerId = provider.id;
   const webllmSelectedModel =
     provider.id === "webllm"
       ? hydrated.webllmPreferredModel || hydrated.model || input.webLLMPrimaryModel
@@ -120,6 +121,12 @@ const saveQueueByScope = new Map<string, Promise<void>>();
 const hydratedScopes = new Set<string>();
 const hydrationRevisionByScope = new Map<string, number>();
 const persistenceRevisionByScope = new Map<string, number>();
+const VALID_PROVIDER_IDS = new Set<LLMProviderId>([
+  "openai-compatible",
+  "ollama",
+  "lmstudio",
+  "webllm",
+]);
 
 function hashScopeValue(raw: string): string {
   return Math.abs(
@@ -217,6 +224,7 @@ function isValidStoredShape(parsed: unknown): parsed is StoredSettings {
   const p = parsed as Record<string, unknown>;
   return (
     typeof p.providerId === "string" &&
+    VALID_PROVIDER_IDS.has(p.providerId as LLMProviderId) &&
     typeof p.baseUrl === "string" &&
     typeof p.model === "string" &&
     (p.ollamaPreferredModel === undefined || typeof p.ollamaPreferredModel === "string") &&
@@ -250,7 +258,7 @@ export async function loadSettingsAsync(
   }
 
   const base: Omit<LLMProviderSettings, "apiKey"> = {
-    providerId: parsed.providerId as LLMProviderId,
+    providerId: parsed.providerId,
     baseUrl: parsed.baseUrl,
     model: parsed.model,
     ollamaPreferredModel:
@@ -371,6 +379,13 @@ export const providerSettingsStore: ProviderSettingsStore = {
     return enqueueSettingsSave(scopeIdentity, settings);
   },
 };
+
+export function resetProviderSettingsStoreForTests(): void {
+  saveQueueByScope.clear();
+  hydratedScopes.clear();
+  hydrationRevisionByScope.clear();
+  persistenceRevisionByScope.clear();
+}
 
 export function clearSettings(scopeIdentity: string | null): void {
   if (!scopeIdentity) return;

@@ -102,9 +102,48 @@ describe("useProviderSettingsPersistence", () => {
       "github:1",
       expect.objectContaining({
         ...settings(),
-        webllmPreferredModel: "recommended-web-model",
+        webllmPreferredModel: "",
       }),
     );
+
+    act(() => {
+      result.current.setWebllmSelectedModel("manual-web-model");
+      result.current.setWebllmModelManuallySet(true);
+    });
+    await waitFor(() =>
+      expect(store.save).toHaveBeenLastCalledWith(
+        "github:1",
+        expect.objectContaining({ webllmPreferredModel: "manual-web-model" }),
+      ),
+    );
+  });
+
+  it("does not rehydrate when equivalent provider definitions receive a new array identity", async () => {
+    const store: ProviderSettingsStore = {
+      hydrate: vi.fn().mockResolvedValue(null),
+      save: vi.fn().mockResolvedValue(undefined),
+    };
+    const onPersistenceError = vi.fn();
+    const hook = renderHook(
+      ({ definitions }) =>
+        useProviderSettingsPersistence({
+          scopeIdentity: "github:1",
+          webLLMEnabled: true,
+          webLLMPrimaryModel: "primary-web-model",
+          providerDefinitions: definitions,
+          store,
+          onPersistenceError,
+        }),
+      { initialProps: { definitions: providerDefinitions } },
+    );
+    await waitFor(() => expect(hook.result.current.saveState).toBe("saved"));
+
+    hook.rerender({ definitions: providerDefinitions.map((definition) => ({ ...definition })) });
+    await waitFor(() => expect(hook.result.current.saveState).toBe("saved"));
+
+    expect(store.hydrate).toHaveBeenCalledOnce();
+    expect(store.save).toHaveBeenCalledOnce();
+    expect(onPersistenceError).not.toHaveBeenCalled();
   });
 
   it("uses clean defaults for an empty scope and never saves without an identity", async () => {

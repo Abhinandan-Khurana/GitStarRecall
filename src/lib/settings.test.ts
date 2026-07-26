@@ -7,6 +7,7 @@ import {
   loadSettingsAsync,
   migrateLegacySettingsScope,
   providerSettingsStore,
+  resetProviderSettingsStoreForTests,
   resolveHydratedProviderSettings,
   type LLMProviderSettings,
 } from "./settings";
@@ -129,6 +130,7 @@ describe("llm provider settings", () => {
 
   beforeEach(() => {
     vi.unstubAllEnvs();
+    resetProviderSettingsStoreForTests();
     originalLocalStorage = globalThis.localStorage;
     storage = new MemoryStorage();
     Object.defineProperty(globalThis, "localStorage", {
@@ -204,6 +206,16 @@ describe("llm provider settings", () => {
     );
 
     localStorage.setItem(scopeStorageKey(scopeIdentity), JSON.stringify({ providerId: "webllm" }));
+    await expect(loadSettingsAsync(scopeIdentity)).rejects.toThrow(
+      "Saved provider settings have an invalid shape",
+    );
+
+    localStorage.setItem(
+      scopeStorageKey(scopeIdentity),
+      JSON.stringify(
+        makeSettings({ providerId: "unknown-provider" as LLMProviderSettings["providerId"] }),
+      ),
+    );
     await expect(loadSettingsAsync(scopeIdentity)).rejects.toThrow(
       "Saved provider settings have an invalid shape",
     );
@@ -300,7 +312,7 @@ describe("llm provider settings", () => {
       providerDefinitions,
     });
     expect(unknownProvider).toMatchObject({
-      providerId: "unknown-provider",
+      providerId: "openai-compatible",
       baseUrl: "https://api.openai.com",
     });
 
@@ -383,6 +395,15 @@ describe("llm provider settings", () => {
 
     expect((await loadSettingsAsync(scopeIdentity))?.apiKey).toBe("sk-account-a");
     expect(await loadSettingsAsync(freshScopeIdentity)).toEqual(cleanDefaults);
+  });
+
+  it("resets singleton hydration state between isolated tests", async () => {
+    await providerSettingsStore.hydrate(scopeIdentity);
+    resetProviderSettingsStoreForTests();
+
+    await expect(providerSettingsStore.save(scopeIdentity, makeSettings())).rejects.toThrow(
+      "Provider settings are still loading",
+    );
   });
 
   it("does not let a pending encrypted save resurrect cleared settings", async () => {

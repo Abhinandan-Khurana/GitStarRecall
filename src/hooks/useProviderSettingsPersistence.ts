@@ -20,6 +20,12 @@ type ProviderSettingsPersistenceOptions = {
   onPersistenceError?: (event: string, error: unknown) => void;
 };
 
+function getProviderDefinitionsKey(definitions: LLMProviderDefinition[]): string {
+  return JSON.stringify(
+    definitions.map(({ id, defaultBaseUrl, defaultModel }) => [id, defaultBaseUrl, defaultModel]),
+  );
+}
+
 export type ProviderSettingsPersistence = {
   providerId: LLMProviderId;
   setProviderId: Dispatch<SetStateAction<LLMProviderId>>;
@@ -57,15 +63,27 @@ export function useProviderSettingsPersistence({
   store = providerSettingsStore,
   onPersistenceError = captureLocalError,
 }: ProviderSettingsPersistenceOptions): ProviderSettingsPersistence {
+  const providerDefinitionsKey = getProviderDefinitionsKey(providerDefinitions);
+  const providerDefinitionsCacheRef = useRef({
+    key: providerDefinitionsKey,
+    definitions: providerDefinitions,
+  });
+  if (providerDefinitionsCacheRef.current.key !== providerDefinitionsKey) {
+    providerDefinitionsCacheRef.current = {
+      key: providerDefinitionsKey,
+      definitions: providerDefinitions,
+    };
+  }
+  const stableProviderDefinitions = providerDefinitionsCacheRef.current.definitions;
   const initial = useMemo(
     () =>
       deriveHydratedProviderSettingsView({
         saved: null,
         webLLMEnabled,
         webLLMPrimaryModel,
-        providerDefinitions,
+        providerDefinitions: stableProviderDefinitions,
       }),
-    [providerDefinitions, webLLMEnabled, webLLMPrimaryModel],
+    [stableProviderDefinitions, webLLMEnabled, webLLMPrimaryModel],
   );
   const [providerId, setProviderId] = useState(initial.providerId);
   const [providerBaseUrl, setProviderBaseUrl] = useState(initial.baseUrl);
@@ -121,7 +139,7 @@ export function useProviderSettingsPersistence({
           saved,
           webLLMEnabled,
           webLLMPrimaryModel,
-          providerDefinitions,
+          providerDefinitions: stableProviderDefinitions,
         });
         setProviderId(hydrated.providerId);
         setProviderBaseUrl(hydrated.baseUrl);
@@ -150,8 +168,8 @@ export function useProviderSettingsPersistence({
   }, [
     initial,
     onPersistenceError,
-    providerDefinitions,
     scopeIdentity,
+    stableProviderDefinitions,
     store,
     webLLMEnabled,
     webLLMPrimaryModel,
@@ -171,7 +189,7 @@ export function useProviderSettingsPersistence({
       allowRemoteProvider,
       allowLocalProvider,
       webllmConsent,
-      webllmPreferredModel: webllmSelectedModel,
+      webllmPreferredModel: webllmModelManuallySet ? webllmSelectedModel : "",
       webllmLastRecommendedModel,
       ollamaPreferredModel: ollamaPreferredChatModel,
     };
@@ -202,6 +220,7 @@ export function useProviderSettingsPersistence({
     store,
     webllmConsent,
     webllmLastRecommendedModel,
+    webllmModelManuallySet,
     webllmSelectedModel,
   ]);
 
