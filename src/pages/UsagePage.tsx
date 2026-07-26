@@ -215,8 +215,8 @@ function formatOllamaConnectionError(err: unknown): string {
     return [
       "Cannot reach Ollama from the browser.",
       "Ensure Ollama is running (`ollama serve`).",
-      "Set `OLLAMA_ORIGINS` to the exact browser origin shown in the address bar; do not use `*`.",
-      "Restart Ollama, then click Test again.",
+      'Enable global CORS (`export OLLAMA_ORIGINS="*"`) and restart Ollama.',
+      "Then click Test again.",
     ].join(" ");
   }
   return message;
