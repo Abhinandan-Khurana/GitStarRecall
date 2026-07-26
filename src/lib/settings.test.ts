@@ -228,7 +228,17 @@ describe("llm provider settings", () => {
   });
 
   it("defaults a missing legacy API key to blank", async () => {
-    const withoutApiKey = { ...makeSettings(), apiKey: undefined };
+    const withoutApiKey = {
+      providerId: "openai-compatible",
+      baseUrl: "https://api.openai.com",
+      model: "gpt-4o-mini",
+      ollamaPreferredModel: "llama3.1:8b",
+      allowRemoteProvider: true,
+      allowLocalProvider: false,
+      webllmConsent: false,
+      webllmPreferredModel: "",
+      webllmLastRecommendedModel: "",
+    };
     localStorage.setItem(scopeStorageKey(scopeIdentity), JSON.stringify(withoutApiKey));
 
     expect((await loadSettingsAsync(scopeIdentity))?.apiKey).toBe("");
