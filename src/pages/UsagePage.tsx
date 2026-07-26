@@ -77,8 +77,14 @@ import {
   getProviderDefinitions,
   isWebLLMEnabled,
 } from "../llm/providers";
-import { resolveProviderFallback } from "../llm/fallback";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
+import {
+  cancelPendingGeneration,
+  createSelectedProviderGeneration,
+  resumePendingWebLLMGeneration,
+  type PendingGeneration,
+} from "../llm/generationState";
+import { executeUsageGeneration } from "../llm/usageGenerationAdapter";
 import { useProviderSettingsPersistence } from "../hooks/useProviderSettingsPersistence";
 import {
   getWebLLMSelectableModels,
@@ -90,7 +96,6 @@ import {
   resolveHermesModelSelection,
   type WebLLMRecommendation,
 } from "../llm/webllm/capability";
-import { WebLLMProviderError } from "../llm/webllm/engine";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -726,8 +731,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const [llmError, setLlmError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const generationControllerRef = useRef<AbortController | null>(null);
-  const pendingWebllmGenerationRef = useRef(false);
-  const generateAnswerRef = useRef<() => Promise<void>>(async () => undefined);
+  const pendingWebllmGenerationRef = useRef<PendingGeneration | null>(null);
   const ollamaCatalogRequestIdRef = useRef(0);
   const ollamaEmbeddingModelManuallySetRef = useRef(false);
   const ollamaChatModelManuallySetRef = useRef(false);
@@ -2928,65 +2932,38 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     });
   };
 
-  const canReachLocalProvider = useCallback(async (provider: "ollama" | "lmstudio"): Promise<boolean> => {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 2000);
-    try {
-      const url =
-        provider === "ollama"
-          ? `${(ollamaBaseUrl.trim() || "http://localhost:11434").replace(/\/+$/, "")}/api/tags`
-          : `${(
-              providerDefinitions.find((item) => item.id === "lmstudio")?.defaultBaseUrl ||
-              "http://localhost:1234"
-            ).replace(/\/+$/, "")}/v1/models`;
-      const response = await fetch(url, { method: "GET", signal: controller.signal });
-      return response.ok;
-    } catch {
-      return false;
-    } finally {
-      window.clearTimeout(timeout);
-    }
-  }, [ollamaBaseUrl]);
-
-  const runProviderStream = useCallback(async (args: {
-    provider: LLMProviderId;
-    model: string;
-    promptText: string;
-    snippets: string[];
-    controller: AbortController;
-    onToken: (token: string) => void;
-    allowModelDownload: boolean;
-  }): Promise<void> => {
-    const provider = getProviderById(args.provider);
-    const lmStudioDefaultBase =
-      providerDefinitions.find((item) => item.id === "lmstudio")?.defaultBaseUrl ||
-      "http://localhost:1234";
-    const providerBase =
-      args.provider === "ollama"
-        ? (ollamaBaseUrl.trim() || "http://localhost:11434")
-        : args.provider === "lmstudio"
-          ? lmStudioDefaultBase
-          : providerBaseUrl.trim();
-    await provider.stream(
-      {
-        baseUrl: providerBase,
-        model: args.model,
-        apiKey: providerApiKey.trim(),
-        allowModelDownload: args.allowModelDownload,
+  const executePendingGeneration = async (generation: PendingGeneration): Promise<void> => {
+    await executeUsageGeneration(generation, {
+      controllerRef: generationControllerRef,
+      pendingGenerationRef: pendingWebllmGenerationRef,
+      fallbackWebLLMModelId: WEBLLM_FALLBACK_MODEL_ID,
+      getDatabase: getLocalDatabase,
+      providerDefinitions,
+      getProvider: getProviderById,
+      createId: () => crypto.randomUUID(),
+      now: Date.now,
+      setGenerating: setIsGenerating,
+      setAnswer: setLlmAnswer,
+      setPrompt: setLlmPrompt,
+      setSessionMessages: setSessionMessagesById,
+      sortMessages: sortChatMessages,
+      setRuntimeState: setWebllmRuntimeState,
+      setDownloadProgress: setWebllmDownloadProgress,
+      setProgressText: setWebllmProgressText,
+      setDownloadDialogOpen: setWebllmDialogOpen,
+      setAllowModelDownload: setWebllmAllowModelDownload,
+      setProviderId,
+      setProviderModel,
+      setProviderBaseUrl,
+      setSelectedWebLLMModel: setWebllmSelectedModel,
+      setError: setLlmError,
+      reportError: (error, failedProviderId) => {
+        captureLocalError("llm_generation_failed", error);
+        const providerKind = getProviderById(failedProviderId).definition.kind;
+        setLlmError(formatProviderError(error, providerKind));
       },
-      {
-        prompt: args.promptText,
-        contextSnippets: args.snippets,
-        signal: args.controller.signal,
-        onToken: args.onToken,
-        onInitProgress: (progress, text) => {
-          setWebllmDownloadProgress(progress);
-          setWebllmProgressText(text);
-          setWebllmRuntimeState("downloading");
-        },
-      },
-    );
-  }, [ollamaBaseUrl, providerApiKey, providerBaseUrl]);
+    });
+  };
 
   const handleGenerateAnswer = async () => {
     if (!activeSession) {
@@ -3011,13 +2988,6 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
     if (providerId === "webllm" && !webLLMEnabled) {
       setLlmError("WebLLM is disabled. Enable VITE_WEBLLM_ENABLED=1 to use browser models.");
-      return;
-    }
-
-    if (providerId === "webllm" && !webllmConsent) {
-      setWebllmRuntimeState("needs-consent");
-      setWebllmDialogOpen(true);
-      setLlmError(null);
       return;
     }
 
@@ -3053,184 +3023,62 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     }
 
     const promptText = llmPrompt.trim();
-    try {
+    const generation = createSelectedProviderGeneration({
+      requestId: crypto.randomUUID(),
+      sessionId: activeSession.id,
+      promptText,
+      snippets,
+      providerSelection: {
+        providerId,
+        providerBaseUrl,
+        ollamaBaseUrl: ollamaBaseUrl.trim(),
+        model: resolveHermesModelSelection(providerModel.trim() || WEBLLM_PRIMARY_MODEL_ID),
+        apiKey: providerApiKey,
+        allowModelDownload: webllmAllowModelDownload,
+      },
+      executionPolicy: {
+        allowLocalProvider,
+        allowRemoteProvider,
+        webllmConsent,
+        ollamaBaseUrl: ollamaBaseUrl.trim(),
+        lmStudioBaseUrl: providerBaseUrl.trim(),
+      },
+    });
+
+    if (providerId === "webllm" && !webllmConsent) {
+      pendingWebllmGenerationRef.current = generation;
+      setWebllmRuntimeState("needs-consent");
+      setWebllmDialogOpen(true);
       setLlmError(null);
-      setLlmAnswer("");
-      setIsGenerating(true);
-      setLlmPrompt("");
-      let streamedAnswer = "";
-      const controller = new AbortController();
-      generationControllerRef.current = controller;
-
-      const database = await getLocalDatabase();
-      const userSequence = database.getNextChatMessageSequence(activeSessionId!);
-      const userMessage: ChatMessageRecord = {
-        id: crypto.randomUUID(),
-        sessionId: activeSessionId!,
-        role: "user",
-        content: promptText,
-        sequence: userSequence,
-        createdAt: Date.now(),
-      };
-      await database.addChatMessage(userMessage);
-      setSessionMessagesById((previous) => {
-        const current = previous[activeSessionId!] ?? [];
-        return {
-          ...previous,
-          [activeSessionId!]: sortChatMessages([...current, userMessage]),
-        };
-      });
-
-      const streamToken = (token: string) => {
-        streamedAnswer += token;
-        setLlmAnswer((previous) => previous + token);
-      };
-
-      const activeModel = resolveHermesModelSelection(providerModel.trim() || WEBLLM_PRIMARY_MODEL_ID);
-      let effectiveProviderId = providerId;
-      let effectiveModel = activeModel;
-
-      try {
-        await runProviderStream({
-          provider: effectiveProviderId,
-          model: effectiveModel,
-          promptText,
-          snippets,
-          controller,
-          onToken: streamToken,
-          allowModelDownload: webllmAllowModelDownload,
-        });
-        if (effectiveProviderId === "webllm") {
-          setWebllmRuntimeState("ready");
-        }
-      } catch (streamError) {
-        if (effectiveProviderId === "webllm" && streamError instanceof WebLLMProviderError) {
-          if (streamError.code === "WEBLLM_DOWNLOAD_REQUIRED") {
-            setWebllmRuntimeState("needs-consent");
-            setWebllmDialogOpen(true);
-            setLlmError(null);
-            return;
-          }
-
-          if (effectiveModel !== WEBLLM_FALLBACK_MODEL_ID) {
-            effectiveModel = WEBLLM_FALLBACK_MODEL_ID;
-            setProviderModel(effectiveModel);
-            setWebllmSelectedModel(effectiveModel);
-            try {
-              setWebllmRuntimeState("downloading");
-              await runProviderStream({
-                provider: "webllm",
-                model: effectiveModel,
-                promptText,
-                snippets,
-                controller,
-                onToken: streamToken,
-                allowModelDownload: true,
-              });
-              setWebllmRuntimeState("ready");
-            } catch {
-              setWebllmRuntimeState("failed");
-            }
-          } else {
-            setWebllmRuntimeState("failed");
-          }
-
-          if (streamedAnswer.trim().length === 0) {
-            const fallbackProviderId = resolveProviderFallback({
-              canUseOllama: allowLocalProvider && await canReachLocalProvider("ollama"),
-              canUseLmStudio: allowLocalProvider && await canReachLocalProvider("lmstudio"),
-              canUseOpenAICompatible: allowRemoteProvider && providerApiKey.trim().length > 0,
-            });
-            if (fallbackProviderId == null) {
-              throw streamError;
-            }
-
-            effectiveProviderId = fallbackProviderId;
-            const fallbackDefinition =
-              providerDefinitions.find((provider) => provider.id === fallbackProviderId) ?? null;
-            const fallbackModel = fallbackDefinition?.defaultModel ?? "gpt-4o-mini";
-            setProviderId(fallbackProviderId);
-            setProviderModel(fallbackModel);
-            setProviderBaseUrl(fallbackDefinition?.defaultBaseUrl ?? providerBaseUrl);
-            setLlmError(`WebLLM failed, switched to ${fallbackDefinition?.label ?? fallbackProviderId}.`);
-
-            await runProviderStream({
-              provider: fallbackProviderId,
-              model: fallbackModel,
-              promptText,
-              snippets,
-              controller,
-              onToken: streamToken,
-              allowModelDownload: false,
-            });
-          } else {
-            throw streamError;
-          }
-        } else {
-          throw streamError;
-        }
-      }
-
-      if (activeSessionId && streamedAnswer.trim()) {
-        const assistantSequence = database.getNextChatMessageSequence(activeSessionId);
-        const assistantMessage: ChatMessageRecord = {
-          id: crypto.randomUUID(),
-          sessionId: activeSessionId,
-          role: "assistant",
-          content: streamedAnswer,
-          sequence: assistantSequence,
-          createdAt: Date.now(),
-        };
-        await database.addChatMessage(assistantMessage);
-        setSessionMessagesById((previous) => {
-          const current = previous[activeSessionId] ?? [];
-          return {
-            ...previous,
-            [activeSessionId]: sortChatMessages([...current, assistantMessage]),
-          };
-        });
-      }
-    } catch (err) {
-      captureLocalError("llm_generation_failed", err);
-      setLlmError(formatProviderError(err, selectedProvider.kind));
-    } finally {
-      setIsGenerating(false);
-      generationControllerRef.current = null;
-      setWebllmAllowModelDownload(false);
+      return;
     }
+
+    await executePendingGeneration(generation);
   };
 
-  generateAnswerRef.current = handleGenerateAnswer;
-
   const handleCancelGeneration = () => {
+    pendingWebllmGenerationRef.current = cancelPendingGeneration();
     generationControllerRef.current?.abort();
   };
 
-  useEffect(() => {
-    if (!pendingWebllmGenerationRef.current) {
-      return;
-    }
-
-    if (providerId !== "webllm" || !webllmConsent || !webllmAllowModelDownload) {
-      return;
-    }
-
-    pendingWebllmGenerationRef.current = false;
-    void generateAnswerRef.current();
-  }, [providerId, webllmAllowModelDownload, webllmConsent]);
-
   const handleConfirmWebllmDownload = () => {
-    pendingWebllmGenerationRef.current = true;
+    const resumed = resumePendingWebLLMGeneration(
+      pendingWebllmGenerationRef.current,
+      resolveHermesModelSelection(webllmSelectedModel),
+    );
+    pendingWebllmGenerationRef.current = resumed.nextPending;
+    if (!resumed.generation) return;
     setWebllmConsent(true);
     setWebllmAllowModelDownload(true);
     setProviderId("webllm");
     setProviderModel(resolveHermesModelSelection(webllmSelectedModel));
     setWebllmDialogOpen(false);
     setWebllmRuntimeState("downloading");
+    void executePendingGeneration(resumed.generation);
   };
 
   const handleCancelWebllmDownload = () => {
-    pendingWebllmGenerationRef.current = false;
+    pendingWebllmGenerationRef.current = cancelPendingGeneration();
     setWebllmDialogOpen(false);
     setWebllmRuntimeState("idle");
   };
