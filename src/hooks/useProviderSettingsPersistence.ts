@@ -107,7 +107,10 @@ export function useProviderSettingsPersistence({
     setWebllmSelectedModel(initial.webllmSelectedModel);
     setWebllmModelManuallySet(initial.webllmModelManuallySet);
     setWebllmLastRecommendedModel(initial.webllmLastRecommendedModel);
-    if (!scopeIdentity) return;
+    if (!scopeIdentity) {
+      setHydrationState("ready");
+      return;
+    }
 
     let cancelled = false;
     void store

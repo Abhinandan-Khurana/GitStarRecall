@@ -116,20 +116,36 @@ describe("useProviderSettingsPersistence", () => {
     expect(emptyScope.result.current).toMatchObject({
       providerId: "webllm",
       providerModel: "primary-web-model",
-      hydrationState: "loading",
+      hydrationState: "ready",
       saveState: "idle",
+      statusMessage: "Provider settings save automatically.",
     });
     expect(store.hydrate).not.toHaveBeenCalled();
     expect(store.save).not.toHaveBeenCalled();
     emptyScope.unmount();
 
+    vi.mocked(store.hydrate).mockResolvedValueOnce(settings());
     const hydrated = renderPersistence(store);
     await waitFor(() => expect(hydrated.result.current.hydrationState).toBe("ready"));
     expect(hydrated.result.current).toMatchObject({
-      providerId: "webllm",
-      providerModel: "primary-web-model",
-      providerApiKey: "",
+      providerId: "openai-compatible",
+      providerModel: "saved-model",
+      providerApiKey: "sk-saved",
     });
+    await waitFor(() => expect(hydrated.result.current.saveState).toBe("saved"));
+    const saveCountBeforeLogout = vi.mocked(store.save).mock.calls.length;
+
+    hydrated.rerender({ scope: null });
+    await waitFor(() =>
+      expect(hydrated.result.current).toMatchObject({
+        providerId: "webllm",
+        providerModel: "primary-web-model",
+        providerApiKey: "",
+        hydrationState: "ready",
+        saveState: "idle",
+      }),
+    );
+    expect(store.save).toHaveBeenCalledTimes(saveCountBeforeLogout);
   });
 
   it("surfaces hydration and latest-save failures without throwing", async () => {
