@@ -295,6 +295,31 @@ describe("github client integration", () => {
     }
   });
 
+  test("fetchReadmes does not retry when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort(null);
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ message: "Unavailable" }, { status: 503 }));
+    const client = createGitHubApiClient({
+      accessToken: "token",
+      fetchImpl,
+      maxRetries: 1,
+      logger: { debug: () => undefined, warn: () => undefined },
+    });
+
+    await expect(
+      client.fetchReadmes([makeRepo(34)], {
+        signal: controller.signal,
+        concurrency: 1,
+        minConcurrency: 1,
+        maxConcurrency: 1,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   test("fetchReadmes aborts the shared adaptive cooldown before starting another request", async () => {
     vi.useFakeTimers();
     try {
@@ -458,6 +483,34 @@ describe("github client integration", () => {
     expect(metadataChanged).toMatchObject({ outcome: "not_modified", readmeText });
     expect(metadataChanged?.checksum).not.toBe(initial?.checksum);
     expect(unchanged?.checksum).toBe(metadataChanged?.checksum);
+  });
+
+  test("fetchReadmes preserves a prior checksum on 304 when prior README bytes are unavailable", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 304 }));
+    const client = createGitHubApiClient({
+      accessToken: "token",
+      fetchImpl,
+      logger: { debug: () => undefined, warn: () => undefined },
+    });
+
+    const result = await client.fetchReadmes([makeRepo(35)], {
+      previousSyncStateByRepoId: new Map([
+        [
+          35,
+          {
+            checksum: "checksum-without-local-readme-bytes",
+            readmeEtag: '"etag-35"',
+            readmeLastModified: null,
+          },
+        ],
+      ]),
+    });
+
+    expect(result.records[0]).toMatchObject({
+      outcome: "not_modified",
+      checksum: "checksum-without-local-readme-bytes",
+      readmeText: null,
+    });
   });
 
   test("fetchReadmes preserves previous README state after transient retry exhaustion", async () => {

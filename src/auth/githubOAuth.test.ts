@@ -151,6 +151,45 @@ describe("github oauth scope policy", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  test("times out a stalled response body and permits a fresh retry", async () => {
+    vi.useFakeTimers();
+    const { state, verifier } = await createOAuthSession();
+    let firstSignal: AbortSignal | undefined;
+
+    vi.mocked(fetch)
+      .mockImplementationOnce((_input, options) => {
+        firstSignal = options?.signal ?? undefined;
+        return Promise.resolve({
+          ...oauthResponse(),
+          json: () =>
+            new Promise((_resolve, reject) => {
+              firstSignal?.addEventListener("abort", () => {
+                reject(new DOMException("Aborted", "AbortError"));
+              });
+            }),
+        } as Response);
+      })
+      .mockResolvedValueOnce(oauthResponse());
+
+    const stalledAttempt = exchangeOAuthCode({ code: "callback-code", state });
+    const timeoutRejection = expect(stalledAttempt).rejects.toMatchObject({
+      retryable: true,
+      message: "OAuth token exchange timed out",
+    });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(firstSignal).toBeDefined();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await timeoutRejection;
+    expect(firstSignal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(sessionStorage.getItem("gitstarrecall.oauth.verifier")).toBe(verifier);
+
+    await expect(exchangeOAuthCode({ code: "callback-code", state })).resolves.toBe("issued-token");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   test.each([429, 503])("retains PKCE state after retryable HTTP %s", async (status) => {
     const { state, verifier } = await createOAuthSession();
     vi.mocked(fetch)

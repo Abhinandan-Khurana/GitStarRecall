@@ -146,6 +146,70 @@ describe("useProviderSettingsPersistence", () => {
     expect(onPersistenceError).not.toHaveBeenCalled();
   });
 
+  it("rehydrates and saves when provider defaults change semantically", async () => {
+    const store: ProviderSettingsStore = {
+      hydrate: vi.fn().mockResolvedValue(
+        settings({
+          providerId: "ollama",
+          baseUrl: "",
+          model: "",
+          ollamaPreferredModel: "",
+          apiKey: "",
+        }),
+      ),
+      save: vi.fn().mockResolvedValue(undefined),
+    };
+    const onPersistenceError = vi.fn();
+    const hook = renderHook(
+      ({ definitions }) =>
+        useProviderSettingsPersistence({
+          scopeIdentity: "github:1",
+          webLLMEnabled: true,
+          webLLMPrimaryModel: "primary-web-model",
+          providerDefinitions: definitions,
+          store,
+          onPersistenceError,
+        }),
+      { initialProps: { definitions: providerDefinitions } },
+    );
+    await waitFor(() =>
+      expect(hook.result.current).toMatchObject({
+        providerId: "ollama",
+        providerBaseUrl: "http://localhost:11434",
+        providerModel: "llama3.1:8b",
+        saveState: "saved",
+      }),
+    );
+
+    const changedDefinitions = providerDefinitions.map((definition) =>
+      definition.id === "ollama"
+        ? {
+            ...definition,
+            defaultBaseUrl: "http://127.0.0.1:22434",
+            defaultModel: "qwen3:8b",
+          }
+        : definition,
+    );
+    hook.rerender({ definitions: changedDefinitions });
+
+    await waitFor(() =>
+      expect(hook.result.current).toMatchObject({
+        providerId: "ollama",
+        providerBaseUrl: "http://127.0.0.1:22434",
+        providerModel: "qwen3:8b",
+        saveState: "saved",
+      }),
+    );
+    expect(store.save).toHaveBeenLastCalledWith(
+      "github:1",
+      expect.objectContaining({
+        providerId: "ollama",
+        baseUrl: "http://127.0.0.1:22434",
+        model: "qwen3:8b",
+      }),
+    );
+  });
+
   it("uses clean defaults for an empty scope and never saves without an identity", async () => {
     const store: ProviderSettingsStore = {
       hydrate: vi.fn().mockResolvedValue(null),
