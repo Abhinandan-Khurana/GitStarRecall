@@ -36,6 +36,10 @@ class MemoryStorage implements Storage {
     this.entries.delete(key);
   }
 
+  seed(key: string, value: string): void {
+    this.entries.set(key, value);
+  }
+
   setItem(key: string, value: string): void {
     if (this.failNextSet) {
       this.failNextSet = false;
@@ -239,7 +243,7 @@ describe("llm provider settings", () => {
       webllmPreferredModel: "",
       webllmLastRecommendedModel: "",
     };
-    localStorage.setItem(scopeStorageKey(scopeIdentity), JSON.stringify(withoutApiKey));
+    storage.seed(scopeStorageKey(scopeIdentity), JSON.stringify(withoutApiKey));
 
     expect((await loadSettingsAsync(scopeIdentity))?.apiKey).toBe("");
   });
