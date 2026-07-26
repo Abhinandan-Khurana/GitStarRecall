@@ -1,3 +1,5 @@
+import { buildLocalEndpointUrl, normalizeLocalEndpoint } from "../llm/localEndpoint";
+
 export type OllamaEmbeddingEndpoint = "embed" | "embeddings";
 
 export type OllamaEmbeddingRuntimeInfo = {
@@ -10,12 +12,6 @@ export type OllamaEmbeddingRuntimeInfo = {
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 type JsonObject = { [key: string]: JsonValue };
-
-const LOCAL_ENDPOINT_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
-
-function isLocalEndpoint(baseUrl: string): boolean {
-  return LOCAL_ENDPOINT_PATTERN.test(baseUrl);
-}
 
 function asObject(value: JsonValue | null | undefined): JsonObject | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -102,10 +98,7 @@ export class OllamaEmbeddingClient {
   private availableModels: string[] = [];
 
   constructor(args: { baseUrl: string; model: string; timeoutMs: number }) {
-    const normalizedBaseUrl = args.baseUrl.trim().replace(/\/+$/, "");
-    if (!isLocalEndpoint(normalizedBaseUrl)) {
-      throw new Error("Ollama endpoint must use localhost / 127.0.0.1 / [::1]");
-    }
+    const normalizedBaseUrl = normalizeLocalEndpoint(args.baseUrl, "Ollama");
     const normalizedModel = args.model.trim();
     if (!normalizedModel) {
       throw new Error("Ollama embedding model is required");
@@ -115,11 +108,11 @@ export class OllamaEmbeddingClient {
     this.timeoutMs = Math.max(1_000, Math.trunc(args.timeoutMs));
   }
 
-  private async fetchWithTimeout(path: string, init: RequestInit): Promise<Response> {
+  private async fetchWithTimeout(path: `/${string}`, init: RequestInit): Promise<Response> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      return await fetch(`${this.baseUrl}${path}`, {
+      return await fetch(buildLocalEndpointUrl(this.baseUrl, path, "Ollama"), {
         ...init,
         signal: controller.signal,
       });
@@ -210,7 +203,9 @@ export class OllamaEmbeddingClient {
       const payload = (await response.json()) as JsonValue;
       const vectors = parseEmbedResponse(payload);
       if (vectors.length !== texts.length) {
-        throw new Error(`Ollama /api/embed mismatch: expected ${texts.length}, got ${vectors.length}`);
+        throw new Error(
+          `Ollama /api/embed mismatch: expected ${texts.length}, got ${vectors.length}`,
+        );
       }
       return vectors.map((vector) => Float32Array.from(vector));
     }
@@ -234,7 +229,9 @@ export class OllamaEmbeddingClient {
       const payload = (await response.json()) as JsonValue;
       const vectorRows = parseEmbedResponse(payload);
       if (vectorRows.length !== 1) {
-        throw new Error(`Ollama /api/embeddings returned ${vectorRows.length} vectors for single prompt`);
+        throw new Error(
+          `Ollama /api/embeddings returned ${vectorRows.length} vectors for single prompt`,
+        );
       }
       vectors.push(Float32Array.from(vectorRows[0]));
     }

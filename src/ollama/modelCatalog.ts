@@ -1,4 +1,5 @@
-const LOCAL_ENDPOINT_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
+import { buildLocalEndpointUrl, normalizeLocalEndpoint } from "../llm/localEndpoint";
+
 const DEFAULT_EMBEDDING_MODEL = "qwen3-embedding:0.6b";
 const EMBEDDING_RECOMMENDATION_ORDER = [
   "qwen3-embedding:4b",
@@ -45,10 +46,6 @@ function asString(value: JsonValue | null | undefined): string | null {
   return value;
 }
 
-function isLocalEndpoint(baseUrl: string): boolean {
-  return LOCAL_ENDPOINT_PATTERN.test(baseUrl);
-}
-
 function normalizeModelName(name: string): string {
   return name.trim();
 }
@@ -58,10 +55,11 @@ function parseFamilies(details: JsonObject | null): string[] {
     return [];
   }
   const family = asString(details.family);
-  const families = asArray(details.families)
-    ?.map((value) => asString(value))
-    .filter((value): value is string => Boolean(value && value.trim()))
-    .map((value) => value.trim()) ?? [];
+  const families =
+    asArray(details.families)
+      ?.map((value) => asString(value))
+      .filter((value): value is string => Boolean(value && value.trim()))
+      .map((value) => value.trim()) ?? [];
 
   if (family && family.trim()) {
     return Array.from(new Set([family.trim(), ...families]));
@@ -153,8 +151,12 @@ export function buildOllamaModelCatalogFromPayload(
 ): OllamaModelCatalog {
   const entries = parseModelEntries(payload);
   const all = uniqueSorted(entries.map((entry) => entry.name));
-  const embedding = orderEmbeddingModels(entries.filter((entry) => isEmbeddingModel(entry)).map((entry) => entry.name));
-  const llm = uniqueSorted(entries.filter((entry) => !isEmbeddingModel(entry)).map((entry) => entry.name));
+  const embedding = orderEmbeddingModels(
+    entries.filter((entry) => isEmbeddingModel(entry)).map((entry) => entry.name),
+  );
+  const llm = uniqueSorted(
+    entries.filter((entry) => !isEmbeddingModel(entry)).map((entry) => entry.name),
+  );
   const normalizedPreferredLlm = preferredLlmModel ? preferredLlmModel.trim() : "";
 
   return {
@@ -162,7 +164,10 @@ export function buildOllamaModelCatalogFromPayload(
     embedding,
     llm,
     recommendedEmbedding: pickRecommendedEmbedding(embedding),
-    recommendedLlm: normalizedPreferredLlm && llm.includes(normalizedPreferredLlm) ? normalizedPreferredLlm : llm[0] ?? null,
+    recommendedLlm:
+      normalizedPreferredLlm && llm.includes(normalizedPreferredLlm)
+        ? normalizedPreferredLlm
+        : (llm[0] ?? null),
   };
 }
 
@@ -182,14 +187,14 @@ async function extractErrorMessage(response: Response): Promise<string> {
 
 async function fetchWithTimeout(
   baseUrl: string,
-  path: string,
+  path: `/${string}`,
   timeoutMs: number,
   init: RequestInit,
 ): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(`${baseUrl}${path}`, {
+    return await fetch(buildLocalEndpointUrl(baseUrl, path, "Ollama"), {
       ...init,
       signal: controller.signal,
     });
@@ -208,14 +213,16 @@ export async function fetchOllamaModelCatalog(args: {
   timeoutMs: number;
   preferredLlmModel: string | null;
 }): Promise<OllamaModelCatalog> {
-  const normalizedBaseUrl = args.baseUrl.trim().replace(/\/+$/, "");
-  if (!isLocalEndpoint(normalizedBaseUrl)) {
-    throw new Error("Ollama endpoint must use localhost / 127.0.0.1 / [::1]");
-  }
+  const normalizedBaseUrl = normalizeLocalEndpoint(args.baseUrl, "Ollama");
 
-  const response = await fetchWithTimeout(normalizedBaseUrl, "/api/tags", Math.max(1_000, Math.trunc(args.timeoutMs)), {
-    method: "GET",
-  });
+  const response = await fetchWithTimeout(
+    normalizedBaseUrl,
+    "/api/tags",
+    Math.max(1_000, Math.trunc(args.timeoutMs)),
+    {
+      method: "GET",
+    },
+  );
   if (!response.ok) {
     const reason = await extractErrorMessage(response);
     throw new Error(`Ollama model list request failed: ${reason}`);

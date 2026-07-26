@@ -1,5 +1,6 @@
 import {
   Embedder,
+  isFatalEmbeddingWorkerError,
   type BatchEmbeddingResultItem,
   type BrowserEmbeddingModelCandidates,
   type EmbeddingBackendPreference,
@@ -80,6 +81,8 @@ export class EmbeddingWorkerPool {
   private embedders: EmbedderLike[] = [];
   private errorCount = 0;
   private downshiftReason: string | null = null;
+  private activeBatchCount = 0;
+  private unusableEmbedders = new Set<EmbedderLike>();
 
   constructor(options: EmbeddingWorkerPoolOptions = {}) {
     const configuredPoolSize = clampPositiveInt(options.poolSize, DEFAULT_POOL_SIZE);
@@ -115,25 +118,43 @@ export class EmbeddingWorkerPool {
     if (!this.downshiftReason) {
       this.downshiftReason = reason;
     }
+    this.retireSurplusIdleWorkers();
+  }
+
+  private retireSurplusIdleWorkers(): void {
+    if (this.activeBatchCount > 0) {
+      return;
+    }
+    if (this.unusableEmbedders.size > 0) {
+      this.embedders = this.embedders.filter((embedder) => {
+        if (!this.unusableEmbedders.delete(embedder)) {
+          return true;
+        }
+        embedder.terminate();
+        return false;
+      });
+    }
+    while (this.embedders.length > this.activePoolSize) {
+      this.embedders.pop()?.terminate();
+    }
   }
 
   setConcurrency(targetPoolSize: number): void {
     const normalized = clampPositiveInt(targetPoolSize, 1);
-    this.activePoolSize = Math.max(1, Math.min(normalized, this.maxPoolSize, this.configuredPoolSize));
+    this.activePoolSize = Math.max(
+      1,
+      Math.min(normalized, this.maxPoolSize, this.configuredPoolSize),
+    );
     if (this.activePoolSize > 1) {
       this.downshiftReason = null;
     }
+    this.retireSurplusIdleWorkers();
   }
 
   private updateConcurrencyForRuntime(): void {
     const status = this.getStatus();
     if (status.selectedBackend === "webgpu") {
       this.setConcurrency(1);
-      return;
-    }
-
-    if (!status.downshifted && this.activePoolSize < this.configuredPoolSize) {
-      this.setConcurrency(this.configuredPoolSize);
     }
   }
 
@@ -171,83 +192,108 @@ export class EmbeddingWorkerPool {
       throw new Error(`embedding queue overflow: ${texts.length} > ${this.maxQueueSize}`);
     }
 
-    this.ensureWorkers();
-    this.updateConcurrencyForRuntime();
-    const results: BatchEmbeddingResultItem[] = Array.from({ length: texts.length }, () => ({
-      embedding: null,
-      error: "embedding job was not executed",
-    }));
+    this.activeBatchCount += 1;
+    try {
+      this.ensureWorkers();
+      this.updateConcurrencyForRuntime();
+      const results: BatchEmbeddingResultItem[] = Array.from({ length: texts.length }, () => ({
+        embedding: null,
+        error: "embedding job was not executed",
+      }));
 
-    const jobs: Array<{ offset: number; texts: string[] }> = [];
-    for (let offset = 0; offset < texts.length; offset += this.workerBatchSize) {
-      jobs.push({
-        offset,
-        texts: texts.slice(offset, offset + this.workerBatchSize),
-      });
-    }
-    let cursor = 0;
-    const workerCount = Math.min(this.activePoolSize, jobs.length);
-
-    const runWorker = async (workerIndex: number) => {
-      const embedder = this.embedders[workerIndex];
-      if (!embedder) {
-        return;
+      const jobs: Array<{ offset: number; texts: string[] }> = [];
+      for (let offset = 0; offset < texts.length; offset += this.workerBatchSize) {
+        jobs.push({
+          offset,
+          texts: texts.slice(offset, offset + this.workerBatchSize),
+        });
       }
+      let cursor = 0;
+      const workerCount = Math.min(this.activePoolSize, jobs.length);
+      let liveRunners = workerCount;
 
-      while (true) {
-        const nextIndex = cursor;
-        if (nextIndex >= jobs.length) {
-          break;
+      const runWorker = async (workerIndex: number) => {
+        let embedder = this.embedders[workerIndex];
+        if (!embedder) {
+          liveRunners -= 1;
+          return;
         }
-        cursor += 1;
 
-        const job = jobs[nextIndex];
-        if (!job) {
-          break;
-        }
-        try {
-          const itemResults = await embedder.embedBatch(job.texts);
-          if (itemResults.length !== job.texts.length) {
-            throw new Error(
-              `embedding batch length mismatch: expected ${job.texts.length}, got ${itemResults.length}`,
-            );
+        while (true) {
+          const nextIndex = cursor;
+          if (nextIndex >= jobs.length) {
+            break;
           }
+          cursor += 1;
 
-          for (let i = 0; i < itemResults.length; i += 1) {
-            const targetIndex = job.offset + i;
-            const item = itemResults[i] ?? { embedding: null, error: "missing batch item result" };
-            results[targetIndex] = item;
-            if (item.error) {
-              this.errorCount += 1;
-              if (
-                isMemoryPressureError(item.error) ||
-                this.errorCount >= this.downshiftErrorThreshold
-              ) {
-                this.downshiftToSingle(item.error);
+          const job = jobs[nextIndex];
+          if (!job) {
+            break;
+          }
+          try {
+            const itemResults = await embedder.embedBatch(job.texts);
+            if (itemResults.length !== job.texts.length) {
+              throw new Error(
+                `embedding batch length mismatch: expected ${job.texts.length}, got ${itemResults.length}`,
+              );
+            }
+
+            for (let i = 0; i < itemResults.length; i += 1) {
+              const targetIndex = job.offset + i;
+              const item = itemResults[i] ?? {
+                embedding: null,
+                error: "missing batch item result",
+              };
+              results[targetIndex] = item;
+              if (item.error) {
+                this.errorCount += 1;
+                if (
+                  isMemoryPressureError(item.error) ||
+                  this.errorCount >= this.downshiftErrorThreshold
+                ) {
+                  this.downshiftToSingle(item.error);
+                }
               }
             }
-          }
-        } catch (error) {
-          const message = normalizeError(error);
-          for (let i = 0; i < job.texts.length; i += 1) {
-            const targetIndex = job.offset + i;
-            this.errorCount += 1;
-            results[targetIndex] = { embedding: null, error: message };
-          }
-          if (isMemoryPressureError(message) || this.errorCount >= this.downshiftErrorThreshold) {
-            this.downshiftToSingle(message);
+          } catch (error) {
+            const message = normalizeError(error);
+            const workerIsFatal = isFatalEmbeddingWorkerError(error);
+            if (workerIsFatal) {
+              this.unusableEmbedders.add(embedder);
+            }
+            for (let i = 0; i < job.texts.length; i += 1) {
+              const targetIndex = job.offset + i;
+              this.errorCount += 1;
+              results[targetIndex] = { embedding: null, error: message };
+            }
+            if (isMemoryPressureError(message) || this.errorCount >= this.downshiftErrorThreshold) {
+              this.downshiftToSingle(message);
+            }
+            if (workerIsFatal) {
+              const jobsRemain = cursor < jobs.length;
+              if (jobsRemain && liveRunners === 1) {
+                // The sole runner hit a fatal worker error while jobs are still
+                // queued. Retire the crashed embedder (already marked unusable)
+                // and continue draining with a healthy replacement so later jobs
+                // don't fall through as "embedding job was not executed".
+                embedder = this.createEmbedder();
+                this.embedders.push(embedder);
+                continue;
+              }
+              liveRunners -= 1;
+              return;
+            }
           }
         }
+        liveRunners -= 1;
+      };
 
-        if (this.activePoolSize === 1 && workerIndex > 0) {
-          // Exit extra workers once pool is downshifted.
-          break;
-        }
-      }
-    };
-
-    await Promise.all(Array.from({ length: workerCount }, (_, index) => runWorker(index)));
-    return results;
+      await Promise.all(Array.from({ length: workerCount }, (_, index) => runWorker(index)));
+      return results;
+    } finally {
+      this.activeBatchCount -= 1;
+      this.retireSurplusIdleWorkers();
+    }
   }
 
   terminate(): void {
@@ -255,5 +301,6 @@ export class EmbeddingWorkerPool {
       embedder.terminate();
     }
     this.embedders = [];
+    this.unusableEmbedders.clear();
   }
 }
