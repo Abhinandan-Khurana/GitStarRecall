@@ -249,6 +249,97 @@ describe("github client integration", () => {
     }
   });
 
+  test("fetchReadmes aborts a long server-directed retry wait without retrying", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          jsonResponse(
+            { message: "Rate limited" },
+            { status: 429, headers: { "retry-after": "3600" } },
+          ),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            content: btoa("should not be fetched"),
+            encoding: "base64",
+          }),
+        );
+      const client = createGitHubApiClient({
+        accessToken: "token",
+        fetchImpl,
+        maxRetries: 1,
+        logger: { debug: () => undefined, warn: () => undefined },
+      });
+
+      const resultPromise = client.fetchReadmes([makeRepo(29)], {
+        signal: controller.signal,
+        concurrency: 1,
+        minConcurrency: 1,
+        maxConcurrency: 1,
+      });
+      const rejection = expect(resultPromise).rejects.toMatchObject({ name: "AbortError" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      controller.abort();
+      await rejection;
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("fetchReadmes aborts the shared adaptive cooldown before starting another request", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          jsonResponse(
+            { message: "Rate limited" },
+            { status: 429, headers: { "retry-after": "0" } },
+          ),
+        );
+      const client = createGitHubApiClient({
+        accessToken: "token",
+        fetchImpl,
+        maxRetries: 1,
+        logger: { debug: () => undefined, warn: () => undefined },
+      });
+
+      const resultPromise = client.fetchReadmes(
+        [makeRepo(30), makeRepo(31), makeRepo(32), makeRepo(33)],
+        {
+          signal: controller.signal,
+          concurrency: 1,
+          minConcurrency: 1,
+          maxConcurrency: 1,
+        },
+      );
+      for (let attempt = 0; attempt < 30 && fetchImpl.mock.calls.length < 6; attempt += 1) {
+        await vi.runOnlyPendingTimersAsync();
+      }
+      expect(fetchImpl).toHaveBeenCalledTimes(6);
+
+      const rejection = expect(resultPromise).rejects.toMatchObject({ name: "AbortError" });
+      controller.abort();
+      await rejection;
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      expect(fetchImpl).toHaveBeenCalledTimes(6);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("fetchReadmes honors the rate-limit reset header when Retry-After is absent", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));

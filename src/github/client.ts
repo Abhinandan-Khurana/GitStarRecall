@@ -63,9 +63,24 @@ const DEFAULT_README_CONCURRENCY = 6;
 const MAX_FALLBACK_RETRY_DELAY_MS = 30_000;
 const MAX_SERVER_RETRY_DELAY_MS = 60 * 60 * 1000;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(
+      signal.reason ?? new DOMException("The operation was aborted", "AbortError"),
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", onAbort);
+      reject(signal?.reason ?? new DOMException("The operation was aborted", "AbortError"));
+    };
+    const timeoutId = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -309,7 +324,7 @@ async function requestWithBackoff(args: {
         attempt: attempt + 1,
         rateLimited: false,
       });
-      await sleep(waitMs);
+      await sleep(waitMs, args.signal);
       attempt += 1;
       continue;
     }
@@ -342,7 +357,7 @@ async function requestWithBackoff(args: {
       rateLimited: isRateLimitedResponse(response),
     });
 
-    await sleep(waitMs);
+    await sleep(waitMs, args.signal);
     attempt += 1;
   }
 }
@@ -694,7 +709,7 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
 
     const processRepo = async (repo: GitHubStarredRepo) => {
       if (cooldownUntil > Date.now()) {
-        await sleep(cooldownUntil - Date.now());
+        await sleep(cooldownUntil - Date.now(), options.signal);
       }
 
       const result = await fetchSingleReadme(repo);
