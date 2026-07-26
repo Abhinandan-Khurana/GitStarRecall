@@ -7,11 +7,15 @@ export type ResolvedTheme = "light" | "dark";
 const STORAGE_KEY = "gitstarrecall.theme";
 
 function getSystemTheme(): ResolvedTheme {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
     return "dark";
   }
 
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  try {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch {
+    return "dark";
+  }
 }
 
 function loadThemeMode(): ThemeMode {
@@ -19,7 +23,12 @@ function loadThemeMode(): ThemeMode {
     return "system";
   }
 
-  const stored = window.localStorage.getItem(STORAGE_KEY);
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return "system";
+  }
   if (stored === "light" || stored === "dark" || stored === "system") {
     return stored;
   }
@@ -37,30 +46,45 @@ function resolveTheme(mode: ThemeMode): ResolvedTheme {
 
 export function ThemeProvider({ children }: PropsWithChildren) {
   const [mode, setMode] = useState<ThemeMode>(() => loadThemeMode());
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveTheme(loadThemeMode()));
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
+    resolveTheme(loadThemeMode()),
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
 
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    let media: MediaQueryList;
+    try {
+      media = window.matchMedia("(prefers-color-scheme: dark)");
+    } catch {
+      return;
+    }
     const handleChange = () => {
       if (mode === "system") {
         setResolvedTheme(resolveTheme("system"));
       }
     };
 
-    media.addEventListener("change", handleChange);
+    media.addEventListener?.("change", handleChange);
     return () => {
-      media.removeEventListener("change", handleChange);
+      media.removeEventListener?.("change", handleChange);
     };
   }, [mode]);
 
   useEffect(() => {
     setResolvedTheme(resolveTheme(mode));
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, mode);
+      try {
+        window.localStorage.setItem(STORAGE_KEY, mode);
+      } catch {
+        // Storage can be unavailable in private or restricted browser contexts.
+      }
     }
   }, [mode]);
 
