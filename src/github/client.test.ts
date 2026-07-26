@@ -205,12 +205,12 @@ describe("github client integration", () => {
     expect(result.records[0]?.readmeText).toBe("recovered");
   });
 
-  test("fetchReadmes honors an HTTP-date Retry-After value", async () => {
+  test("fetchReadmes honors an HTTP-date Retry-After beyond the fallback cap", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     try {
       const warn = vi.fn();
-      const retryAt = new Date(Date.now() + 2_000).toUTCString();
+      const retryAt = new Date(Date.now() + 120_000).toUTCString();
       const fetchImpl = vi
         .fn<typeof fetch>()
         .mockResolvedValueOnce(
@@ -234,12 +234,14 @@ describe("github client integration", () => {
       });
 
       const resultPromise = client.fetchReadmes([makeRepo(25)]);
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(90_000);
       const result = await resultPromise;
 
       expect(warn).toHaveBeenCalledWith(
         "transient GitHub response, backing off",
-        expect.objectContaining({ waitMs: 2_000 }),
+        expect.objectContaining({ waitMs: 120_000 }),
       );
       expect(result.records[0]?.outcome).toBe("success");
     } finally {
@@ -252,7 +254,7 @@ describe("github client integration", () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     try {
       const warn = vi.fn();
-      const resetSeconds = Math.floor((Date.now() + 2_000) / 1_000);
+      const resetSeconds = Math.floor((Date.now() + 120_000) / 1_000);
       const fetchImpl = vi
         .fn<typeof fetch>()
         .mockResolvedValueOnce(
@@ -276,17 +278,95 @@ describe("github client integration", () => {
       });
 
       const resultPromise = client.fetchReadmes([makeRepo(26)]);
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(90_500);
       const result = await resultPromise;
 
       expect(warn).toHaveBeenCalledWith(
         "transient GitHub response, backing off",
-        expect.objectContaining({ waitMs: 2_500 }),
+        expect.objectContaining({ waitMs: 120_500 }),
       );
       expect(result.records[0]?.outcome).toBe("success");
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("fetchReadmes caps client-chosen exponential backoff at 30 seconds", async () => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.999);
+    try {
+      const warn = vi.fn();
+      const fetchImpl = vi.fn<typeof fetch>();
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        fetchImpl.mockResolvedValueOnce(jsonResponse({ message: "Unavailable" }, { status: 503 }));
+      }
+      fetchImpl.mockResolvedValueOnce(
+        jsonResponse({
+          content: btoa("fallback recovered"),
+          encoding: "base64",
+          html_url: "https://github.com/owner/repo-27/blob/main/README.md",
+        }),
+      );
+      const client = createGitHubApiClient({
+        accessToken: "token",
+        fetchImpl,
+        maxRetries: 6,
+        logger: { debug: () => undefined, warn },
+      });
+
+      const resultPromise = client.fetchReadmes([makeRepo(27)]);
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+      const waits = warn.mock.calls.map(([, meta]) => Number(meta?.waitMs));
+
+      expect(waits).toHaveLength(6);
+      expect(Math.max(...waits)).toBe(30_000);
+      expect(waits.at(-1)).toBe(30_000);
+      expect(result.records[0]?.outcome).toBe("success");
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  test("fetchReadmes recomputes a 304 checksum from current metadata and preserved bytes", async () => {
+    const readmeText = "preserved README";
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          content: btoa(readmeText),
+          encoding: "base64",
+          html_url: "https://github.com/owner/repo-28/blob/main/README.md",
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 304 }))
+      .mockResolvedValueOnce(new Response(null, { status: 304 }));
+    const client = createGitHubApiClient({
+      accessToken: "token",
+      fetchImpl,
+      logger: { debug: () => undefined, warn: () => undefined },
+    });
+    const before = { ...makeRepo(28), description: "before" };
+    const after = { ...before, description: "after" };
+    const initial = (await client.fetchReadmes([before])).records[0];
+
+    const metadataChanged = (
+      await client.fetchReadmes([after], {
+        previousSyncStateByRepoId: new Map([[28, initial!]]),
+      })
+    ).records[0];
+    const unchanged = (
+      await client.fetchReadmes([after], {
+        previousSyncStateByRepoId: new Map([[28, metadataChanged!]]),
+      })
+    ).records[0];
+
+    expect(metadataChanged).toMatchObject({ outcome: "not_modified", readmeText });
+    expect(metadataChanged?.checksum).not.toBe(initial?.checksum);
+    expect(unchanged?.checksum).toBe(metadataChanged?.checksum);
   });
 
   test("fetchReadmes preserves previous README state after transient retry exhaustion", async () => {
@@ -530,7 +610,7 @@ describe("github client integration", () => {
     expect(capturedHeaders).toContain('"etag-10"');
     const notModified = result.records.find((record) => record.repoId === 10);
     expect(notModified?.notModified).toBe(true);
-    expect(notModified?.checksum).toBe("previous-checksum");
+    expect(notModified?.checksum).not.toBe("previous-checksum");
     expect(notModified?.outcome).toBe("not_modified");
     expect(notModified?.readmeText).toBe("previous readme");
     expect(notModified?.readmeEtag).toBe('"etag-10"');

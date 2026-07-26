@@ -105,7 +105,7 @@ describe("README sync outcome integration", () => {
     expect(result.checksum).toBe("checksum-old");
     expect(result.readmeEtag).toBe('"etag-new"');
     expect(result.readmeRetryRequired).toBe(false);
-    expect(readmeOutcomeCanChangeChunks("not_modified")).toBe(false);
+    expect(readmeOutcomeCanChangeChunks("not_modified")).toBe(true);
   });
 
   it("creates a stable known-empty README state for not-found responses", () => {
@@ -189,7 +189,7 @@ describe("README sync outcome integration", () => {
     expect(transition.syncState).toEqual(toRepoSyncState(transition.record));
   });
 
-  it("rechunks only successful checksum changes and skips unchanged records", () => {
+  it("rechunks checksum-changing outcomes and skips an unchanged 304", () => {
     const success = applyReadmeBatchTransition({
       remoteRepo: remoteRepo(),
       readme: readme("success", { readmeText: "new", checksum: "checksum-new" }),
@@ -204,6 +204,13 @@ describe("README sync outcome integration", () => {
       metadataChanged: false,
       syncedAt: 42,
     });
+    const metadataChanged304 = applyReadmeBatchTransition({
+      remoteRepo: remoteRepo(),
+      readme: readme("not_modified", { checksum: "checksum-current-metadata" }),
+      localRepo: repo(),
+      metadataChanged: true,
+      syncedAt: 42,
+    });
     const initial = applyReadmeBatchTransition({
       remoteRepo: remoteRepo(),
       readme: readme("not_found", { checksum: "empty" }),
@@ -214,6 +221,11 @@ describe("README sync outcome integration", () => {
 
     expect(success).toMatchObject({ shouldUpsert: true, shouldRechunk: true });
     expect(unchanged).toMatchObject({ shouldUpsert: false, shouldRechunk: false });
+    expect(metadataChanged304).toMatchObject({
+      shouldUpsert: true,
+      shouldRechunk: true,
+      record: { readmeText: "known good bytes", checksum: "checksum-current-metadata" },
+    });
     expect(initial).toMatchObject({ shouldUpsert: true, shouldRechunk: true });
   });
 

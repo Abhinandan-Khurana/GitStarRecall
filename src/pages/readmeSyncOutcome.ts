@@ -32,6 +32,7 @@ export function applyReadmeOutcome(
     return {
       ...record,
       ...preservedReadmeFields(previous, readme),
+      checksum: readme.checksum ?? previous?.checksum ?? null,
       readmeRetryRequired: false,
     };
   }
@@ -48,7 +49,7 @@ export function applyReadmeOutcome(
 }
 
 export function readmeOutcomeCanChangeChunks(outcome: RepoReadmeRecord["outcome"]): boolean {
-  return outcome === "success" || outcome === "not_found";
+  return outcome === "success" || outcome === "not_modified" || outcome === "not_found";
 }
 
 export function mapStarredRepoToRecord(repo: GitHubStarredRepo, syncedAt: number): RepoRecord {

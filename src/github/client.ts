@@ -60,7 +60,8 @@ const API_BASE_URL = "https://api.github.com";
 const DEFAULT_PER_PAGE = 100;
 const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_README_CONCURRENCY = 6;
-const MAX_RETRY_DELAY_MS = 30_000;
+const MAX_FALLBACK_RETRY_DELAY_MS = 30_000;
+const MAX_SERVER_RETRY_DELAY_MS = 60 * 60 * 1000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -87,12 +88,12 @@ function getRetryDelayMs(response: Response | null, attempt: number): number {
     const parsed = Number(retryAfter);
 
     if (Number.isFinite(parsed) && parsed >= 0) {
-      return Math.min(parsed * 1000, MAX_RETRY_DELAY_MS);
+      return Math.min(parsed * 1000, MAX_SERVER_RETRY_DELAY_MS);
     }
 
     const retryAt = Date.parse(retryAfter);
     if (Number.isFinite(retryAt)) {
-      return Math.min(Math.max(retryAt - Date.now(), 0), MAX_RETRY_DELAY_MS);
+      return Math.min(Math.max(retryAt - Date.now(), 0), MAX_SERVER_RETRY_DELAY_MS);
     }
   }
 
@@ -101,13 +102,13 @@ function getRetryDelayMs(response: Response | null, attempt: number): number {
     const resetMs = Number(reset) * 1000;
 
     if (Number.isFinite(resetMs)) {
-      return Math.min(Math.max(resetMs - Date.now() + 500, 1000), MAX_RETRY_DELAY_MS);
+      return Math.min(Math.max(resetMs - Date.now() + 500, 1000), MAX_SERVER_RETRY_DELAY_MS);
     }
   }
 
   // bounded exponential backoff with jitter
   const base = Math.min(2 ** attempt * 1000, 30000);
-  return Math.min(Math.floor(base + Math.random() * 300), MAX_RETRY_DELAY_MS);
+  return Math.min(Math.floor(base + Math.random() * 300), MAX_FALLBACK_RETRY_DELAY_MS);
 }
 
 function shouldRetry(response: Response): boolean {
@@ -631,13 +632,17 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
         }
 
         if (response.status === 304) {
+          const checksum =
+            typeof previous?.readmeText === "string"
+              ? await sha256Hex(canonicalChecksumInput(repo, await sha256Hex(previous.readmeText)))
+              : (previous?.checksum ?? null);
           const record = await buildReadmeRecord({
             repo,
             readmeText: previous?.readmeText ?? null,
             readmeUrl: previous?.readmeUrl ?? null,
             readmeEtag: readmeEtag ?? previous?.readmeEtag ?? null,
             readmeLastModified: readmeLastModified ?? previous?.readmeLastModified ?? null,
-            checksum: previous?.checksum ?? null,
+            checksum,
             missingReadme: false,
             notModified: true,
             outcome: "not_modified",
