@@ -6,6 +6,7 @@ import type {
   LLMStreamRequest,
 } from "./types";
 import { getWebLLMEngineManager, WebLLMProviderError } from "./webllm/engine";
+import { buildLocalEndpointUrl } from "./localEndpoint";
 
 const TOP_K_LIMIT = 8;
 
@@ -28,6 +29,36 @@ function normalizeProviderError(error: unknown): Error {
   return new Error(String(error));
 }
 
+type StreamRecordOutcome = "ignored" | "valid" | "malformed" | "done";
+
+function consumeSseLine(line: string, onToken: (token: string) => void): StreamRecordOutcome {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("data:")) {
+    return "ignored";
+  }
+
+  const raw = trimmed.slice(5).trim();
+  if (raw === "[DONE]") {
+    return "done";
+  }
+  if (!raw) {
+    return "ignored";
+  }
+
+  try {
+    const payload = JSON.parse(raw) as {
+      choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>;
+    };
+    const token = payload.choices?.[0]?.delta?.content ?? payload.choices?.[0]?.message?.content;
+    if (token) {
+      onToken(token);
+    }
+    return "valid";
+  } catch {
+    return "malformed";
+  }
+}
+
 async function parseSseStream(response: Response, onToken: (token: string) => void): Promise<void> {
   if (!response.body) {
     throw new Error("Streaming response body is not available");
@@ -36,50 +67,69 @@ async function parseSseStream(response: Response, onToken: (token: string) => vo
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let pendingMalformedRecord = false;
+
+  const consume = (line: string): boolean => {
+    const outcome = consumeSseLine(line, onToken);
+    if (outcome === "malformed") {
+      pendingMalformedRecord = true;
+    } else if (outcome === "valid" || outcome === "done") {
+      pendingMalformedRecord = false;
+    }
+    return outcome === "done";
+  };
 
   while (true) {
     const { done, value } = await reader.read();
-
     if (done) {
+      buffer += decoder.decode();
       break;
     }
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
-
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) {
-        continue;
-      }
-
-      const raw = trimmed.slice(5).trim();
-      if (raw === "[DONE]") {
+      if (consume(line)) {
         return;
-      }
-
-      if (!raw) {
-        continue;
-      }
-
-      try {
-        const payload = JSON.parse(raw) as {
-          choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>;
-        };
-        const token = payload.choices?.[0]?.delta?.content ?? payload.choices?.[0]?.message?.content;
-
-        if (token) {
-          onToken(token);
-        }
-      } catch {
-        // Skip malformed SSE lines without killing the stream.
       }
     }
   }
+
+  if (buffer.trim()) {
+    consume(buffer);
+  }
+  if (pendingMalformedRecord) {
+    throw new Error("Malformed terminal SSE record");
+  }
 }
 
-async function parseJsonLineStream(response: Response, onToken: (token: string) => void): Promise<void> {
+function consumeJsonLine(line: string, onToken: (token: string) => void): StreamRecordOutcome {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return "ignored";
+  }
+
+  try {
+    const payload = JSON.parse(trimmed) as {
+      message?: { content?: string };
+      response?: string;
+      done?: boolean;
+    };
+    const token = payload.message?.content ?? payload.response;
+    if (token) {
+      onToken(token);
+    }
+    return payload.done === true ? "done" : "valid";
+  } catch {
+    return "malformed";
+  }
+}
+
+async function parseJsonLineStream(
+  response: Response,
+  onToken: (token: string) => void,
+): Promise<void> {
   if (!response.body) {
     throw new Error("Streaming response body is not available");
   }
@@ -87,43 +137,40 @@ async function parseJsonLineStream(response: Response, onToken: (token: string) 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let pendingMalformedRecord = false;
+
+  const consume = (line: string): boolean => {
+    const outcome = consumeJsonLine(line, onToken);
+    if (outcome === "malformed") {
+      pendingMalformedRecord = true;
+    } else if (outcome === "valid" || outcome === "done") {
+      pendingMalformedRecord = false;
+    }
+    return outcome === "done";
+  };
 
   while (true) {
     const { done, value } = await reader.read();
-
     if (done) {
+      buffer += decoder.decode();
       break;
     }
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
-
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        continue;
-      }
-
-      try {
-        const payload = JSON.parse(trimmed) as {
-          message?: { content?: string };
-          response?: string;
-          done?: boolean;
-        };
-
-        const token = payload.message?.content ?? payload.response;
-        if (token) {
-          onToken(token);
-        }
-
-        if (payload.done) {
-          return;
-        }
-      } catch {
-        // ignore bad line
+      if (consume(line)) {
+        return;
       }
     }
+  }
+
+  if (buffer.trim()) {
+    consume(buffer);
+  }
+  if (pendingMalformedRecord) {
+    throw new Error("Malformed terminal JSONL record");
   }
 }
 
@@ -214,7 +261,7 @@ const providersById: Record<LLMProviderId, LLMStreamProvider> = {
   ollama: {
     definition: definitions[1],
     async stream(config: LLMProviderConfig, request: LLMStreamRequest): Promise<void> {
-      const response = await fetch(`${trimSlash(config.baseUrl)}/api/chat`, {
+      const response = await fetch(buildLocalEndpointUrl(config.baseUrl, "/api/chat", "Ollama"), {
         method: "POST",
         signal: request.signal,
         headers: {
@@ -237,18 +284,21 @@ const providersById: Record<LLMProviderId, LLMStreamProvider> = {
   lmstudio: {
     definition: definitions[2],
     async stream(config: LLMProviderConfig, request: LLMStreamRequest): Promise<void> {
-      const response = await fetch(`${trimSlash(config.baseUrl)}/v1/chat/completions`, {
-        method: "POST",
-        signal: request.signal,
-        headers: {
-          "Content-Type": "application/json",
+      const response = await fetch(
+        buildLocalEndpointUrl(config.baseUrl, "/v1/chat/completions", "LM Studio"),
+        {
+          method: "POST",
+          signal: request.signal,
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: config.model,
+            stream: true,
+            messages: buildMessages(request.prompt, request.contextSnippets),
+          }),
         },
-        body: JSON.stringify({
-          model: config.model,
-          stream: true,
-          messages: buildMessages(request.prompt, request.contextSnippets),
-        }),
-      });
+      );
 
       if (!response.ok) {
         throw new Error(`Provider request failed (${response.status})`);
@@ -267,6 +317,7 @@ const providersById: Record<LLMProviderId, LLMStreamProvider> = {
       const manager = getWebLLMEngineManager();
       await manager.ensureReady(config.model, {
         allowDownload: config.allowModelDownload === true,
+        signal: request.signal,
         onProgress: (progress, text) => {
           request.onInitProgress?.(progress, text);
         },

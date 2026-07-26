@@ -15,7 +15,11 @@ describe("buildOllamaModelCatalogFromPayload", () => {
       "llama3.1:8b",
     );
 
-    expect(catalog.embedding).toEqual(["qwen3-embedding:0.6b", "mxbai-embed-large", "nomic-embed-text"]);
+    expect(catalog.embedding).toEqual([
+      "qwen3-embedding:0.6b",
+      "mxbai-embed-large",
+      "nomic-embed-text",
+    ]);
     expect(catalog.llm).toEqual(["llama3.1:8b"]);
     expect(catalog.recommendedEmbedding).toBe("qwen3-embedding:0.6b");
     expect(catalog.recommendedLlm).toBe("llama3.1:8b");
@@ -50,11 +54,7 @@ describe("buildOllamaModelCatalogFromPayload", () => {
   test("deduplicates and sorts model names", () => {
     const catalog = buildOllamaModelCatalogFromPayload(
       {
-        models: [
-          { name: "llama3.1:8b" },
-          { name: "llama3.1:8b" },
-          { name: "nomic-embed-text" },
-        ],
+        models: [{ name: "llama3.1:8b" }, { name: "llama3.1:8b" }, { name: "nomic-embed-text" }],
       },
       null,
     );
@@ -67,10 +67,7 @@ describe("fetchOllamaModelCatalog", () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         JSON.stringify({
-          models: [
-            { name: "nomic-embed-text" },
-            { name: "llama3.1:8b" },
-          ],
+          models: [{ name: "nomic-embed-text" }, { name: "llama3.1:8b" }],
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -78,22 +75,36 @@ describe("fetchOllamaModelCatalog", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const catalog = await fetchOllamaModelCatalog({
-      baseUrl: "http://localhost:11434",
+      baseUrl: "http://127.99.42.7:11434/proxy/",
       timeoutMs: 10_000,
       preferredLlmModel: "llama3.1:8b",
     });
 
     expect(catalog.embedding).toContain("nomic-embed-text");
     expect(catalog.llm).toContain("llama3.1:8b");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.99.42.7:11434/proxy/api/tags",
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
-  test("rejects non-local endpoint", async () => {
+  test.each([
+    "https://example.com",
+    "http://localhost.example.com:11434",
+    "http://127.0.0.1.example.com",
+    "http://user@localhost:11434",
+    "ftp://localhost:11434",
+  ])("rejects unsafe endpoint %s before model discovery", async (baseUrl) => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
     await expect(
       fetchOllamaModelCatalog({
-        baseUrl: "https://example.com",
+        baseUrl,
         timeoutMs: 10_000,
         preferredLlmModel: null,
       }),
-    ).rejects.toThrow("localhost");
+    ).rejects.toThrow(/endpoint/u);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

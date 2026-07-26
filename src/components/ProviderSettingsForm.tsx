@@ -88,7 +88,10 @@ export function ProviderSettingsForm({
           <Label htmlFor="provider-select" className="text-muted-foreground">
             Provider
           </Label>
-          <Select value={providerId} onValueChange={(value) => onProviderIdChange(value as LLMProviderId)}>
+          <Select
+            value={providerId}
+            onValueChange={(value) => onProviderIdChange(value as LLMProviderId)}
+          >
             <SelectTrigger id="provider-select" className={inputClassName}>
               <SelectValue placeholder="Select provider" />
             </SelectTrigger>
@@ -248,7 +251,9 @@ export function ProviderSettingsForm({
           />
           <div className="min-w-0">
             <p className={`${textClassName} font-medium text-foreground`}>Remote providers</p>
-            <p className="text-xs text-muted-foreground">Allow OpenAI-compatible and LM Studio requests.</p>
+            <p className="text-xs text-muted-foreground">
+              Allow OpenAI-compatible requests to remote endpoints.
+            </p>
           </div>
         </label>
         <label className="flex cursor-pointer items-center gap-3 rounded-md border border-border/60 bg-background/50 px-3 py-3">
@@ -258,7 +263,9 @@ export function ProviderSettingsForm({
           />
           <div className="min-w-0">
             <p className={`${textClassName} font-medium text-foreground`}>Local providers</p>
-            <p className="text-xs text-muted-foreground">Allow Ollama and browser-local WebLLM runs.</p>
+            <p className="text-xs text-muted-foreground">
+              Allow Ollama, LM Studio, and browser-local WebLLM runs.
+            </p>
           </div>
         </label>
       </div>

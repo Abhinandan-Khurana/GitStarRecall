@@ -1,8 +1,4 @@
-import type {
-  ChatCompletionChunk,
-  InitProgressReport,
-  MLCEngineInterface,
-} from "@mlc-ai/web-llm";
+import type { ChatCompletionChunk, InitProgressReport, MLCEngineInterface } from "@mlc-ai/web-llm";
 import { CreateMLCEngine } from "@mlc-ai/web-llm";
 
 export type WebLLMErrorCode =
@@ -23,10 +19,44 @@ export class WebLLMProviderError extends Error {
 
 export type WebLLMEnsureReadyOptions = {
   allowDownload: boolean;
+  signal: AbortSignal;
   onProgress?: (progress: number, text: string) => void;
 };
 
-class WebLLMEngineManager {
+function abortError(): DOMException {
+  return new DOMException("aborted", "AbortError");
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw abortError();
+  }
+}
+
+async function waitWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  throwIfAborted(signal);
+
+  return await new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      callback();
+    };
+    const onAbort = () => finish(() => reject(abortError()));
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
+}
+
+export class WebLLMEngineManager {
   private engine: MLCEngineInterface | null = null;
 
   private activeModelId: string | null = null;
@@ -46,8 +76,13 @@ class WebLLMEngineManager {
   }
 
   async ensureReady(modelId: string, options: WebLLMEnsureReadyOptions): Promise<void> {
+    throwIfAborted(options.signal);
+
     if (!this.supportsWebGPU()) {
-      throw new WebLLMProviderError("WEBLLM_UNSUPPORTED", "WebGPU is not available in this browser.");
+      throw new WebLLMProviderError(
+        "WEBLLM_UNSUPPORTED",
+        "WebGPU is not available in this browser.",
+      );
     }
 
     if (this.engine && this.activeModelId === modelId) {
@@ -62,19 +97,23 @@ class WebLLMEngineManager {
     }
 
     if (this.loadingPromise) {
-      await this.loadingPromise;
+      await waitWithAbort(this.loadingPromise, options.signal);
+      throwIfAborted(options.signal);
       if (this.engine && this.activeModelId === modelId) {
         return;
       }
     }
 
-    this.loadingPromise = (async () => {
+    throwIfAborted(options.signal);
+    const loadingPromise = (async () => {
       try {
         if (!this.engine) {
           this.engine = await CreateMLCEngine(modelId, {
             initProgressCallback: (report) => {
               const next = this.toProgress(report);
-              options.onProgress?.(next.progress, next.text);
+              if (!options.signal.aborted) {
+                options.onProgress?.(next.progress, next.text);
+              }
             },
             logLevel: "INFO",
           });
@@ -84,7 +123,9 @@ class WebLLMEngineManager {
 
         this.engine.setInitProgressCallback((report) => {
           const next = this.toProgress(report);
-          options.onProgress?.(next.progress, next.text);
+          if (!options.signal.aborted) {
+            options.onProgress?.(next.progress, next.text);
+          }
         });
         await this.engine.reload(modelId);
         this.activeModelId = modelId;
@@ -93,12 +134,21 @@ class WebLLMEngineManager {
         throw new WebLLMProviderError("WEBLLM_INIT_FAILED", `WebLLM init failed: ${message}`);
       }
     })();
+    this.loadingPromise = loadingPromise;
+    void loadingPromise.then(
+      () => {
+        if (this.loadingPromise === loadingPromise) {
+          this.loadingPromise = null;
+        }
+      },
+      () => {
+        if (this.loadingPromise === loadingPromise) {
+          this.loadingPromise = null;
+        }
+      },
+    );
 
-    try {
-      await this.loadingPromise;
-    } finally {
-      this.loadingPromise = null;
-    }
+    await waitWithAbort(loadingPromise, options.signal);
   }
 
   async stream(
@@ -107,6 +157,8 @@ class WebLLMEngineManager {
     signal: AbortSignal,
     onToken: (token: string) => void,
   ): Promise<void> {
+    throwIfAborted(signal);
+
     if (!this.engine || this.activeModelId !== modelId) {
       throw new WebLLMProviderError(
         "WEBLLM_INIT_FAILED",
@@ -114,20 +166,44 @@ class WebLLMEngineManager {
       );
     }
 
-    try {
-      const chunkStream = await this.engine.chat.completions.create({
-        model: modelId,
-        messages,
-        stream: true,
-        temperature: 0.2,
-        max_tokens: 700,
-      });
+    const engine = this.engine;
+    let interrupted = false;
+    let iterator: AsyncIterator<ChatCompletionChunk> | null = null;
+    const interrupt = () => {
+      if (interrupted) {
+        return;
+      }
+      interrupted = true;
+      try {
+        void Promise.resolve(engine.interruptGenerate()).catch(() => undefined);
+      } catch {
+        // Cancellation must still settle even if the runtime cannot interrupt cleanly.
+      }
+    };
+    const onAbort = () => interrupt();
+    signal.addEventListener("abort", onAbort, { once: true });
 
-      for await (const chunk of chunkStream as AsyncIterable<ChatCompletionChunk>) {
-        if (signal.aborted) {
-          throw new DOMException("aborted", "AbortError");
+    try {
+      throwIfAborted(signal);
+      const chunkStream = await waitWithAbort(
+        engine.chat.completions.create({
+          model: modelId,
+          messages,
+          stream: true,
+          temperature: 0.2,
+          max_tokens: 700,
+        }),
+        signal,
+      );
+      iterator = (chunkStream as AsyncIterable<ChatCompletionChunk>)[Symbol.asyncIterator]();
+
+      while (true) {
+        const result = await waitWithAbort(iterator.next(), signal);
+        if (result.done) {
+          break;
         }
-        const token = chunk.choices?.[0]?.delta?.content ?? "";
+        throwIfAborted(signal);
+        const token = result.value.choices?.[0]?.delta?.content ?? "";
         if (token.length > 0) {
           onToken(token);
         }
@@ -139,6 +215,15 @@ class WebLLMEngineManager {
 
       const message = error instanceof Error ? error.message : String(error);
       throw new WebLLMProviderError("WEBLLM_STREAM_FAILED", `WebLLM stream failed: ${message}`);
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+      if (signal.aborted && iterator?.return) {
+        try {
+          void Promise.resolve(iterator.return()).catch(() => undefined);
+        } catch {
+          // The abort result remains authoritative even if iterator cleanup fails.
+        }
+      }
     }
   }
 
