@@ -101,8 +101,8 @@ Set all of these in Vercel project env vars:
 
 Routing:
 
-- Keep SPA fallback rewrite so `/app` and `/auth/callback` refreshes do not 404.
-- Current project includes this in `vercel.json`.
+- Keep the explicit SPA rewrite entries so known `/app` routes and `/auth/callback` refreshes do not 404.
+- The current project enumerates these routes in `vercel.json` without a global catch-all.
 
 ## 7) Authentication in App
 
@@ -241,7 +241,7 @@ Recommended starting points:
 
 - <=30k chunks: `fetchK=120`, `topK=20`, `mmrLambda=0.72`, `maxChunksPerRepo=2`
 - 30k..120k chunks: `fetchK=150`, `topK=20`, `mmrLambda=0.72`, `maxChunksPerRepo=2`
-- > 120k chunks: consider Ollama local embedding and increase `fetchK` gradually with latency checks
+- More than 120k chunks: consider Ollama local embedding and increase `fetchK` gradually with latency checks
 
 ## 11) Data Storage and Reset
 
@@ -282,8 +282,8 @@ Reset actions in UI:
 
 ## 12.3 `/app` refresh 404 in production
 
-- Ensure SPA fallback rewrite is active.
-- Keep `vercel.json` route fallback configured.
+- Ensure the explicit rewrite for the affected known route is active.
+- Keep the allowlisted `vercel.json` rewrite entries configured.
 
 ## 12.4 localStorage quota exceeded
 

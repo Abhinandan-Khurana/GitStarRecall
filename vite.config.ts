@@ -43,7 +43,9 @@ const DEV_CSP = [
 
 const PROD_CSP = [
   `script-src 'self' 'unsafe-eval' ${JSDELIVR_TRANSFORMERS_SCRIPT_SRC}`,
-  "connect-src 'self' https://api.github.com https://api.openai.com https://api.anthropic.com https://api.deepseek.com https://api.moonshot.cn https://api.moonshot.ai https://api.z.ai https://open.bigmodel.cn https://bigmodel.cn https://huggingface.co https://*.huggingface.co https://hf.co https://*.hf.co https://xethub.hf.co https://*.xethub.hf.co https://cdn-lfs.huggingface.co https://cdn.jsdelivr.net https://raw.githubusercontent.com https://*.githubusercontent.com http://localhost:11434 http://localhost:1234 http://localhost:3001",
+  // Chromium rejects IPv6 literals in CSP host sources. Do not broaden this to `http:`;
+  // request-layer loopback validation must land before plain HTTP can safely cover [::1].
+  "connect-src 'self' https: http://localhost:* http://127.0.0.1:*",
   ...BASE_CSP_DIRECTIVES,
 ].join("; ");
 
