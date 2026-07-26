@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { captureLocalError, captureLocalWarn, clearLocalLogs, getLocalLogs } from "./localLog";
+import {
+  captureLocalError,
+  captureLocalWarn,
+  clearLocalLogs,
+  clearLocalLogsStrict,
+  getLocalLogs,
+} from "./localLog";
 
 class MemoryStorage implements Storage {
   private readonly entries = new Map<string, string>();
@@ -119,5 +125,121 @@ describe("scoped local logs", () => {
     captureLocalError(null, "oauth_failure", new Error("code=unauthenticated-secret"));
 
     expect(storage.length).toBe(0);
+  });
+});
+
+describe("clearLocalLogsStrict", () => {
+  const accountAKey = "gitstarrecall.local_logs.v2.github-user%3A1";
+  const accountBKey = "gitstarrecall.local_logs.v2.github-user%3A2";
+
+  let storage: MemoryStorage;
+
+  beforeEach(() => {
+    storage = new MemoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects an empty scope identity without touching storage", () => {
+    storage.setItem(accountAKey, JSON.stringify([]));
+
+    expect(() => clearLocalLogsStrict("")).toThrow(/scope/i);
+    expect(() => clearLocalLogsStrict("   ")).toThrow(/scope/i);
+    expect(storage.getItem(accountAKey)).not.toBeNull();
+  });
+
+  it("removes the scope key and the legacy global key on success", () => {
+    captureLocalWarn("github-user:1", "sync_warning", "account A");
+    storage.setItem("gitstarrecall.local_logs.v1", JSON.stringify([{ legacy: true }]));
+    expect(storage.getItem(accountAKey)).not.toBeNull();
+
+    clearLocalLogsStrict("github-user:1");
+
+    expect(storage.getItem(accountAKey)).toBeNull();
+    expect(storage.getItem("gitstarrecall.local_logs.v1")).toBeNull();
+  });
+
+  it("leaves account B byte-for-byte intact when clearing account A", () => {
+    captureLocalWarn("github-user:1", "sync_warning", "account A");
+    captureLocalError("github-user:2", "sync_failure", new Error("account B"));
+    const accountBBefore = storage.getItem(accountBKey);
+
+    clearLocalLogsStrict("github-user:1");
+
+    expect(storage.getItem(accountAKey)).toBeNull();
+    expect(storage.getItem(accountBKey)).toBe(accountBBefore);
+  });
+
+  it("propagates a thrown removeItem instead of reporting success", () => {
+    class ThrowingRemoveStorage extends MemoryStorage {
+      override removeItem(): void {
+        throw new Error("removeItem is unavailable");
+      }
+    }
+    const throwing = new ThrowingRemoveStorage();
+    throwing.setItem(accountAKey, JSON.stringify([]));
+    vi.stubGlobal("localStorage", throwing);
+
+    expect(() => clearLocalLogsStrict("github-user:1")).toThrow("removeItem is unavailable");
+    expect(throwing.getItem(accountAKey)).not.toBeNull();
+  });
+
+  it("propagates a legacy-key removeItem failure and leaves legacy data intact", () => {
+    class LegacyRemoveFailsStorage extends MemoryStorage {
+      override removeItem(key: string): void {
+        if (key === "gitstarrecall.local_logs.v1") {
+          throw new Error("legacy removeItem is unavailable");
+        }
+        super.removeItem(key);
+      }
+    }
+    const throwing = new LegacyRemoveFailsStorage();
+    throwing.setItem(accountAKey, JSON.stringify([]));
+    throwing.setItem("gitstarrecall.local_logs.v1", JSON.stringify([{ legacy: true }]));
+    vi.stubGlobal("localStorage", throwing);
+
+    expect(() => clearLocalLogsStrict("github-user:1")).toThrow("legacy removeItem is unavailable");
+    expect(throwing.getItem("gitstarrecall.local_logs.v1")).not.toBeNull();
+  });
+
+  it("clears the scope key best-effort even when legacy-key removal fails", () => {
+    class LegacyRemoveFailsStorage extends MemoryStorage {
+      override removeItem(key: string): void {
+        if (key === "gitstarrecall.local_logs.v1") {
+          throw new Error("legacy removeItem is unavailable");
+        }
+        super.removeItem(key);
+      }
+    }
+    const throwing = new LegacyRemoveFailsStorage();
+    throwing.setItem(accountAKey, JSON.stringify([]));
+    throwing.setItem("gitstarrecall.local_logs.v1", JSON.stringify([{ legacy: true }]));
+    vi.stubGlobal("localStorage", throwing);
+
+    expect(() => clearLocalLogs("github-user:1")).not.toThrow();
+    expect(throwing.getItem(accountAKey)).toBeNull();
+  });
+
+  it("throws when the scope key survives a removeItem that lies about success", () => {
+    class LyingRemoveStorage extends MemoryStorage {
+      override removeItem(): void {
+        // Pretend the deletion succeeded while retaining the data.
+      }
+    }
+    const lying = new LyingRemoveStorage();
+    lying.setItem(
+      accountAKey,
+      JSON.stringify([{ ts: 0, level: "warn", event: "e", message: "m" }]),
+    );
+    vi.stubGlobal("localStorage", lying);
+
+    expect(() => clearLocalLogsStrict("github-user:1")).toThrow(/github-user:1/);
+    expect(lying.getItem(accountAKey)).not.toBeNull();
   });
 });

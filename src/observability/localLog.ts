@@ -22,6 +22,14 @@ function purgeLegacyLogs(): void {
   }
 }
 
+function purgeLegacyLogsStrict(): void {
+  localStorage.removeItem(LEGACY_LOCAL_LOG_KEY);
+
+  if (localStorage.getItem(LEGACY_LOCAL_LOG_KEY) !== null) {
+    throw new Error("Failed to clear legacy local logs");
+  }
+}
+
 if (typeof localStorage !== "undefined") {
   purgeLegacyLogs();
 }
@@ -110,11 +118,29 @@ export function getLocalLogs(scopeIdentity: string): LocalLogEntry[] {
   return entries;
 }
 
+export function clearLocalLogsStrict(scopeIdentity: string): void {
+  if (!scopeIdentity || !scopeIdentity.trim()) {
+    throw new Error("clearLocalLogsStrict requires a non-empty scope identity");
+  }
+
+  purgeLegacyLogsStrict();
+
+  const scopeKey = getScopeKey(scopeIdentity);
+  localStorage.removeItem(scopeKey);
+
+  if (localStorage.getItem(scopeKey) !== null) {
+    throw new Error(`Failed to clear local logs for scope ${scopeIdentity}`);
+  }
+}
+
 export function clearLocalLogs(scopeIdentity: string): void {
+  // Best-effort clear for logout and existing callers. Legacy purge and scoped
+  // removal are attempted independently so a legacy-key failure cannot block
+  // scoped cleanup.
   purgeLegacyLogs();
   try {
     localStorage.removeItem(getScopeKey(scopeIdentity));
   } catch {
-    // Ignore storage failures.
+    // Ignore storage removal failures.
   }
 }
