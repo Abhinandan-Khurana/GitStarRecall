@@ -1,5 +1,9 @@
 const AUTH_STATE_KEY = "gitstarrecall.oauth.state";
 const AUTH_VERIFIER_KEY = "gitstarrecall.oauth.verifier";
+const AUTH_ISSUED_AT_KEY = "gitstarrecall.oauth.issued-at";
+const AUTH_SESSION_TTL_MS = 10 * 60 * 1000;
+const OAUTH_EXCHANGE_TIMEOUT_MS = 10_000;
+const inFlightExchanges = new Map<string, Promise<string>>();
 
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
@@ -28,6 +32,20 @@ export type OAuthConfig = {
   scopes: string[];
 };
 
+export class OAuthExchangeError extends Error {
+  readonly retryable: boolean;
+
+  constructor(message: string, retryable: boolean, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "OAuthExchangeError";
+    this.retryable = retryable;
+  }
+}
+
+export function isRetryableOAuthError(error: unknown): error is OAuthExchangeError {
+  return error instanceof OAuthExchangeError && error.retryable;
+}
+
 export function getOAuthConfig(): OAuthConfig {
   const redirectUri =
     import.meta.env.VITE_GITHUB_REDIRECT_URI ?? `${window.location.origin}/auth/callback`;
@@ -52,6 +70,7 @@ export async function buildGitHubAuthorizeUrl(): Promise<string> {
 
   sessionStorage.setItem(AUTH_STATE_KEY, state);
   sessionStorage.setItem(AUTH_VERIFIER_KEY, verifier);
+  sessionStorage.setItem(AUTH_ISSUED_AT_KEY, String(Date.now()));
 
   const params = new URLSearchParams({
     client_id: config.clientId,
@@ -66,58 +85,115 @@ export async function buildGitHubAuthorizeUrl(): Promise<string> {
   return `https://github.com/login/oauth/authorize?${params.toString()}`;
 }
 
-export function consumeOAuthSession(expectedState: string): string {
-  const storedState = sessionStorage.getItem(AUTH_STATE_KEY);
-  const verifier = sessionStorage.getItem(AUTH_VERIFIER_KEY);
-
+export function clearOAuthSession(): void {
   sessionStorage.removeItem(AUTH_STATE_KEY);
   sessionStorage.removeItem(AUTH_VERIFIER_KEY);
+  sessionStorage.removeItem(AUTH_ISSUED_AT_KEY);
+}
 
-  if (!storedState || !verifier) {
+function readOAuthSession(expectedState: string): string {
+  const storedState = sessionStorage.getItem(AUTH_STATE_KEY);
+  const verifier = sessionStorage.getItem(AUTH_VERIFIER_KEY);
+  const issuedAtRaw = sessionStorage.getItem(AUTH_ISSUED_AT_KEY);
+
+  if (!storedState || !verifier || !issuedAtRaw) {
+    clearOAuthSession();
     throw new Error("OAuth session was not found. Start login again.");
   }
 
   if (storedState !== expectedState) {
+    clearOAuthSession();
     throw new Error("OAuth state mismatch. Start login again.");
+  }
+
+  const issuedAt = Number(issuedAtRaw);
+  const age = Date.now() - issuedAt;
+  if (!Number.isFinite(issuedAt) || age < 0 || age > AUTH_SESSION_TTL_MS) {
+    clearOAuthSession();
+    throw new Error("OAuth session expired. Start login again.");
   }
 
   return verifier;
 }
 
-export async function exchangeOAuthCode(args: {
-  code: string;
-  state: string;
-}): Promise<string> {
-  const verifier = consumeOAuthSession(args.state);
+async function performOAuthCodeExchange(args: { code: string; state: string }): Promise<string> {
   const exchangeUrl = import.meta.env.VITE_GITHUB_OAUTH_EXCHANGE_URL ?? "";
 
   if (!exchangeUrl) {
     throw new Error("Missing VITE_GITHUB_OAUTH_EXCHANGE_URL");
   }
 
+  const verifier = readOAuthSession(args.state);
   const config = getOAuthConfig();
-  const response = await fetch(exchangeUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      code: args.code,
-      codeVerifier: verifier,
-      redirectUri: config.redirectUri,
-      clientId: config.clientId,
-    }),
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OAUTH_EXCHANGE_TIMEOUT_MS);
+
+  try {
+    let response: Response;
+    try {
+      response = await fetch(exchangeUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          code: args.code,
+          codeVerifier: verifier,
+          redirectUri: config.redirectUri,
+          clientId: config.clientId,
+        }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      const message = controller.signal.aborted
+        ? "OAuth token exchange timed out"
+        : "OAuth token exchange is temporarily unavailable";
+      throw new OAuthExchangeError(message, true, { cause: error });
+    }
+
+    if (!response.ok) {
+      if (response.status === 429 || response.status >= 500) {
+        throw new OAuthExchangeError(
+          `OAuth token exchange is temporarily unavailable (${response.status})`,
+          true,
+        );
+      }
+      clearOAuthSession();
+      throw new Error(`OAuth token exchange failed (${response.status})`);
+    }
+
+    let payload: { access_token?: string };
+    try {
+      payload = (await response.json()) as { access_token?: string };
+    } catch (error) {
+      const message = controller.signal.aborted
+        ? "OAuth token exchange timed out"
+        : "OAuth token exchange returned an invalid response";
+      throw new OAuthExchangeError(message, true, { cause: error });
+    }
+
+    if (!payload.access_token) {
+      clearOAuthSession();
+      throw new Error("OAuth exchange did not return access_token");
+    }
+
+    clearOAuthSession();
+    return payload.access_token;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export function exchangeOAuthCode(args: { code: string; state: string }): Promise<string> {
+  const requestKey = `${args.code}\u0000${args.state}`;
+  const existing = inFlightExchanges.get(requestKey);
+  if (existing) {
+    return existing;
+  }
+
+  const exchange = performOAuthCodeExchange(args).finally(() => {
+    inFlightExchanges.delete(requestKey);
   });
-
-  if (!response.ok) {
-    throw new Error(`OAuth token exchange failed (${response.status})`);
-  }
-
-  const payload = (await response.json()) as { access_token?: string };
-
-  if (!payload.access_token) {
-    throw new Error("OAuth exchange did not return access_token");
-  }
-
-  return payload.access_token;
+  inFlightExchanges.set(requestKey, exchange);
+  return exchange;
 }

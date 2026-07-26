@@ -99,6 +99,35 @@ function encodeBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+function createSchemaFailureSnapshot(): Uint8Array {
+  const rawDb = new SQL.Database();
+  rawDb.run("CREATE VIEW repos AS SELECT 1 AS id;");
+  const bytes = rawDb.export();
+  rawDb.close();
+  return bytes;
+}
+
+function createHealthySnapshot(repoId: number): Uint8Array {
+  const rawDb = new SQL.Database();
+  runSchema(rawDb);
+  rawDb.run(
+    `INSERT INTO repos (
+      id, full_name, name, topics_json, html_url, stars, forks, updated_at,
+      checksum, readme_retry_required, last_synced_at
+    ) VALUES (?, ?, ?, '[]', ?, 0, 0, '2026-07-26T00:00:00Z', ?, 0, 1);`,
+    [
+      repoId,
+      `owner/repo-${repoId}`,
+      `repo-${repoId}`,
+      `https://github.com/owner/repo-${repoId}`,
+      `checksum-${repoId}`,
+    ],
+  );
+  const bytes = rawDb.export();
+  rawDb.close();
+  return bytes;
+}
+
 async function seedRepoDatabase(args: {
   scopeKey: string;
   storageMode: "opfs" | "local-storage";
@@ -178,7 +207,9 @@ describe("database scope naming", () => {
 
   it("sanitizes authenticated scope keys", () => {
     expect(getScopedDatabaseFileName("auth:abc/123")).toBe("gitstarrecall.auth:abc_123.sqlite");
-    expect(getScopedDatabaseStorageKey("auth:abc/123")).toBe("gitstarrecall.sqlite.base64.auth:abc_123");
+    expect(getScopedDatabaseStorageKey("auth:abc/123")).toBe(
+      "gitstarrecall.sqlite.base64.auth:abc_123",
+    );
   });
 
   it("migrates legacy token-scoped local data into the stable auth scope", async () => {
@@ -279,8 +310,14 @@ describe("database scope naming", () => {
     const legacyScope = "token:legacy";
     const nextScope = "auth:github:42";
 
-    localStorage.setItem(getScopedDatabaseStorageKey(legacyScope), encodeBase64(new Uint8Array([1, 2, 3])));
-    localStorage.setItem(getScopedDatabaseStorageKey(nextScope), encodeBase64(new Uint8Array([4, 5, 6])));
+    localStorage.setItem(
+      getScopedDatabaseStorageKey(legacyScope),
+      encodeBase64(new Uint8Array([1, 2, 3])),
+    );
+    localStorage.setItem(
+      getScopedDatabaseStorageKey(nextScope),
+      encodeBase64(new Uint8Array([4, 5, 6])),
+    );
 
     const migrated = await migrateLocalDatabaseScope({
       fromScopeKey: legacyScope,
@@ -296,7 +333,10 @@ describe("database scope naming", () => {
     const legacyScope = "token:broken";
     const nextScope = "auth:github:42";
 
-    localStorage.setItem(getScopedDatabaseStorageKey(legacyScope), encodeBase64(new Uint8Array([1, 2, 3])));
+    localStorage.setItem(
+      getScopedDatabaseStorageKey(legacyScope),
+      encodeBase64(new Uint8Array([1, 2, 3])),
+    );
 
     const migrated = await migrateLocalDatabaseScope({
       fromScopeKey: legacyScope,
@@ -341,5 +381,49 @@ describe("database scope naming", () => {
 
     expect(database.listRepos().map((repo) => repo.id)).toEqual([2]);
     nowSpy.mockRestore();
+  });
+
+  it("preserves a local-storage snapshot when schema initialization fails and retries later", async () => {
+    const scopeKey = "auth:github:migration-failure-local";
+    const storageKey = getScopedDatabaseStorageKey(scopeKey);
+    const originalEncoded = encodeBase64(createSchemaFailureSnapshot());
+    localStorage.setItem(storageKey, originalEncoded);
+    setLocalDatabaseScope(scopeKey);
+
+    await expect(getLocalDatabase()).rejects.toThrow(
+      "Failed to open or migrate the local database. Stored data was preserved",
+    );
+    expect(localStorage.getItem(storageKey)).toBe(originalEncoded);
+
+    localStorage.setItem(storageKey, encodeBase64(createHealthySnapshot(91)));
+    const recovered = await getLocalDatabase();
+    expect(recovered.listRepos().map((repo) => repo.id)).toEqual([91]);
+  });
+
+  it("preserves an OPFS snapshot when schema initialization fails", async () => {
+    const scopeKey = "auth:github:migration-failure-opfs";
+    const opfsRoot = new MemoryOpfsRoot();
+    Object.defineProperty(globalThis, "navigator", {
+      value: {
+        storage: {
+          getDirectory: async () => opfsRoot,
+        },
+      },
+      configurable: true,
+    });
+    const originalBytes = createSchemaFailureSnapshot();
+    const handle = await opfsRoot.getFileHandle(getScopedDatabaseFileName(scopeKey), {
+      create: true,
+    });
+    const writable = await handle.createWritable();
+    await writable.write(originalBytes);
+    await writable.close();
+    setLocalDatabaseScope(scopeKey);
+
+    await expect(getLocalDatabase()).rejects.toThrow(
+      "Failed to open or migrate the local database. Stored data was preserved",
+    );
+    const preserved = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+    expect(preserved).toEqual(originalBytes);
   });
 });

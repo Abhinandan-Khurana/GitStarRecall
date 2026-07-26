@@ -10,6 +10,9 @@ function localRepo(overrides: Partial<RepoSyncState> = {}): RepoSyncState {
     topics: ["a", "b"],
     language: "TypeScript",
     updatedAt: "2026-01-01T00:00:00Z",
+    stars: 1,
+    forks: 1,
+    readmeRetryRequired: false,
     checksum: "hash-1",
     ...overrides,
   };
@@ -61,5 +64,27 @@ describe("sync planning", () => {
     });
 
     expect(repoMetadataChanged(local, remote)).toBe(false);
+  });
+
+  test("detects stars and forks changes without another metadata change", () => {
+    const local = localRepo({ stars: 1, forks: 1 });
+
+    expect(repoMetadataChanged(local, remoteRepo(1, { stargazers_count: 2 }))).toBe(true);
+    expect(repoMetadataChanged(local, remoteRepo(1, { forks_count: 2 }))).toBe(true);
+  });
+
+  test("retries an unchanged repository after a transient README failure", () => {
+    const plan = buildSyncPlan([localRepo({ readmeRetryRequired: true })], [remoteRepo(1)]);
+
+    expect(plan.candidateRepoIds).toEqual([1]);
+  });
+
+  test("does not repeatedly select a stable known-empty README", () => {
+    const plan = buildSyncPlan(
+      [localRepo({ checksum: "known-empty-checksum", readmeRetryRequired: false })],
+      [remoteRepo(1)],
+    );
+
+    expect(plan.candidateRepoIds).toEqual([]);
   });
 });

@@ -14,6 +14,7 @@ export type RepoRecord = {
   readmeEtag?: string | null;
   readmeLastModified?: string | null;
   checksum: string | null;
+  readmeRetryRequired?: boolean;
   lastSyncedAt: number;
 };
 
@@ -24,9 +25,14 @@ export type RepoSyncState = {
   topics: string[];
   language: string | null;
   updatedAt: string;
+  stars?: number;
+  forks?: number;
+  readmeUrl?: string | null;
+  readmeText?: string | null;
   readmeEtag?: string | null;
   readmeLastModified?: string | null;
   checksum: string | null;
+  readmeRetryRequired?: boolean;
 };
 
 export type ChunkRecord = {

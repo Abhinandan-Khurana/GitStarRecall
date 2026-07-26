@@ -40,7 +40,13 @@ type FetchReadmesOptions = {
   batchSize?: number;
   previousSyncStateByRepoId?: Map<
     number,
-    { checksum: string | null; readmeEtag: string | null; readmeLastModified: string | null }
+    {
+      checksum: string | null;
+      readmeUrl?: string | null;
+      readmeText?: string | null;
+      readmeEtag: string | null;
+      readmeLastModified: string | null;
+    }
   >;
   onProgress?: (progress: ReadmeFetchProgress) => void;
   onBatch?: (
@@ -54,10 +60,27 @@ const API_BASE_URL = "https://api.github.com";
 const DEFAULT_PER_PAGE = 100;
 const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_README_CONCURRENCY = 6;
+const MAX_FALLBACK_RETRY_DELAY_MS = 30_000;
+const MAX_SERVER_RETRY_DELAY_MS = 60 * 60 * 1000;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(
+      signal.reason ?? new DOMException("The operation was aborted", "AbortError"),
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", onAbort);
+      reject(signal?.reason ?? new DOMException("The operation was aborted", "AbortError"));
+    };
+    const timeoutId = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -73,32 +96,41 @@ function parseRateLimit(headers: Headers): GitHubRateLimit {
   };
 }
 
-function getRetryDelayMs(response: Response, attempt: number): number {
-  const retryAfter = response.headers.get("retry-after");
+function getRetryDelayMs(response: Response | null, attempt: number): number {
+  const retryAfter = response?.headers.get("retry-after");
 
   if (retryAfter) {
     const parsed = Number(retryAfter);
 
     if (Number.isFinite(parsed) && parsed >= 0) {
-      return parsed * 1000;
+      return Math.min(parsed * 1000, MAX_SERVER_RETRY_DELAY_MS);
+    }
+
+    const retryAt = Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) {
+      return Math.min(Math.max(retryAt - Date.now(), 0), MAX_SERVER_RETRY_DELAY_MS);
     }
   }
 
-  const reset = response.headers.get("x-ratelimit-reset");
+  const reset = response?.headers.get("x-ratelimit-reset");
   if (reset) {
     const resetMs = Number(reset) * 1000;
 
     if (Number.isFinite(resetMs)) {
-      return Math.max(resetMs - Date.now() + 500, 1000);
+      return Math.min(Math.max(resetMs - Date.now() + 500, 1000), MAX_SERVER_RETRY_DELAY_MS);
     }
   }
 
   // bounded exponential backoff with jitter
   const base = Math.min(2 ** attempt * 1000, 30000);
-  return Math.floor(base + Math.random() * 300);
+  return Math.min(Math.floor(base + Math.random() * 300), MAX_FALLBACK_RETRY_DELAY_MS);
 }
 
 function shouldRetry(response: Response): boolean {
+  if (response.status >= 500 && response.status <= 599) {
+    return true;
+  }
+
   if (response.status === 429) {
     return true;
   }
@@ -208,19 +240,28 @@ function assertAuthenticatedUser(payload: unknown): asserts payload is GitHubAut
   }
 
   const candidate = payload as Partial<GitHubAuthenticatedUser>;
-  if (!Number.isFinite(candidate.id) || typeof candidate.login !== "string" || !candidate.login.trim()) {
+  if (
+    !Number.isFinite(candidate.id) ||
+    typeof candidate.login !== "string" ||
+    !candidate.login.trim()
+  ) {
     throw new Error("GitHub user response was missing id/login");
   }
 }
 
 type GitHubReadmePayload = {
-  content?: string;
-  encoding?: string;
+  content: string;
+  encoding: "base64";
   html_url?: string | null;
 };
 
 function assertReadmePayload(payload: unknown): asserts payload is GitHubReadmePayload {
   if (!payload || typeof payload !== "object") {
+    throw new Error("GitHub README response had unexpected payload");
+  }
+
+  const candidate = payload as Partial<GitHubReadmePayload>;
+  if (typeof candidate.content !== "string" || candidate.encoding !== "base64") {
     throw new Error("GitHub README response had unexpected payload");
   }
 }
@@ -245,21 +286,48 @@ async function requestWithBackoff(args: {
   logger: Logger;
   maxRetries: number;
   headers?: Record<string, string>;
-  onRetry?: (meta: { status: number; waitMs: number; attempt: number; rateLimited: boolean }) => void;
+  onRetry?: (meta: {
+    status: number;
+    waitMs: number;
+    attempt: number;
+    rateLimited: boolean;
+  }) => void;
 }): Promise<Response> {
   let attempt = 0;
 
   while (true) {
-    const response = await args.fetchImpl(args.url, {
-      method: "GET",
-      signal: args.signal,
-      headers: {
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        Authorization: `Bearer ${args.accessToken}`,
-        ...(args.headers ?? {}),
-      },
-    });
+    let response: Response;
+    try {
+      response = await args.fetchImpl(args.url, {
+        method: "GET",
+        signal: args.signal,
+        headers: {
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          Authorization: `Bearer ${args.accessToken}`,
+          ...(args.headers ?? {}),
+        },
+      });
+    } catch (error) {
+      if (args.signal?.aborted || attempt >= args.maxRetries) {
+        throw error;
+      }
+
+      const waitMs = getRetryDelayMs(null, attempt);
+      args.logger.warn("transient network failure, backing off", {
+        attempt: attempt + 1,
+        waitMs,
+      });
+      args.onRetry?.({
+        status: 0,
+        waitMs,
+        attempt: attempt + 1,
+        rateLimited: false,
+      });
+      await sleep(waitMs, args.signal);
+      attempt += 1;
+      continue;
+    }
 
     if (response.ok || response.status === 304 || response.status === 404) {
       return response;
@@ -277,7 +345,7 @@ async function requestWithBackoff(args: {
 
     const waitMs = getRetryDelayMs(response, attempt);
 
-    args.logger.warn("rate-limited, backing off", {
+    args.logger.warn("transient GitHub response, backing off", {
       attempt: attempt + 1,
       status: response.status,
       waitMs,
@@ -289,7 +357,7 @@ async function requestWithBackoff(args: {
       rateLimited: isRateLimitedResponse(response),
     });
 
-    await sleep(waitMs);
+    await sleep(waitMs, args.signal);
     attempt += 1;
   }
 }
@@ -346,7 +414,9 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
     };
   }
 
-  async function fetchAllStarredRepos(options: FetchStarredOptions = {}): Promise<FetchStarredResult> {
+  async function fetchAllStarredRepos(
+    options: FetchStarredOptions = {},
+  ): Promise<FetchStarredResult> {
     const repos: GitHubStarredRepo[] = [];
     let nextUrl: string | null = `${API_BASE_URL}/user/starred?per_page=${perPage}&page=1`;
     let fetchedPages = 0;
@@ -509,17 +579,16 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
       checksum: string | null;
       missingReadme: boolean;
       notModified: boolean;
+      outcome: RepoReadmeRecord["outcome"];
     }): Promise<RepoReadmeRecord> => {
-      const resolvedChecksum =
-        params.checksum ??
-        (await sha256Hex(canonicalChecksumInput(params.repo, await sha256Hex(params.readmeText ?? ""))));
       return {
         repoId: params.repo.id,
+        outcome: params.outcome,
         readmeUrl: params.readmeUrl,
         readmeText: params.readmeText,
         readmeEtag: params.readmeEtag,
         readmeLastModified: params.readmeLastModified,
-        checksum: resolvedChecksum,
+        checksum: params.checksum,
         missingReadme: params.missingReadme,
         notModified: params.notModified,
       };
@@ -567,50 +636,39 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
             repo,
             readmeText: null,
             readmeUrl: null,
-            readmeEtag: readmeEtag ?? previous?.readmeEtag ?? null,
-            readmeLastModified: readmeLastModified ?? previous?.readmeLastModified ?? null,
+            readmeEtag: null,
+            readmeLastModified: null,
             checksum,
             missingReadme: true,
             notModified: false,
+            outcome: "not_found",
           });
           return { record, latencyMs, failed: false, rateLimited };
         }
 
         if (response.status === 304) {
+          const checksum =
+            typeof previous?.readmeText === "string"
+              ? await sha256Hex(canonicalChecksumInput(repo, await sha256Hex(previous.readmeText)))
+              : (previous?.checksum ?? null);
           const record = await buildReadmeRecord({
             repo,
-            readmeText: null,
-            readmeUrl: null,
+            readmeText: previous?.readmeText ?? null,
+            readmeUrl: previous?.readmeUrl ?? null,
             readmeEtag: readmeEtag ?? previous?.readmeEtag ?? null,
             readmeLastModified: readmeLastModified ?? previous?.readmeLastModified ?? null,
-            checksum: previous?.checksum ?? null,
+            checksum,
             missingReadme: false,
             notModified: true,
+            outcome: "not_modified",
           });
           return { record, latencyMs, failed: false, rateLimited };
         }
 
-        if (!response.ok) {
-          const emptyHash = await sha256Hex("");
-          const checksum = await sha256Hex(canonicalChecksumInput(repo, emptyHash));
-          const record = await buildReadmeRecord({
-            repo,
-            readmeText: null,
-            readmeUrl: null,
-            readmeEtag: readmeEtag ?? previous?.readmeEtag ?? null,
-            readmeLastModified: readmeLastModified ?? previous?.readmeLastModified ?? null,
-            checksum,
-            missingReadme: true,
-            notModified: false,
-          });
-          return { record, latencyMs, failed: true, rateLimited };
-        }
-
-        const payload = (await response.json()) as GitHubReadmePayload;
+        const payload = (await response.json()) as unknown;
         assertReadmePayload(payload);
-        const readmeText =
-          payload.content && payload.encoding === "base64" ? decodeBase64Utf8(payload.content) : null;
-        const readmeSha256 = await sha256Hex(readmeText ?? "");
+        const readmeText = decodeBase64Utf8(payload.content);
+        const readmeSha256 = await sha256Hex(readmeText);
         const checksum = await sha256Hex(canonicalChecksumInput(repo, readmeSha256));
         const record = await buildReadmeRecord({
           repo,
@@ -619,8 +677,9 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
           readmeEtag,
           readmeLastModified,
           checksum,
-          missingReadme: readmeText == null,
+          missingReadme: false,
           notModified: false,
+          outcome: "success",
         });
         return { record, latencyMs, failed: false, rateLimited };
       } catch (err) {
@@ -633,17 +692,16 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
           error: err instanceof Error ? err.message : String(err),
         });
         const latencyMs = performance.now() - startedAt;
-        const emptyHash = await sha256Hex("");
-        const checksum = await sha256Hex(canonicalChecksumInput(repo, emptyHash));
         const record = await buildReadmeRecord({
           repo,
-          readmeText: null,
-          readmeUrl: null,
+          readmeText: previous?.readmeText ?? null,
+          readmeUrl: previous?.readmeUrl ?? null,
           readmeEtag: previous?.readmeEtag ?? null,
           readmeLastModified: previous?.readmeLastModified ?? null,
-          checksum,
-          missingReadme: true,
+          checksum: previous?.checksum ?? null,
+          missingReadme: false,
           notModified: false,
+          outcome: "transient_failure",
         });
         return { record, latencyMs, failed: readmeFailed, rateLimited };
       }
@@ -651,7 +709,7 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
 
     const processRepo = async (repo: GitHubStarredRepo) => {
       if (cooldownUntil > Date.now()) {
-        await sleep(cooldownUntil - Date.now());
+        await sleep(cooldownUntil - Date.now(), options.signal);
       }
 
       const result = await fetchSingleReadme(repo);
@@ -661,10 +719,10 @@ export function createGitHubApiClient(args: CreateGitHubApiClientArgs) {
       completed += 1;
       windowCompleted += 1;
 
-      if (result.record.notModified || !result.record.missingReadme) {
+      if (result.record.outcome === "success" || result.record.outcome === "not_modified") {
         succeeded += 1;
       }
-      if (result.record.missingReadme && !result.failed) {
+      if (result.record.outcome === "not_found") {
         missingCount += 1;
       }
       if (result.failed) {
