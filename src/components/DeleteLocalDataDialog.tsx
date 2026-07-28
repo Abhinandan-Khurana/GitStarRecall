@@ -8,7 +8,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { DeleteLocalDataCategory, DeleteLocalDataFailure } from "@/localData/deleteLocalData";
+import {
+  DELETE_LOCAL_DATA_CATEGORIES,
+  type DeleteLocalDataCategory,
+  type DeleteLocalDataFailure,
+} from "@/localData/deleteLocalData";
 
 type Props = {
   /** Whether the dialog is shown. */
@@ -32,14 +36,6 @@ const CATEGORY_LABELS: Record<DeleteLocalDataCategory, string> = {
   preferences: "Scoped preferences",
   logs: "Local logs",
 };
-
-const CATEGORY_ORDER: readonly DeleteLocalDataCategory[] = [
-  "repository-data",
-  "model-caches",
-  "provider-settings",
-  "preferences",
-  "logs",
-];
 
 export function DeleteLocalDataDialog(props: Readonly<Props>) {
   const { open, pending, blocked, blockReason, failures, onCancel, onConfirm } = props;
@@ -101,7 +97,7 @@ export function DeleteLocalDataDialog(props: Readonly<Props>) {
             The following local data will be deleted:
           </p>
           <ul aria-labelledby={categoriesId} className="list-disc space-y-1 pl-5">
-            {CATEGORY_ORDER.map((category) => (
+            {DELETE_LOCAL_DATA_CATEGORIES.map((category) => (
               <li key={category}>{CATEGORY_LABELS[category]}</li>
             ))}
           </ul>

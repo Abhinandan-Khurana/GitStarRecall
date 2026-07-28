@@ -532,6 +532,54 @@ describe("scoped chat backup storage", () => {
     expect(survivors.sessions.map((item) => item.id)).toEqual(["s-a"]);
   });
 
+  it("erases the cleared scope's legacy localStorage entries and keeps other identities", async () => {
+    expect(typeof indexedDB).toBe("undefined");
+    const otherSession = session({ id: "user-b:one", query: "b-one" });
+    const otherMessage = message({ id: "mb", sessionId: "user-b:one", content: "b" });
+    storage.setItem(
+      LEGACY_SESSIONS_KEY,
+      JSON.stringify([session({ id: "user-a:one", query: "a-one" }), otherSession]),
+    );
+    storage.setItem(
+      LEGACY_MESSAGES_KEY,
+      JSON.stringify([
+        message({ id: "ma", sessionId: "user-a:one", content: "a" }),
+        otherMessage,
+        message({ id: "ma-orphan", sessionId: "user-a:gone", content: "a-orphan" }),
+      ]),
+    );
+    // Establishes the backend proof the clear path requires.
+    await backupChatSession(scopeA, session({ id: "scoped-a", query: "scoped" }));
+
+    await clearChatBackup(scopeA);
+
+    expect(JSON.parse(storage.getItem(LEGACY_SESSIONS_KEY) ?? "null")).toEqual([otherSession]);
+    expect(JSON.parse(storage.getItem(LEGACY_MESSAGES_KEY) ?? "null")).toEqual([otherMessage]);
+  });
+
+  it("leaves legacy localStorage bytes untouched when the scope owns no legacy entries", async () => {
+    const scopeC: ChatBackupScope = { key: "user-c", legacySessionPrefix: "user-c:" };
+    // Matches the beforeEach seeding for the other scopes so the backup below
+    // does not attempt a legacy migration with IndexedDB absent.
+    storage.setItem("gitstarrecall.chat.backup.legacy-migrated.v2.user-c", "1");
+    storage.setItem(
+      LEGACY_SESSIONS_KEY,
+      JSON.stringify([session({ id: "user-a:one", query: "a-one" })]),
+    );
+    storage.setItem(
+      LEGACY_MESSAGES_KEY,
+      JSON.stringify([message({ id: "ma", sessionId: "user-a:one", content: "a" })]),
+    );
+    const sessionsBefore = storage.getItem(LEGACY_SESSIONS_KEY);
+    const messagesBefore = storage.getItem(LEGACY_MESSAGES_KEY);
+    await backupChatSession(scopeC, session({ id: "scoped-c", query: "scoped" }));
+
+    await clearChatBackup(scopeC);
+
+    expect(storage.getItem(LEGACY_SESSIONS_KEY)).toBe(sessionsBefore);
+    expect(storage.getItem(LEGACY_MESSAGES_KEY)).toBe(messagesBefore);
+  });
+
   it("rejects the clear and keeps records when localStorage disappears mid deletion", async () => {
     expect(typeof indexedDB).toBe("undefined");
     const backing = new MemoryStorage();
@@ -642,6 +690,28 @@ async function seedLegacyIndexedDb(
   for (const record of messages) transaction.objectStore("chat_messages").put(record);
   await transactionDone(transaction);
   database.close();
+}
+
+/** Reads the raw legacy v1 stores so scoped erasure can be asserted directly. */
+async function readLegacyIndexedDbStores(): Promise<{
+  sessions: ChatSessionRecord[];
+  messages: ChatMessageRecord[];
+}> {
+  const database = await openDatabase(BACKUP_DB_NAME);
+  const transaction = database.transaction(["chat_sessions", "chat_messages"], "readonly");
+  const read = <T>(store: string): Promise<T[]> =>
+    new Promise((resolve, reject) => {
+      const request = transaction.objectStore(store).getAll() as IDBRequest<T[]>;
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  const [sessions, messages] = await Promise.all([
+    read<ChatSessionRecord>("chat_sessions"),
+    read<ChatMessageRecord>("chat_messages"),
+  ]);
+  await transactionDone(transaction);
+  database.close();
+  return { sessions, messages };
 }
 
 async function withTemporaryIndexedDb<T>(operation: () => Promise<T>): Promise<T> {
@@ -796,6 +866,33 @@ describe("scoped chat backup IndexedDB storage", () => {
     const other = await loadChatBackup(scopeB);
     expect(other.sessions.map((item) => item.id)).toEqual(["b"]);
     expect(other.messagesBySessionId.b?.map((item) => item.id)).toEqual(["mb"]);
+  });
+
+  it("erases the cleared scope's legacy IndexedDB rows and keeps other identities", async () => {
+    await seedLegacyIndexedDb(
+      [
+        session({ id: "user-a:one", query: "a-one" }),
+        session({ id: "user-b:one", query: "b-one" }),
+      ],
+      [
+        message({ id: "ma", sessionId: "user-a:one", content: "a" }),
+        message({ id: "mb", sessionId: "user-b:one", content: "b" }),
+        // Orphaned: no surviving session row, but still this scope's data.
+        message({ id: "ma-orphan", sessionId: "user-a:gone", content: "a-orphan" }),
+      ],
+    );
+
+    await clearChatBackup(scopeA);
+
+    const legacy = await readLegacyIndexedDbStores();
+    expect(legacy.sessions.map((item) => item.id)).toEqual(["user-b:one"]);
+    expect(legacy.messages.map((item) => item.id)).toEqual(["mb"]);
+    // Account B's legacy rows are still restorable through its own migration.
+    const survivors = await loadChatBackup(scopeB);
+    expect(survivors.sessions.map((item) => item.id)).toEqual(["user-b:one"]);
+    expect(survivors.messagesBySessionId["user-b:one"]?.map((item) => item.id)).toEqual(["mb"]);
+    // The cleared scope stays empty rather than re-migrating its legacy rows.
+    expect((await loadChatBackup(scopeA)).sessions).toHaveLength(0);
   });
 
   it("rejects the clear when a captured backend disappears after the capability proof", async () => {

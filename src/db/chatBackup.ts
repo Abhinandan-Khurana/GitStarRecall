@@ -787,7 +787,75 @@ async function readLegacyIndexedDbResult(
   }
 }
 
-/** v1 keys are read-only input; this never writes or trims the legacy bytes. */
+/** True when a legacy v1 id belongs to `scope`; the prefix is scope-specific. */
+function ownsLegacyId(scope: ChatBackupScope, id: unknown): boolean {
+  return typeof id === "string" && id.startsWith(scope.legacySessionPrefix);
+}
+
+/**
+ * Deletes only the legacy v1 IndexedDB rows owned by `scope`. Rows belonging to
+ * other identities are left untouched, so this cannot widen a scoped deletion.
+ */
+async function deleteLegacyIndexedDbScopeRecords(scope: ChatBackupScope): Promise<void> {
+  await withBackupDb(async (database) => {
+    if (
+      !database.objectStoreNames.contains(LEGACY_SESSIONS_STORE) ||
+      !database.objectStoreNames.contains(LEGACY_MESSAGES_STORE)
+    ) {
+      return;
+    }
+    const transaction = database.transaction(
+      [LEGACY_SESSIONS_STORE, LEGACY_MESSAGES_STORE],
+      "readwrite",
+    );
+    const completion = wrapTransaction(transaction);
+    const sessionStore = transaction.objectStore(LEGACY_SESSIONS_STORE);
+    const messageStore = transaction.objectStore(LEGACY_MESSAGES_STORE);
+    const [allSessions, allMessages] = await Promise.all([
+      wrapRequest(sessionStore.getAll() as IDBRequest<ChatSessionRecord[]>),
+      wrapRequest(messageStore.getAll() as IDBRequest<ChatMessageRecord[]>),
+    ]);
+    for (const session of allSessions) {
+      if (ownsLegacyId(scope, session?.id)) sessionStore.delete(session.id);
+    }
+    // Keyed on sessionId so an orphaned legacy message is erased with its scope.
+    for (const message of allMessages) {
+      if (ownsLegacyId(scope, message?.sessionId)) messageStore.delete(message.id);
+    }
+    await completion;
+  });
+}
+
+/**
+ * Removes this scope's entries from the shared legacy v1 localStorage arrays.
+ * A key whose entries are all owned by other identities is never rewritten, so
+ * their bytes are preserved exactly.
+ */
+function deleteLegacyLocalScopeRecords(scope: ChatBackupScope, storage: Storage): void {
+  const raw = readStoragePair(storage, LEGACY_LOCAL_SESSIONS_KEY, LEGACY_LOCAL_MESSAGES_KEY);
+  if (raw.status === "error") {
+    throw readFailure("Failed to read the legacy chat backup during scoped deletion", raw.error);
+  }
+  if (raw.status !== "ok") return;
+  const sessions = raw.value.sessions.filter((session) => !ownsLegacyId(scope, session?.id));
+  const messages = raw.value.messages.filter((message) => !ownsLegacyId(scope, message?.sessionId));
+  if (sessions.length !== raw.value.sessions.length) {
+    writeOrRemoveLegacyList(storage, LEGACY_LOCAL_SESSIONS_KEY, sessions);
+  }
+  if (messages.length !== raw.value.messages.length) {
+    writeOrRemoveLegacyList(storage, LEGACY_LOCAL_MESSAGES_KEY, messages);
+  }
+}
+
+function writeOrRemoveLegacyList(storage: Storage, key: string, remaining: unknown[]): void {
+  if (remaining.length === 0) {
+    removeAndVerify(storage, key);
+    return;
+  }
+  writeAndVerify(storage, key, JSON.stringify(remaining));
+}
+
+/** Reads the v1 input without mutating it; scoped deletion handles its own erasure separately. */
 function readLegacyLocal(scope: ChatBackupScope): BackendRead<SnapshotInput> {
   const storage = getStorage();
   if (!storage) return { status: "unavailable" };
@@ -1030,6 +1098,16 @@ async function clearScopeInternal(scope: ChatBackupScope): Promise<void> {
         if (remaining.sessions.length || Object.keys(remaining.messagesBySessionId).length) {
           throw new Error("IndexedDB retained scoped chat backup records after deletion");
         }
+        // The migration marker only blocks restoration; the v1 rows must also go
+        // for the dialog's permanent-erasure promise to hold.
+        await deleteLegacyIndexedDbScopeRecords(scope);
+        const remainingLegacy = await readLegacyIndexedDb(scope);
+        if (
+          remainingLegacy.sessions.length ||
+          Object.keys(remainingLegacy.messagesBySessionId).length
+        ) {
+          throw new Error("IndexedDB retained legacy chat backup records after deletion");
+        }
       } catch (error) {
         errors.push(error);
       }
@@ -1043,6 +1121,7 @@ async function clearScopeInternal(scope: ChatBackupScope): Promise<void> {
       try {
         removeAndVerify(currentStorage, localSessionsKey(scope));
         removeAndVerify(currentStorage, localMessagesKey(scope));
+        deleteLegacyLocalScopeRecords(scope, currentStorage);
       } catch (error) {
         errors.push(error);
       }

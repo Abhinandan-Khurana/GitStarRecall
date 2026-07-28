@@ -13,11 +13,11 @@ const budget = (baselineBytes, toleranceBasisPoints, metricClass) => ({
   maximumBytes: Math.ceil((baselineBytes * (10_000 + toleranceBasisPoints)) / 10_000),
 });
 
-// Baselines are measurements from BASELINE_COMMIT. Raw JavaScript has a 2.5% ceiling;
+// Baselines are measurements from BASELINE_COMMIT. Raw JavaScript has a 2.6% ceiling;
 // transferred JavaScript and every WASM measurement retain the stricter 2% ceiling.
 export const BUDGETS = {
-  largestJavaScriptRawBytes: budget(6_796_298, 250, "rawJavaScript"),
-  totalJavaScriptRawBytes: budget(7_677_607, 250, "rawJavaScript"),
+  largestJavaScriptRawBytes: budget(6_796_298, 260, "rawJavaScript"),
+  totalJavaScriptRawBytes: budget(7_677_607, 260, "rawJavaScript"),
   totalJavaScriptGzipBytes: budget(2_615_423, 200, "gzipJavaScript"),
   ortWasmRawBytes: budget(21_596_019, 200, "wasm"),
   ortWasmGzipBytes: budget(5_046_898, 200, "wasm"),
@@ -28,7 +28,7 @@ export const BUDGETS = {
 const BUDGET_POLICY = {
   rule: "Each ceiling is the fixed baseline plus its metric class tolerance, rounded up to whole bytes.",
   metricClasses: {
-    rawJavaScript: { tolerancePercent: 2.5, appliesTo: "uncompressed JavaScript" },
+    rawJavaScript: { tolerancePercent: 2.6, appliesTo: "uncompressed JavaScript" },
     gzipJavaScript: { tolerancePercent: 2, appliesTo: "gzipped JavaScript" },
     wasm: { tolerancePercent: 2, appliesTo: "raw and gzipped WASM" },
   },

@@ -162,6 +162,16 @@ async function writeBytesToOpfs(bytes: Uint8Array, scopeKey: string): Promise<bo
   }
 }
 
+/** A missing entry means the snapshot is already gone, which is a successful clear. */
+function isMissingOpfsEntryError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "NotFoundError";
+}
+
+/**
+ * Removes the scoped OPFS snapshot. Anything other than an absent entry is
+ * propagated: swallowing it would let `clearAllData` report success while an old
+ * snapshot survives to win a later freshness comparison.
+ */
 async function clearOpfsFile(scopeKey: string): Promise<void> {
   if (!isOpfsSupported()) {
     return;
@@ -170,8 +180,11 @@ async function clearOpfsFile(scopeKey: string): Promise<void> {
   try {
     const root = await navigator.storage.getDirectory();
     await root.removeEntry(getScopedDatabaseFileName(scopeKey));
-  } catch {
-    // noop: best effort
+  } catch (error) {
+    if (isMissingOpfsEntryError(error)) {
+      return;
+    }
+    throw error;
   }
 }
 
@@ -2458,7 +2471,10 @@ export async function migrateLocalDatabaseScope(args: {
   toChatScopeKey?: string | null;
 }): Promise<boolean> {
   async function clearLegacyScopeSnapshot(scopeKey: string): Promise<void> {
-    await clearOpfsFile(scopeKey);
+    // Source-snapshot cleanup stays best effort: migration runs on sign-in, and
+    // failing it would block access to the already-migrated target scope. Unlike
+    // clearAllData this promises no erasure to the user.
+    await clearOpfsFile(scopeKey).catch(() => undefined);
     clearLocalStorageBytes(scopeKey);
     dbPromiseByScope.delete(scopeKey);
   }

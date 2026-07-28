@@ -54,6 +54,7 @@ class FailingStorage extends MemoryStorage {
 class ControlledOpfsRoot {
   private files = new Map<string, Uint8Array>();
   private closeGates: Array<Promise<void>> = [];
+  private removeEntryFailure: unknown = null;
   closeCount = 0;
 
   delayNextClose(gate: Promise<void>): void {
@@ -90,7 +91,19 @@ class ControlledOpfsRoot {
     };
   }
 
+  failNextRemoveEntry(error: unknown): void {
+    this.removeEntryFailure = error;
+  }
+
   async removeEntry(name: string): Promise<void> {
+    if (this.removeEntryFailure !== null) {
+      const failure = this.removeEntryFailure;
+      this.removeEntryFailure = null;
+      throw failure;
+    }
+    if (!this.files.has(name)) {
+      throw new DOMException(`${name} not found`, "NotFoundError");
+    }
     this.files.delete(name);
   }
 
@@ -293,6 +306,45 @@ describe("LocalDatabase durability ordering", () => {
     await Promise.all([mutation, clear]);
 
     expect(repoIdsFromSnapshot(root.read(getScopedDatabaseFileName(scopeKey)))).toEqual([]);
+    expect(database.listRepos()).toEqual([]);
+  });
+
+  it("fails clearAllData when the OPFS snapshot cannot be removed", async () => {
+    const scopeKey = "auth:durability-clear-opfs-failure";
+    const root = new ControlledOpfsRoot();
+    installOpfs(root);
+    const database = new LocalDatabase({
+      sql: SQL,
+      db: rawDatabase(),
+      storageMode: "opfs",
+      scopeKey,
+    });
+
+    await database.upsertRepos([repo(1)]);
+    expect(repoIdsFromSnapshot(root.read(getScopedDatabaseFileName(scopeKey)))).toEqual([1]);
+
+    root.failNextRemoveEntry(new DOMException("removal blocked", "NoModificationAllowedError"));
+    await expect(database.clearAllData()).rejects.toThrow(/removal blocked/);
+
+    // Deletion genuinely did not happen, so it must not have reported success.
+    // The empty replacement snapshot is never written, so nothing can later beat
+    // the surviving bytes in freshness arbitration.
+    expect(repoIdsFromSnapshot(root.read(getScopedDatabaseFileName(scopeKey)))).toEqual([1]);
+  });
+
+  it("treats an already absent OPFS snapshot as a successful clear", async () => {
+    const scopeKey = "auth:durability-clear-opfs-absent";
+    const root = new ControlledOpfsRoot();
+    installOpfs(root);
+    const database = new LocalDatabase({
+      sql: SQL,
+      db: rawDatabase(),
+      storageMode: "opfs",
+      scopeKey,
+    });
+
+    // No snapshot was ever written, so removeEntry reports NotFoundError.
+    await expect(database.clearAllData()).resolves.toBeUndefined();
     expect(database.listRepos()).toEqual([]);
   });
 

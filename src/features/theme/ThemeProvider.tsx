@@ -46,9 +46,9 @@ function resolveTheme(mode: ThemeMode): ResolvedTheme {
 
 export function ThemeProvider({ children }: PropsWithChildren) {
   const [mode, setMode] = useState<ThemeMode>(() => loadThemeMode());
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
-    resolveTheme(loadThemeMode()),
-  );
+  // Derived from the already-initialized mode so a storage read cannot return a
+  // different value between the two initializers.
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveTheme(mode));
 
   useEffect(() => {
     if (typeof window === "undefined") {
