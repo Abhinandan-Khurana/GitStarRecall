@@ -1,7 +1,13 @@
 import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import wasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { DATABASE_SCHEMA_SQL } from "./schema";
-import { backupChatMessage, backupChatSession, clearChatBackup } from "./chatBackup";
+import {
+  backupChatMessage,
+  backupChatSession,
+  clearChatBackup,
+  type ChatBackupScope,
+} from "./chatBackup";
+import { captureLocalError } from "../observability/localLog";
 import { reciprocalRankFusion } from "../search/fusion";
 import { lexicalOverlapScore, countRareLikeTokens } from "../search/lexical";
 import { mmrSelect, type DenseCandidate } from "../search/rerank";
@@ -32,6 +38,7 @@ const DATABASE_WRITER_LOCK_PREFIX = "gitstarrecall:database-writer";
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
 let currentDatabaseScopeKey = "anon";
+let currentChatBackupScope: ChatBackupScope | null = null;
 const dbPromiseByScope = new Map<string, Promise<LocalDatabase>>();
 
 type EmbeddingCheckpointPolicy = {
@@ -84,6 +91,10 @@ function normalizeDatabaseScopeKey(scopeKey: string): string {
     return "anon";
   }
   return trimmed.replace(/[^a-z0-9:_-]/gi, "_");
+}
+
+function getChatBackupLogScope(scope: ChatBackupScope): string {
+  return scope.key.startsWith("chat:") ? scope.key.slice("chat:".length) : scope.key;
 }
 
 export function getScopedDatabaseFileName(scopeKey: string): string {
@@ -849,6 +860,7 @@ export class LocalDatabase {
   private db: Database;
   private _storageMode: StorageMode;
   private scopeKey: string;
+  private readonly chatBackupScope: ChatBackupScope | null;
   private vectorIndexCache: Array<{ chunkId: string; vector: Float32Array }> | null = null;
   private vectorIndexCacheCount = -1;
   private embeddingCheckpointPolicy: EmbeddingCheckpointPolicy;
@@ -865,12 +877,16 @@ export class LocalDatabase {
     db: Database;
     storageMode: StorageMode;
     scopeKey?: string;
+    chatBackupScope?: ChatBackupScope | null;
     embeddingCheckpointPolicy?: EmbeddingCheckpointPolicy;
   }) {
     this.sql = args.sql;
     this.db = args.db;
     this._storageMode = args.storageMode;
     this.scopeKey = normalizeDatabaseScopeKey(args.scopeKey ?? "anon");
+    this.chatBackupScope = args.chatBackupScope
+      ? Object.freeze({ ...args.chatBackupScope })
+      : null;
     this.embeddingCheckpointPolicy = {
       everyEmbeddings: normalizePositiveInt(
         args.embeddingCheckpointPolicy?.everyEmbeddings,
@@ -2210,14 +2226,24 @@ export class LocalDatabase {
       }
     }
 
-    await backupChatSession({
-      id,
-      query,
-      createdAt,
-      updatedAt,
-    });
-
     await this.persist();
+
+    if (this.chatBackupScope) {
+      try {
+        await backupChatSession(this.chatBackupScope, {
+          id,
+          query,
+          createdAt,
+          updatedAt,
+        });
+      } catch (error) {
+        captureLocalError(
+          getChatBackupLogScope(this.chatBackupScope),
+          "chat_session_backup_failed",
+          error,
+        );
+      }
+    }
   }
 
   listChatSessions(): ChatSessionRecord[] {
@@ -2366,16 +2392,26 @@ export class LocalDatabase {
       }
     }
 
-    await backupChatMessage({
-      id,
-      sessionId,
-      role,
-      content,
-      sequence,
-      createdAt,
-    });
-
     await this.persist();
+
+    if (this.chatBackupScope) {
+      try {
+        await backupChatMessage(this.chatBackupScope, {
+          id,
+          sessionId,
+          role,
+          content,
+          sequence,
+          createdAt,
+        });
+      } catch (error) {
+        captureLocalError(
+          getChatBackupLogScope(this.chatBackupScope),
+          "chat_message_backup_failed",
+          error,
+        );
+      }
+    }
   }
 
   clearAllData(): Promise<void> {
@@ -2396,7 +2432,9 @@ export class LocalDatabase {
 
         await clearOpfsFile(this.scopeKey);
         clearLocalStorageBytes(this.scopeKey);
-        await clearChatBackup();
+        if (this.chatBackupScope) {
+          await clearChatBackup(this.chatBackupScope);
+        }
         const bytes = this.db.export();
         await this.writeSnapshot(bytes);
       });
@@ -2472,12 +2510,17 @@ export async function migrateLocalDatabaseScope(args: {
   return true;
 }
 
-export function setLocalDatabaseScope(scopeKey: string): void {
+export function setLocalDatabaseScope(
+  scopeKey: string,
+  chatBackupScope: ChatBackupScope | null = null,
+): void {
   currentDatabaseScopeKey = normalizeDatabaseScopeKey(scopeKey);
+  currentChatBackupScope = chatBackupScope ? Object.freeze({ ...chatBackupScope }) : null;
 }
 
 export async function getLocalDatabase(): Promise<LocalDatabase> {
   const scopeKey = currentDatabaseScopeKey;
+  const chatBackupScope = currentChatBackupScope;
   const existingPromise = dbPromiseByScope.get(scopeKey);
   if (existingPromise) {
     return existingPromise;
@@ -2496,6 +2539,7 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
           db,
           storageMode,
           scopeKey,
+          chatBackupScope,
           embeddingCheckpointPolicy,
         });
         try {
@@ -2525,6 +2569,7 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
             db,
             storageMode,
             scopeKey,
+            chatBackupScope,
             embeddingCheckpointPolicy,
           });
         } catch (error) {

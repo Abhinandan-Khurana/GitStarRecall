@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
-import { buildChatScopeKey, buildEmbeddingPreferenceScopeKey } from "../auth/authScope";
+import {
+  buildChatBackupScope,
+  buildChatScopeKey,
+  buildEmbeddingPreferenceScopeKey,
+} from "../auth/authScope";
 import { createGitHubApiClient } from "../github/client";
 import type { RepoReadmeRecord } from "../github/types";
 import { getLocalDatabase } from "../db/client";
@@ -56,9 +60,14 @@ import {
   toPreviousReadmeStateByRepoId,
 } from "./readmeSyncOutcome";
 import { sortChatMessages } from "../chat/order";
-import { captureLocalError, captureLocalWarn, clearLocalLogs } from "../observability/localLog";
+import {
+  captureLocalError,
+  captureLocalWarn,
+  clearLocalLogsStrict,
+} from "../observability/localLog";
 import { SessionChat } from "../components/SessionChat";
 import { WebLLMDownloadDialog } from "../components/WebLLMDownloadDialog";
+import { DeleteLocalDataDialog } from "../components/DeleteLocalDataDialog";
 import { SearchBar } from "../components/SearchBar";
 import { SyncStatusBar } from "../components/SyncStatusBar";
 import { OllamaConfigPanel } from "../components/OllamaConfigPanel";
@@ -73,6 +82,8 @@ import { EmptyState } from "../components/EmptyState";
 import {
   buildHistoryRestoreResult,
   createRestoreRequestTracker,
+  invalidateHistoryRestore,
+  loadHistoryBackupAfterPrimaryFailure,
   shouldRestoreOnAuthTransition,
   type HistoryLoadState,
   type SearchSession,
@@ -82,6 +93,7 @@ import {
   getProviderById,
   getProviderDefinitions,
   isWebLLMEnabled,
+  unloadWebLLM,
 } from "../llm/providers";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
 import {
@@ -94,6 +106,17 @@ import {
 } from "../llm/generationState";
 import { executeUsageGeneration } from "../llm/usageGenerationAdapter";
 import { useProviderSettingsPersistence } from "../hooks/useProviderSettingsPersistence";
+import { clearSettingsStrict } from "../lib/settings";
+import {
+  clearModelCaches,
+  clearScopedPreferences,
+} from "../localData/clearLocalDataPrimitives";
+import type { DeleteLocalDataFailure } from "../localData/deleteLocalData";
+import {
+  applyUsagePageDeletionResult,
+  deleteUsagePageLocalData,
+  getUsagePageDeletionBlockReason,
+} from "./usagePageDeletion";
 import {
   getWebLLMSelectableModels,
   WEBLLM_FALLBACK_MODEL_ID,
@@ -651,22 +674,6 @@ function getEmbeddingWorkerBatchSize(): number {
   return 8;
 }
 
-async function clearWebLLMRuntimeCaches(): Promise<void> {
-  if (!("caches" in globalThis)) {
-    return;
-  }
-
-  const keys = await caches.keys();
-  await Promise.all(
-    keys
-      .filter((key) => {
-        const lower = key.toLowerCase();
-        return lower.includes("webllm") || lower.includes("mlc") || lower.includes("model");
-      })
-      .map((key) => caches.delete(key)),
-  );
-}
-
 export type UsagePageView = "legacy" | "recall" | "settings" | "setup";
 
 type UsagePageProps = {
@@ -739,7 +746,13 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const [llmError, setLlmError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const generationControllerRef = useRef<AbortController | null>(null);
+  const activeGenerationPromisesRef = useRef(new Set<Promise<unknown>>());
   const pendingWebllmGenerationRef = useRef<PendingGeneration | null>(null);
+  const [deleteLocalDataOpen, setDeleteLocalDataOpen] = useState(false);
+  const [deleteLocalDataPending, setDeleteLocalDataPending] = useState(false);
+  const [deleteLocalDataFailures, setDeleteLocalDataFailures] = useState<
+    DeleteLocalDataFailure[]
+  >([]);
   const ollamaCatalogRequestIdRef = useRef(0);
   const ollamaEmbeddingModelManuallySetRef = useRef(false);
   const ollamaChatModelManuallySetRef = useRef(false);
@@ -748,9 +761,13 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const browserEmbeddingRecommendationPromiseRef = useRef<Promise<BrowserEmbeddingRecommendation> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const restoreRequestTrackerRef = useRef(createRestoreRequestTracker());
+  const currentHistoryScopeRef = useRef<string | null>(null);
+  const suppressNextHistoryRestoreRef = useRef(false);
   const webllmPreviousRecommendationRef = useRef<WebLLMRecommendation | null>(null);
   const previousIsAuthenticatedRef = useRef(isAuthenticated);
   const chatScopeKey = useMemo(() => buildChatScopeKey(authScopeIdentity), [authScopeIdentity]);
+  currentHistoryScopeRef.current = chatScopeKey;
+  const chatBackupScope = useMemo(() => buildChatBackupScope(chatScopeKey), [chatScopeKey]);
   const embeddingPreferenceScopeKey = useMemo(
     () => buildEmbeddingPreferenceScopeKey(authScopeIdentity),
     [authScopeIdentity],
@@ -1081,7 +1098,8 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   }, [activeResults, activeSessionId]);
 
   const restoreHistory = useCallback(async () => {
-    if (!chatScopeKey) {
+    if (!chatScopeKey || !chatBackupScope) {
+      invalidateHistoryRestore(restoreRequestTrackerRef.current);
       setSessions([]);
       setSelectedContextChunkIdsBySessionId({});
       setSessionMessagesById({});
@@ -1094,6 +1112,9 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     }
 
     const requestId = restoreRequestTrackerRef.current.nextRequestId();
+    const isCurrentRestore = () =>
+      restoreRequestTrackerRef.current.isCurrent(requestId) &&
+      currentHistoryScopeRef.current === chatScopeKey;
     setHistoryLoadState("loading");
 
     const applyRestore = async (params: {
@@ -1101,7 +1122,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       source: "sqlite" | "indexeddb" | "local-storage";
       database?: Awaited<ReturnType<typeof getLocalDatabase>>;
     }) => {
-      if (!restoreRequestTrackerRef.current.isCurrent(requestId)) {
+      if (!isCurrentRestore()) {
         return;
       }
 
@@ -1159,7 +1180,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       let source: "sqlite" | "indexeddb" | "local-storage" = "sqlite";
 
       if (restoreResult.sessions.length === 0) {
-        const backupSnapshot = await loadChatBackup();
+        const backupSnapshot = await loadChatBackup(chatBackupScope);
         const scopedBackupSessions = backupSnapshot.sessions.filter((session) =>
           isSessionInScope(session.id, chatScopeKey),
         );
@@ -1198,20 +1219,40 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
         }));
-        void backupChatSnapshot({
+        void backupChatSnapshot(chatBackupScope, {
           sessions: sessionsForBackup,
           messagesBySessionId: restoreResult.messagesBySessionId,
+        }).catch((error) => {
+          if (isCurrentRestore()) {
+            captureLocalError(authScopeIdentity, "history_backup_failed", error);
+          }
         });
       }
 
       await applyRestore({ restoreResult, source, database });
     } catch (err) {
-      captureLocalError(authScopeIdentity, "history_restore_failed", err);
-      if (!restoreRequestTrackerRef.current.isCurrent(requestId)) {
+      if (!isCurrentRestore()) {
         return;
       }
+      captureLocalError(authScopeIdentity, "history_restore_failed", err);
 
-      const backupSnapshot = await loadChatBackup();
+      const backupSnapshot = await loadHistoryBackupAfterPrimaryFailure({
+        load: () => loadChatBackup(chatBackupScope),
+        isCurrent: isCurrentRestore,
+        onError: (backupError) => {
+          if (isCurrentRestore()) {
+            captureLocalError(authScopeIdentity, "history_backup_restore_failed", backupError);
+          }
+        },
+        onUnavailable: () => {
+          if (isCurrentRestore()) {
+            setHistoryDataSource(null);
+            setHistoryLastRestoredAt(null);
+            setHistoryLoadState("error");
+          }
+        },
+      });
+      if (!backupSnapshot || !isCurrentRestore()) return;
       const scopedBackupSessions = backupSnapshot.sessions.filter((session) =>
         isSessionInScope(session.id, chatScopeKey),
       );
@@ -1228,13 +1269,19 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         return;
       }
 
-      setHistoryDataSource(null);
-      setHistoryLastRestoredAt(null);
-      setHistoryLoadState("error");
+      if (isCurrentRestore()) {
+        setHistoryDataSource(null);
+        setHistoryLastRestoredAt(null);
+        setHistoryLoadState("error");
+      }
     }
-  }, [activeSessionId, authScopeIdentity, chatScopeKey]);
+  }, [activeSessionId, authScopeIdentity, chatBackupScope, chatScopeKey]);
 
   useEffect(() => {
+    if (suppressNextHistoryRestoreRef.current) {
+      suppressNextHistoryRestoreRef.current = false;
+      return;
+    }
     void restoreHistory();
   }, [restoreHistory]);
 
@@ -2712,29 +2759,110 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     }
   };
 
-  const handleClearLocalData = async () => {
+  const deleteLocalDataBlockReason = getUsagePageDeletionBlockReason({
+    hasAuthenticatedScope: Boolean(authScopeIdentity?.trim()),
+    fetchingStars,
+    rebuildingEmbeddings: isRebuildingEmbeddings,
+    searching: isSearching,
+    restoringHistory: historyLoadState === "loading",
+    downloadingWebLLM: webllmRuntimeState === "downloading",
+  });
+
+  const openDeleteLocalDataDialog = () => {
+    setDeleteLocalDataFailures([]);
+    setDeleteLocalDataOpen(true);
+  };
+
+  const clearRepositoryUiState = () => {
+    // Invalidate a restore that settled at the deletion boundary. Clearing a
+    // non-null active session changes restoreHistory's identity, so suppress
+    // that single dependency-driven restore instead of repopulating the DB.
+    restoreRequestTrackerRef.current.nextRequestId();
+    if (activeSessionId !== null) {
+      suppressNextHistoryRestoreRef.current = true;
+    }
+    setStarsSummary("Local repository data cleared.");
+    setIndexingStatus(null);
+    setEmbeddingRunMetrics(null);
+    setRepoInventoryCount(0);
+    setStoredEmbeddingCount(0);
+    setEmbeddingReadiness("empty");
+    setSessions([]);
+    setSelectedContextChunkIdsBySessionId({});
+    setSessionMessagesById({});
+    setActiveSessionId(null);
+    setSessionMode("new");
+    setHistoryLoadState("empty");
+    setHistoryLastRestoredAt(null);
+    setHistoryDataSource(null);
+    setSearchQuery("");
+    setSearchProgress(null);
+    setLlmPrompt("");
+    setLlmAnswer("");
+    setLlmError(null);
+  };
+
+  const handleConfirmDeleteLocalData = async () => {
+    const scopeIdentity = authScopeIdentity?.trim() ?? "";
+    const liveBlockReason = getUsagePageDeletionBlockReason({
+      hasAuthenticatedScope: Boolean(scopeIdentity),
+      fetchingStars,
+      rebuildingEmbeddings: isRebuildingEmbeddings,
+      searching: isSearching,
+      restoringHistory: historyLoadState === "loading",
+      downloadingWebLLM: webllmRuntimeState === "downloading",
+    });
+    if (liveBlockReason || deleteLocalDataPending) {
+      return;
+    }
+
+    setDeleteLocalDataPending(true);
+    setDeleteLocalDataFailures([]);
+
     try {
-      resetSearchEmbedder();
-      const database = await getLocalDatabase();
-      await database.clearAllData();
-      await clearWebLLMRuntimeCaches();
-      if (authScopeIdentity) {
-        clearLocalLogs(authScopeIdentity);
+      const result = await deleteUsagePageLocalData({
+        abortGenerations: () => {
+          pendingWebllmGenerationRef.current = cancelPendingGeneration();
+          generationControllerRef.current?.abort();
+          setWebllmDialogOpen(false);
+        },
+        awaitGenerations: async () => {
+          while (activeGenerationPromisesRef.current.size > 0) {
+            await Promise.allSettled([...activeGenerationPromisesRef.current]);
+          }
+        },
+        clearRepositoryData: async () => {
+          const database = await getLocalDatabase();
+          await database.clearAllData();
+        },
+        unloadWebLLM: async () => {
+          resetSearchEmbedder();
+          await unloadWebLLM();
+          setWebllmRuntimeState("idle");
+          setWebllmDownloadProgress(0);
+          setWebllmProgressText(null);
+        },
+        clearModelCaches,
+        clearProviderSettings: () => clearSettingsStrict(scopeIdentity),
+        clearPreferences: async () => clearScopedPreferences(scopeIdentity),
+        clearLogs: async () => clearLocalLogsStrict(scopeIdentity),
+      });
+
+      applyUsagePageDeletionResult(result, {
+        clearRepositoryUi: clearRepositoryUiState,
+        logout,
+      });
+
+      if (result.success) {
+        setError(null);
+        setDeleteLocalDataOpen(false);
+        return;
       }
-      setStarsSummary("Local database cleared.");
-      setIndexingStatus(null);
-      setSessions([]);
-      setSessionMessagesById({});
-      setActiveSessionId(null);
-      setSessionMode("new");
-      setHistoryLoadState("empty");
-      setHistoryLastRestoredAt(null);
-      setHistoryDataSource(null);
-      setDbStorageMode(database.storageMode);
-      setError(null);
-    } catch (err) {
-      captureLocalError(authScopeIdentity, "clear_local_data_failed", err);
-      setError(err instanceof Error ? err.message : "Failed to clear local database");
+
+      setDeleteLocalDataFailures(result.failures);
+      setError("Some local data could not be deleted. Review the details and retry.");
+    } finally {
+      setDeleteLocalDataPending(false);
     }
   };
 
@@ -2990,7 +3118,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   };
 
   const executePendingGeneration = async (generation: PendingGeneration): Promise<void> => {
-    await executeUsageGeneration(generation, {
+    const execution = executeUsageGeneration(generation, {
       controllerRef: generationControllerRef,
       pendingGenerationRef: pendingWebllmGenerationRef,
       fallbackWebLLMModelId: WEBLLM_FALLBACK_MODEL_ID,
@@ -3020,6 +3148,12 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         setLlmError(formatProviderError(error, providerKind));
       },
     });
+    activeGenerationPromisesRef.current.add(execution);
+    try {
+      await execution;
+    } finally {
+      activeGenerationPromisesRef.current.delete(execution);
+    }
   };
 
   const handleGenerateAnswer = async () => {
@@ -3164,6 +3298,20 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         }}
         onConfirm={handleConfirmWebllmDownload}
         onCancel={handleCancelWebllmDownload}
+      />
+      <DeleteLocalDataDialog
+        open={deleteLocalDataOpen}
+        pending={deleteLocalDataPending}
+        blocked={deleteLocalDataBlockReason !== null}
+        blockReason={deleteLocalDataBlockReason ?? undefined}
+        failures={deleteLocalDataFailures}
+        onCancel={() => {
+          if (!deleteLocalDataPending) {
+            setDeleteLocalDataOpen(false);
+            setDeleteLocalDataFailures([]);
+          }
+        }}
+        onConfirm={() => void handleConfirmDeleteLocalData()}
       />
 
       {error && (
@@ -3493,7 +3641,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                     <Button variant="outline" className="rounded-md" onClick={logout}>
                       {authMethod === "oauth" ? "Sign out of GitHub" : "Clear PAT session"}
                     </Button>
-                    <Button variant="destructive" className="rounded-md" onClick={() => void handleClearLocalData()}>
+                    <Button variant="destructive" className="rounded-md" onClick={openDeleteLocalDataDialog}>
                       Delete local data
                     </Button>
                   </div>
@@ -3959,7 +4107,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                       variant="destructive"
                       size="sm"
                       className="h-7 rounded-lg text-xs"
-                      onClick={() => void handleClearLocalData()}
+                      onClick={openDeleteLocalDataDialog}
                     >
                       Delete local data
                     </Button>

@@ -7,7 +7,7 @@ type Overrides = Partial<React.ComponentProps<typeof DeleteLocalDataDialog>>;
 function renderDialog(overrides: Overrides = {}) {
   const onCancel = vi.fn();
   const onConfirm = vi.fn();
-  render(
+  const view = render(
     <DeleteLocalDataDialog
       open
       pending={false}
@@ -18,7 +18,7 @@ function renderDialog(overrides: Overrides = {}) {
       {...overrides}
     />,
   );
-  return { onCancel, onConfirm };
+  return { onCancel, onConfirm, ...view };
 }
 
 describe("DeleteLocalDataDialog", () => {
@@ -98,5 +98,48 @@ describe("DeleteLocalDataDialog", () => {
     expect(within(alert).getByText(/cannot clear settings/i)).toBeVisible();
     expect(within(alert).getByText(/log handle busy/i)).toBeVisible();
     expect(within(alert).getByText(/provider setting/i)).toBeVisible();
+  });
+
+  test("allows a retry after a pending attempt settles with partial failures", async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    const onConfirm = vi.fn();
+    const { rerender } = render(
+      <DeleteLocalDataDialog
+        open
+        pending={false}
+        blocked={false}
+        failures={[]}
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /delete local data/i }));
+    expect(onConfirm).toHaveBeenCalledOnce();
+
+    rerender(
+      <DeleteLocalDataDialog
+        open
+        pending
+        blocked={false}
+        failures={[]}
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />,
+    );
+    rerender(
+      <DeleteLocalDataDialog
+        open
+        pending={false}
+        blocked={false}
+        failures={[{ category: "provider-settings", message: "settings remained" }]}
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /delete local data/i }));
+    expect(onConfirm).toHaveBeenCalledTimes(2);
   });
 });

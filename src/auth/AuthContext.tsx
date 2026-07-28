@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState, type PropsWithChildren } from "react";
 import { buildGitHubAuthorizeUrl, exchangeOAuthCode, getOAuthConfig } from "./githubOAuth";
 import {
   buildAuthStorageScope,
+  buildChatBackupScope,
   buildChatScopeKey,
   buildGitHubUserScopeIdentity,
   buildLegacyTokenChatScopeKey,
@@ -11,6 +12,7 @@ import { AuthContext } from "./auth-context";
 import type { AuthContextValue, AuthMethod, OAuthCallbackInput } from "./auth-types";
 import { createGitHubApiClient } from "@/github/client";
 import { migrateLocalDatabaseScope, setLocalDatabaseScope } from "@/db/client";
+import { migrateChatBackupScope } from "@/db/chatBackup";
 import { migrateLegacySettingsScope } from "@/lib/settings";
 import { normalizeGitHubToken } from "@/lib/normalizeGitHubToken";
 import { clearLocalLogs } from "@/observability/localLog";
@@ -38,16 +40,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }).fetchAuthenticatedUser();
     const nextAuthScopeIdentity = buildGitHubUserScopeIdentity(viewer);
     const nextDatabaseScope = buildAuthStorageScope(nextAuthScopeIdentity);
+    const legacyChatScope = buildChatBackupScope(buildLegacyTokenChatScopeKey(normalizedToken));
+    const nextChatScope = buildChatBackupScope(buildChatScopeKey(nextAuthScopeIdentity));
 
     await migrateLocalDatabaseScope({
       fromScopeKey: buildLegacyTokenStorageScope(normalizedToken),
       toScopeKey: nextDatabaseScope,
-      fromChatScopeKey: buildLegacyTokenChatScopeKey(normalizedToken),
-      toChatScopeKey: buildChatScopeKey(nextAuthScopeIdentity),
+      fromChatScopeKey: legacyChatScope?.key,
+      toChatScopeKey: nextChatScope?.key,
     });
+    if (legacyChatScope && nextChatScope) {
+      await migrateChatBackupScope(legacyChatScope, nextChatScope);
+    }
     await migrateLegacySettingsScope(normalizedToken, nextAuthScopeIdentity);
 
-    setLocalDatabaseScope(nextDatabaseScope);
+    setLocalDatabaseScope(nextDatabaseScope, nextChatScope);
     setAccessToken(normalizedToken);
     setAuthScopeIdentity(nextAuthScopeIdentity);
     setAuthMethod(method);
@@ -84,7 +91,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (authScopeIdentity) {
       clearLocalLogs(authScopeIdentity);
     }
-    setLocalDatabaseScope(buildAuthStorageScope(null));
+    setLocalDatabaseScope(buildAuthStorageScope(null), null);
     setAccessToken(null);
     setAuthScopeIdentity(null);
     setAuthMethod(null);

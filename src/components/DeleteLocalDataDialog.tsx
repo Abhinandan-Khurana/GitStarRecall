@@ -49,13 +49,14 @@ export function DeleteLocalDataDialog(props: Readonly<Props>) {
   const failuresId = useId();
 
   // Guard so a rapid double-click confirms exactly once, even before the parent
-  // flips `pending`. Reset whenever the dialog is dismissed and reopened.
+  // flips `pending`. Reset after an attempt settles so a visible partial failure
+  // can be retried without forcing the user to dismiss the evidence first.
   const confirmedRef = useRef(false);
   useEffect(() => {
-    if (!open) {
+    if (!open || !pending) {
       confirmedRef.current = false;
     }
-  }, [open]);
+  }, [open, pending]);
 
   const disableReason = pending
     ? "Deletion is in progress."
