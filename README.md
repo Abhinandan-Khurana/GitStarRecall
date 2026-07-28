@@ -8,7 +8,6 @@
   <strong>Find your starred repos by memory, not by name.</strong>
 </p>
 
-
 <p align="center">
   <a href="https://deepwiki.com/Abhinandan-Khurana/GitStarRecall"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
   <a href="./docs/Usage.md"><img alt="Usage Guide" src="https://img.shields.io/badge/docs-Usage_Guide-0ea5e9"></a>
@@ -18,7 +17,6 @@
   <a href="./docs/security-review-stride.md"><img alt="Security Review" src="https://img.shields.io/badge/security-STRIDE_Reviewed-059669"></a>
 </p>
 
-
 **GitStarRecall** is a local-first web app that turns your GitHub stars into a searchable memory system.
 
 ### Ask it like this
@@ -26,7 +24,7 @@
 - "I starred a GraphQL security testing repo months ago, what was it?"
 - "TypeScript auth starter with clear boundaries."
 
-***TIP: add specific details for better results.***
+**_TIP: add specific details for better results._**
 
 ### LLM chat
 
@@ -162,13 +160,19 @@ flowchart LR
     F --> R[Remote OpenAI-Compatible - opt-in]
 ```
 
-
-
 Notes:
 
 - Star sync is user-triggered via `Fetch Stars`; search runs on existing local embeddings.
-- Vector data is stored as Float32 blobs in local SQLite tables.
-- Retrieval/search is local; no server-side vector index is required.
+- Persistence is a single sql.js (SQLite WASM) database exported and written whole to OPFS, with a
+  base64 localStorage snapshot as the fallback when OPFS is unavailable. There is no `sqlite-vec`
+  or other native vector extension.
+- Vector data is stored as Float32 blobs in ordinary SQLite tables and read back into `Float32Array`
+  views for ranking.
+- Ranking is exact and in-process: brute-force cosine similarity over every candidate vector,
+  followed by MMR with a per-repo cap. There is no approximate-nearest-neighbour index, and no
+  server-side vector index is required.
+- Chat history is backed up per authenticated identity into a scoped IndexedDB store, falling back
+  to scoped localStorage keys; clearing one identity never touches another's backup.
 - The authenticated app now uses a route-based shell: `/app` auto-navigates first-time users to `/app/setup`; returning users see a home dashboard with onboarding stepper (if indexing incomplete), interactive workspace guide, and quick-nav cards.
 - Browser embedding model is capability-driven (`embeddinggemma` on strong desktop, `Xenova/all-MiniLM-L6-v2` on mobile/weak/no-WebGPU); local Ollama embedding is opt-in.
 - Retrieval path uses dense fetch + confidence gate + conditional lexical safety net + MMR with per-repo cap.
@@ -180,8 +184,8 @@ Notes:
 
 ### Prerequisites
 
-- Node.js 20+
-- pnpm 9+
+- Node.js 22 or 24 (active LTS lines; enforced by `engines`)
+- pnpm 11.17.0 (pinned via `packageManager`; run `corepack enable` to use it automatically)
 - A GitHub OAuth app (recommended) or GitHub PAT with read access to the repositories you want to import
 
 ### Install
@@ -207,6 +211,17 @@ Then follow the complete setup and environment guide:
 ```bash
 pnpm dev
 ```
+
+`pnpm dev` starts the Vite dev server and serves the UI only. It does **not** serve
+`api/github/oauth/exchange.js`, so the OAuth code exchange returns 404 under `pnpm dev`.
+To exercise the full OAuth login flow locally, run the Vercel dev server instead, which
+serves both the UI and the serverless API route:
+
+```bash
+vercel dev
+```
+
+A GitHub PAT still works under `pnpm dev`, because the PAT path never calls the exchange API.
 
 ### Production build
 
@@ -270,4 +285,3 @@ We prioritize:
 ## Author
 
 - Made with <3 by [Abhinandan-Khurana](https://github.com/Abhinandan-Khurana)
-

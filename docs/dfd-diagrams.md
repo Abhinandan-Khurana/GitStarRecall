@@ -7,6 +7,7 @@ This doc includes a top-level Data Flow Diagram (DFD) with trust boundaries and 
 ## 1) Top-Level DFD (With Trust Boundaries)
 
 Trust boundaries:
+
 - TB1: User device / browser runtime
 - TB2: GitHub API boundary
 - TB3: External LLM providers (optional)
@@ -25,7 +26,7 @@ flowchart LR
     CapProbe[Browser Capability Probe]
     Selector["Backend Selector (WebGPU/WASM)"]
     Checkpoint[Checkpoint Writer]
-    DB[(SQLite WASM + sqlite-vec)]
+    DB[("SQLite WASM (sql.js) + Float32 vector blobs")]
     Chat[Chat Session Store]
     Query[Query + RAG]
     Dense[Dense Retrieval fetchK]
@@ -136,6 +137,7 @@ flowchart TD
 ---
 
 ## 3) DFD Notes
+
 - All repo data, embeddings, and chats live inside the browser (SQLite WASM).
 - External providers are optional and receive only top-K snippets if enabled.
 - Local providers are optional and may be blocked by CORS unless configured.

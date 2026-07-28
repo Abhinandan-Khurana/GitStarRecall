@@ -7,6 +7,7 @@ This document maps risks using the STRIDE model and lists mitigations aligned wi
 ## 1) Scope and Assets
 
 In scope:
+
 - GitHub tokens (OAuth/PAT)
 - Starred public-repo metadata and README content
 - Embeddings and vector index
@@ -21,6 +22,7 @@ In scope:
 - User queries
 
 Out of scope:
+
 - GitHub platform internals
 - Third-party LLM provider infrastructure
 
@@ -29,7 +31,9 @@ Out of scope:
 ## 2) STRIDE Analysis
 
 ### S - Spoofing
+
 Threats:
+
 - Attacker impersonates user in the browser (session spoofing).
 - Malicious site tricks user into pasting PAT into a fake UI.
 - User pastes a header-form or quoted token value and auth flow misinterprets it, leading to avoidable 401s and unsafe retry behavior.
@@ -37,6 +41,7 @@ Threats:
 - Unintended model artifact host access when Browser WebLLM is enabled.
 
 Mitigations:
+
 - Use OAuth PKCE and avoid tokens in URL.
 - Clear separation between landing and login flow.
 - Add warning banner when PAT is used; recommend OAuth.
@@ -47,7 +52,9 @@ Mitigations:
 - Gate Browser WebLLM behind explicit feature flag and user consent-before-download.
 
 ### T - Tampering
+
 Threats:
+
 - Local DB tampering (malicious extensions, XSS).
 - Modified embeddings or vectors change search results.
 - Injected README content leading to unsafe output.
@@ -56,6 +63,7 @@ Threats:
 - Runtime script load blocked by CSP drift (ORT module load failure).
 
 Mitigations:
+
 - Sanitize README rendering.
 - Use CSP + no inline scripts.
 - Validate checksum format and store checksum for integrity checks.
@@ -66,20 +74,25 @@ Mitigations:
 - Add end-to-end embedding count reconciliation (`chunks_pending + embeddings_created`).
 
 ### R - Repudiation
+
 Threats:
+
 - User cannot confirm what data was fetched or sent externally.
 - No record of consent to external LLM usage.
 - No record of Browser WebLLM model-download consent.
 - User cannot confirm which embedding backend was active when results were generated.
 
 Mitigations:
+
 - Store audit metadata locally: last sync time, LLM usage toggle timestamps.
 - Display a “data sent” notice when remote LLMs are enabled.
 - Store and restore per-auth WebLLM consent + model preference locally.
 - Store embedding run metadata: backend, worker pool size, checkpoint policy version, fallback reason.
 
 ### I - Information Disclosure
+
 Threats:
+
 - README content sent to external LLM provider unintentionally.
 - Tokens leaked through logs or URL parameters.
 - Local DB accessed by other scripts via XSS.
@@ -87,6 +100,7 @@ Threats:
 - Local reset leaves browser-cached model/runtime artifacts behind after the user expects a full wipe.
 
 Mitigations:
+
 - External LLM off by default, explicit opt-in.
 - Browser WebLLM download is explicit opt-in; no GitHub token in request payloads.
 - Send only top-K snippets, not full repo content.
@@ -101,7 +115,9 @@ Mitigations:
 - Ollama embedding request payload must not include GitHub tokens or PAT values.
 
 ### D - Denial of Service
+
 Threats:
+
 - GitHub API rate-limits block sync.
 - Large number of stars (1k+) causes UI freeze.
 - Long README content creates memory pressure.
@@ -109,6 +125,7 @@ Threats:
 - WebGPU driver/runtime instability causes repeated failures.
 
 Mitigations:
+
 - Rate limit handling with backoff.
 - Concurrency caps for README fetching.
 - Chunking and truncation of huge README files.
@@ -121,7 +138,9 @@ Mitigations:
 - Discard unreadable legacy token-scoped DB snapshots during one-time scope migration so corrupt historical data does not permanently block login.
 
 ### E - Elevation of Privilege
+
 Threats:
+
 - Over-scoped GitHub token allows repo access beyond need.
 - Local LLM endpoints expose sensitive data to other local services.
 - Browser origin accidentally gains unintended access to privileged local runtime endpoints.
@@ -131,6 +150,7 @@ Threats:
 - Misleading auth troubleshooting guidance nudges users toward creating broader-scope tokens when the real issue is token validity or formatting.
 
 Mitigations:
+
 - Use minimal GitHub scopes or fine-grained PAT.
 - Clearly label local endpoints and require explicit opt-in.
 - Keep browser embedding path default; local Ollama runtime integration remains explicit and isolated.
@@ -144,7 +164,10 @@ Mitigations:
 ## 3) Security Requirements Traceability
 
 Mapped requirements:
-- Local-first storage: SQLite WASM + sqlite-vec.
+
+- Local-first storage: SQLite WASM via sql.js, persisted to OPFS with a scoped localStorage snapshot
+  fallback. Embeddings are Float32 blobs in ordinary tables ranked in-process (exact cosine + MMR);
+  no `sqlite-vec` extension is used.
 - GitHub-account-scoped local persistence for SQLite and settings continuity.
 - Shared GitHub token normalization before in-memory storage/use.
 - OAuth PKCE and PAT fallback with warnings.
@@ -159,6 +182,7 @@ Mapped requirements:
 ---
 
 ## 4) Residual Risk Summary
+
 - External LLM usage still sends data off-device by design.
 - Client device compromise exposes local data.
 
@@ -167,6 +191,7 @@ Mapped requirements:
 ## 5) Privacy Impact Assessment (PIA)
 
 ### 5.1 Data Categories
+
 - GitHub user identity (username, avatar, profile URL)
 - Starred repo metadata and README content
 - Public repo content
@@ -174,27 +199,32 @@ Mapped requirements:
 - Local embeddings and vector index
 
 ### 5.2 Purpose of Processing
+
 - Local-first semantic search over user’s starred repositories
 - Optional LLM-based summaries and recommendations
 - Sync and integrity validation of starred repo data
 
 ### 5.3 Data Storage and Retention
+
 - Stored locally in browser (SQLite WASM + OPFS where available)
 - No server-side retention unless user opts in
 - User can delete all data at any time
 
 ### 5.4 Data Sharing
+
 - None by default
 - Optional sharing with external LLM providers (explicit opt-in only)
 - Optional sharing with local LLM endpoints (explicit opt-in only)
 
 ### 5.5 User Rights and Controls
+
 - Clear toggle for remote/local LLM usage
 - “Clear all data” and “Clear token” actions
 - Visible disclosure when data is sent externally
 - Local data reset also clears WebLLM/model runtime caches where supported
 
 ### 5.6 Risk Assessment
+
 - Low risk for users who keep LLMs off (local-only)
 - Medium risk for users who enable remote LLMs (data leaves device)
 - Mitigated by explicit opt-in and minimal top-K context
@@ -203,6 +233,7 @@ Mapped requirements:
 ---
 
 ## 6) Recommended Tests
+
 - Simulate XSS in README rendering.
 - Token leakage scanning (no tokens in logs).
 - Token normalization coverage for `Bearer ` / `token ` / quoted GitHub token pastes.

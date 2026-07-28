@@ -15,8 +15,8 @@ By default, data stays in-browser unless you explicitly enable remote providers.
 
 ## 2) Prerequisites
 
-- Node.js 20+
-- pnpm 9+
+- Node.js 22 or 24 (active LTS lines; enforced by `engines`)
+- pnpm 11.17.0 (pinned via `packageManager`; `corepack enable` selects it automatically)
 - GitHub account with:
   - OAuth app (recommended), or
   - Personal Access Token (PAT) fallback
@@ -35,6 +35,23 @@ pnpm dev
 ```
 
 Open: `http://localhost:5173`
+
+`pnpm dev` runs the Vite dev server and serves the UI only. Vite does not execute
+`api/github/oauth/exchange.js`, so `VITE_GITHUB_OAUTH_EXCHANGE_URL` resolves to a route that
+does not exist and OAuth login fails with a 404 from the exchange step.
+
+Two supported local paths:
+
+- **PAT only** — `pnpm dev` is sufficient, because the PAT path never calls the exchange endpoint.
+- **Full OAuth login** — run the Vercel dev server, which serves the UI and the serverless API
+  route together:
+
+```bash
+vercel dev
+```
+
+Match `VITE_GITHUB_REDIRECT_URI` and `GITHUB_OAUTH_REDIRECT_URI` to whichever port you actually
+serve on, and register that exact callback URL on the GitHub OAuth app.
 
 ## 4) Environment Configuration
 
@@ -247,13 +264,18 @@ Recommended starting points:
 
 Primary local storage:
 
-- SQLite (sql.js) with OPFS when available.
-- Fallback local storage modes when persistent quota/backends fail.
+- SQLite via sql.js (SQLite compiled to WASM), held in memory and persisted by exporting the whole
+  database and writing it to a scoped OPFS file when OPFS is available.
+- When OPFS is unavailable, the same exported bytes are persisted as a base64 snapshot under a
+  scoped localStorage key. There is no `sqlite-vec` or other native vector extension; embeddings are
+  Float32 blobs in ordinary tables, ranked in-process with exact cosine similarity plus MMR.
 - The local database file/key is scoped per authenticated GitHub account identity, so different GitHub accounts do not share repo indexes or embedding stores, while the same account keeps the same local workspace across OAuth token refreshes or PAT re-entry.
 
 Additional local persistence:
 
-- Chat backup in IndexedDB with localStorage fallback.
+- Chat backup in IndexedDB with localStorage fallback, scoped per authenticated identity. Clearing
+  or deleting one identity's backup leaves every other identity's records intact, and a scoped clear
+  fails closed rather than reporting success if a known storage backend cannot be written.
 - Account-scoped settings for advanced retrieval mode, embedding preferences, and session continuity metadata.
 - Local runtime caches for model artifacts (WebLLM / embedding assets).
 - If a legacy token-scoped settings record is malformed JSON during one-time migration, the app discards that unreadable historical record instead of repeatedly blocking login on the same parse failure.

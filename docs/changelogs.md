@@ -1,5 +1,70 @@
 # Changelogs
 
+## 2026-07-28 (v0.14.0 - Public Launch Hardening)
+
+Lean remediation program, PRs #46, #47, #54, #55, #56. Full mapping with commits and deferred work:
+`docs/remediation/v0.14.0.md`.
+
+Toolchain and CI (#46):
+
+- Pinned supported runtimes: Node 22/24 via `engines`, pnpm 11.17.0 via `packageManager`, and an
+  explicit dependency build allowlist.
+- Added component and browser (Playwright) test harnesses, coverage and bundle-budget gates, and a
+  reproducible Node 24 + Node 22 CI workflow with SHA-pinned actions and least-privilege permissions.
+- Lint runs at `--max-warnings=0` with the baseline warnings removed.
+
+Public launch boundary (#47):
+
+- OAuth token exchange now enforces POST, a JSON content type, an 8 KiB body limit (413), exact field
+  validation, a bounded upstream timeout, bounded error bodies, and `Cache-Control: no-store, private`.
+- Added production security headers on Vercel: CSP, `X-Content-Type-Options`, `Referrer-Policy`,
+  `Permissions-Policy`, and `X-Frame-Options: DENY`. CSP still allows `unsafe-eval`, which the
+  in-browser model runtimes currently require.
+- Replaced the catch-all SPA rewrite with explicit entry-route rewrites, so unknown paths return a
+  real 404 instead of a 200 HTML shell.
+- Fixed MIT attribution, corrected the favicon MIME declaration, published social/favicon assets
+  under `public/static/`, removed an unreferenced 4.3 MB image, and dropped authenticated routes from
+  the sitemap.
+
+Sync, settings, and auth integrity (#54):
+
+- README fetches distinguish 404 from transient failures: a transient failure preserves stored README
+  bytes, validators, checksum, and chunks, then marks the repository for retry on the next sync.
+- Retry waits are abortable and honor rate limits; star and fork counts refresh even when other
+  repository metadata is unchanged.
+- Provider settings hydrate asynchronously and persist through an invocation-ordered queue, so a save
+  can no longer overwrite a stored encrypted key with a blank value; persistence failures are surfaced.
+- OAuth callback exchange is single-flight and retryable, and retains its state/verifier until success
+  or terminal validation failure.
+
+Provider and worker reliability (#55):
+
+- Generation executes against an immutable provider request config, including the fallback path, so a
+  later render cannot change the endpoint mid-request.
+- Hardened provider transport boundaries and stream finalization; suspended generations resume exactly
+  once.
+- Embedding workers recover from failed jobs, shared initialization failures, and queue drains.
+
+Storage, privacy, and UX (#56):
+
+- Workspace writes are serialized so the newest acknowledged mutation is the durable one.
+- Chat backups, local logs, and deletion are scoped per authenticated identity: clearing one identity
+  never touches another's records, logs are redacted and expired, and scoped clears fail closed rather
+  than reporting success when a known storage backend cannot be written.
+- Confirmed "Delete local data" surfaces enumerate every category, and legacy v1 chat records for the
+  cleared identity are erased rather than only marked migrated.
+- Enforced one current embedding per chunk with model/dimension readiness validation.
+- Fixed command-palette parsing and shortcut handling, and made theme resolution tolerate unavailable
+  browser storage.
+
+Release slice (this PR):
+
+- Authenticated app route pages load lazily behind an accessible Suspense boundary; `/` and
+  `/auth/callback` stay eager.
+- Version metadata aligned to 0.14.0 (`package.json`, JSON-LD `softwareVersion`).
+- Documentation corrected for supported runtimes, `pnpm dev` versus `vercel dev`, and the actual
+  persistence/search architecture. Pre-implementation planning documents are marked historical.
+
 ## 2026-04-07 (Footer Redesign and Stacking Fix)
 
 - Replaced the old card-style footer with a minimal two-column layout:
@@ -118,7 +183,7 @@
 ## 2026-03-08 (GitHub Auth 401 Fix and Token Normalization)
 
 - Hardened GitHub auth token handling for both OAuth tokens and pasted PATs:
-  - shared token normalization now strips accidental `Bearer`  / `token`  prefixes, surrounding quotes, and extra whitespace before the token is stored or reused,
+  - shared token normalization now strips accidental `Bearer` / `token` prefixes, surrounding quotes, and extra whitespace before the token is stored or reused,
   - reduces avoidable authorization failures when users paste tokens copied from shells, headers, or quoted env values.
 - Standardized GitHub API authorization behavior around normalized raw tokens and `Bearer` request headers so login/import flows consistently send the expected credential format.
 - Improved the GitHub 401 error guidance shown to users:
@@ -275,13 +340,13 @@
   - `denseSuspicious` reports dense-confidence concerns (`low_top1`, `low_top5_mean`, `low_repo_diversity`),
   - `lexicalTriggered` still reports whether lexical safety-net executed (including rare-token triggers).
 - Rare-token lexical trigger now has a confidence/alignment bypass:
-  - lexical safety-net is skipped when dense top-1 is highly confident *and* lexically aligned with the rare-token query,
+  - lexical safety-net is skipped when dense top-1 is highly confident _and_ lexically aligned with the rare-token query,
   - lexical safety-net still runs for high-confidence but lexically mismatched dense top-1 results.
 - Qwen3 retrieval prompting now follows model-card format:
   - queries use `Instruct: ...` + `Query: ...`,
   - passages/documents are embedded as raw text (no `passage:` prefix).
 - Lexical broad sampling now targets the corpus interior slice first (excluding oldest/newest windows) to reduce overlap and improve unique lexical candidate coverage.
-- Curated embedding warning logic now matches retrieval-profile model families (for example `mxbai-embed`*, `nomic-embed`*) to avoid false custom-model warnings on valid variants.
+- Curated embedding warning logic now matches retrieval-profile model families (for example `mxbai-embed`_, `nomic-embed`_) to avoid false custom-model warnings on valid variants.
 - `Rebuild Embeddings` now requires explicit user confirmation before clearing and regenerating the embedding index.
 - README section splitting for large-readme chunking is now code-fence-aware, so heading-like lines inside fenced code blocks do not create artificial section boundaries.
 - Chunk budgeting for large READMEs now intentionally under-fills when fewer than 120 windows clear the quality floor (no low-quality padding fallback).
