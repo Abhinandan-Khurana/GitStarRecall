@@ -23,10 +23,10 @@ vi.mock("./pages/auth/AuthCallbackPage", () => ({ default: () => null }));
 vi.mock("./pages/LandingPage", () => ({ default: () => null }));
 vi.mock("./pages/app/AppHomePage", () => ({ default: () => <p>home page</p> }));
 vi.mock("./pages/app/LibraryPage", () => ({ default: () => <p>library page</p> }));
-vi.mock("./pages/app/RecallPage", () => ({ default: () => null }));
 vi.mock("./pages/app/SessionsPage", () => ({ default: () => null }));
-vi.mock("./pages/app/SettingsPage", () => ({ default: () => null }));
-vi.mock("./pages/app/SetupPage", () => ({ default: () => null }));
+vi.mock("./pages/UsagePage", () => ({
+  default: ({ view }: { view: string }) => <p>usage view: {view}</p>,
+}));
 
 describe("App authenticated route suspense", () => {
   it("announces an accessible fallback while a lazy page resolves, then renders the page", async () => {
@@ -57,5 +57,19 @@ describe("App authenticated route suspense", () => {
 
     await waitFor(() => expect(screen.getByText("home page")).toBeInTheDocument());
     expect(screen.getByText("shell chrome")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["/app/setup", "setup"],
+    ["/app/recall", "recall"],
+    ["/app/settings", "settings"],
+  ])("loads UsagePage directly for %s", async (path, view) => {
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText(`usage view: ${view}`)).toBeInTheDocument());
   });
 });
