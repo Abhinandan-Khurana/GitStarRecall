@@ -2,135 +2,103 @@
   <img src="./static/gitstarrecall-logo.png" width="220" alt="GitStarRecall logo">
 </p>
 
-<!-- <h1 align="center">GitStarRecall</h1> -->
-
 <p align="center">
   <strong>Find your starred repos by memory, not by name.</strong>
 </p>
 
-
 <p align="center">
+  <a href="https://git-star-recall.vercel.app/"><img alt="Live Demo" src="https://img.shields.io/badge/demo-live-ff4d4d"></a>
+  <a href="https://github.com/Abhinandan-Khurana/GitStarRecall/actions/workflows/quality.yml"><img alt="Quality" src="https://github.com/Abhinandan-Khurana/GitStarRecall/actions/workflows/quality.yml/badge.svg?branch=main"></a>
+  <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <a href="https://deepwiki.com/Abhinandan-Khurana/GitStarRecall"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
   <a href="./docs/Usage.md"><img alt="Usage Guide" src="https://img.shields.io/badge/docs-Usage_Guide-0ea5e9"></a>
-  <a href="./docs/changelogs.md"><img alt="Changelogs" src="https://img.shields.io/badge/docs-Changelogs-1d4ed8"></a>
-  <a href="./CODE_OF_CONDUCT.md"><img alt="Code of Conduct" src="https://img.shields.io/badge/community-Code_of_Conduct-15803d"></a>
-  <a href="./SECURITY.md"><img alt="Security Policy" src="https://img.shields.io/badge/security-Policy-166534"></a>
   <a href="./docs/security-review-stride.md"><img alt="Security Review" src="https://img.shields.io/badge/security-STRIDE_Reviewed-059669"></a>
 </p>
 
+**GitStarRecall** turns your GitHub stars into a searchable memory system. It runs in your browser, and
+your data stays there.
 
-**GitStarRecall** is a local-first web app that turns your GitHub stars into a searchable memory system.
+> **This project exists because starred repos are great until your brain says, "I know what it does, but
+> not what it is called."**
 
 ### Ask it like this
 
 - "I starred a GraphQL security testing repo months ago, what was it?"
 - "TypeScript auth starter with clear boundaries."
+- "Recommend the best-fit repos for my use case." (LLM chat)
 
-***TIP: add specific details for better results.***
+**_TIP: add specific details for better results._**
 
-### LLM chat
+---
 
-- "Recommend the best-fit repos for my use case."
+## Try It
 
-> **This project exists because starred repos are great until your brain says, "I know what it does, but not what it is called."**
+Hosted, runs entirely in your browser: **<https://git-star-recall.vercel.app/>**
 
-### Keywords
+Continue with GitHub (read-only), click `Fetch Stars`, then search once indexing finishes. The app does not
+store your stars, READMEs, embeddings, or chats on an application server; they stay on your device unless
+you explicitly enable a remote LLM.
 
-`github stars search` · `semantic search` · `local-first rag` · `browser embeddings` · `webllm` · `ollama` · `privacy-focused ai` · `vector search` · `MMR`
+<!-- Demo GIF slot: record a vague query -> ranked results -> follow-up chat, ~20-40s, silent.
+     Use a scrubbed demo account: the recording shows real starred repos and a real GitHub identity. -->
+
+<!-- Discoverability: these belong in the repository's GitHub "topics" field, not the rendered README:
+     github-stars, semantic-search, local-first, rag, browser-embeddings, webllm, ollama,
+     privacy, vector-search, mmr -->
 
 ---
 
 ## Why This Exists
 
-People star a lot of useful repos.
-Later, they remember functionality, not names.
-GitHub search is good, but semantic memory search is better for this exact problem.
+People star a lot of useful repos, then later remember functionality rather than names. GitHub search is
+good, but semantic memory search fits this exact problem better.
 
-GitStarRecall solves this by:
+GitStarRecall fetches your starred public repositories, pulls README content and metadata, chunks and
+embeds it locally, lets you search in natural language, and optionally generates an LLM answer from the
+top local matches.
 
-- Fetching your starred public repositories.
-- Pulling README content and metadata.
-- Chunking and embedding content locally.
-- Letting you search in natural language.
-- Optionally generating an LLM answer from the top local matches.
-
-Full usage instructions:
-
-- [Usage Docs](./docs/Usage.md)
+Principles: local-first by default, security before convenience, explainability over magic, and practical
+performance at real star counts (1k+ repos).
 
 ---
 
-## Core Principles
+## What You Get
 
-- Local-first by default.
-- Security before convenience.
-- Explainability over magic.
-- Practical performance for real star counts (1k+ repos).
+- Natural-language search with dense retrieval, a confidence gate, a conditional lexical safety net with
+  RRF fusion, then MMR reranking with a per-repo cap — plus local diagnostics explaining each result.
+- Star sync with checksum-based diffing, README fetch with retry, and local chunking and embedding on a
+  worker pool with checkpoint resume.
+- Capability-driven browser embeddings (WebGPU with WASM fallback), or opt-in local Ollama embeddings.
+- Chat sessions over your local index, answered by local, in-browser (WebLLM), or remote
+  OpenAI-compatible providers — every path opt-in behind explicit consent.
+- Per-GitHub-identity scoping of every local store, confirmed five-category data deletion, and
+  single-writer tab enforcement where Web Locks are available.
+
+Full inventory: [docs/features.md](./docs/features.md).
 
 ---
 
 ## Security Model (Short Version)
 
-GitStarRecall is designed to keep your data in the browser unless you explicitly opt into remote LLM usage.
+Your data stays in the browser unless you explicitly opt into a remote LLM.
 
-What stays local by default:
+**Local by default:** star metadata, README content, chunks and embeddings, chat history, and settings —
+each scoped to the authenticated GitHub account, so one identity never reuses another's local index.
 
-- GitHub star metadata.
-- README content.
-- Chunks and embeddings.
-- Chat sessions and message history.
-- GitHub-account-scoped local databases and settings, so one GitHub identity does not silently reuse another identity's local index.
+**Remote only when you enable it:** prompt context sent to a remote LLM provider, top-K snippets only.
 
-What can go remote (opt-in only):
-
-- Prompt context sent to a remote LLM provider when you enable it.
-
-Built-in security posture:
-
-- Strict CSP with explicit allowlist.
-- OAuth code exchange via backend endpoint to avoid exposing client secret.
-- Public landing now spells out that OAuth and PAT are both read-only paths for reading authorized public repositories.
-- PAT fallback supported for power users who want a manual access path.
-- Local data delete flow for cleanup/reset.
-- Threat-model-driven docs in `docs/`.
+**Built-in posture:** strict CSP with an explicit allowlist; OAuth code exchange through a stateless
+backend endpoint so the client secret never reaches the browser; OAuth requests only `read:user` and
+indexing filters private repositories out; PAT fallback for manual access; confirmed local-data deletion;
+and threat-model-driven documentation.
 
 Read more:
 
-- [Architecture and PRD](./docs/tech-stack-architecture-security-prd.md)
-- [STRIDE Review](./docs/threat-modeling-stride.md)
-- [DFD diagram](./docs/dfd-diagrams.md)
-
----
-
-## Product Capabilities
-
-- Public landing page redesigned with a "Midnight Minimal" design system:
-  - CSS atmospheric gradient background with ambient drift animation (Raycast-inspired),
-  - Bricolage Grotesque / Outfit / JetBrains Mono font stack,
-  - solid card surfaces with hot coral accent, scroll-triggered entrance animations,
-  - hero contains a direct "Continue with GitHub" OAuth button (zero-click auth) plus a "Use a PAT instead" secondary CTA,
-  - compact auth section one scroll below the hero with OAuth and PAT side-by-side,
-  - lean static "How it works" 3-step section downstream of auth,
-  - minimal footer with brand lockup, Star on GitHub pill, categorized resource and security link columns, theme-native badge pills (DeepWiki, MIT, STRIDE), and author attribution,
-  - explicit read-only access trust badge in hero and auth section.
-- GitHub OAuth and PAT authentication paths.
-- Route-based workspace with dedicated `Setup`, `Recall`, `Library`, `Sessions`, and `Settings` surfaces.
-- Persistent app shell with workspace health, keyboard navigation, and command palette (`Cmd/Ctrl+K`).
-- First-time users are auto-routed from `/app` to `/app/setup`; returning users see a compact onboarding stepper and collapsible interactive workspace guide on the home dashboard.
-- Star sync with pagination handling (manual via `Fetch Stars`).
-- Checksum-based diff sync for changed/new/removed stars.
-- README fetch pipeline with missing/failure tracking.
-- Adaptive batched README ingestion pipeline (feature-flagged rollout).
-- Local chunking + embedding generation.
-- GitHub-account-scoped local database/storage isolation for repos, embeddings, chat state, and runtime preferences.
-- Browser embedding capability test with model recommendation (mobile-safe fallback).
-- Persistent chat sessions with ordered messages.
-- Library browsing and session transcript views outside the main Recall workflow.
-- Session-aware search and follow-up flow on existing local embeddings.
-- Local and remote LLM answer modes.
-- Browser-local LLM mode via WebLLM (feature-flagged, explicit download consent).
-- Embedding acceleration controls (batching, worker pool, backend fallback).
-- Sync status that distinguishes first sync from incremental sync and keeps embedding generation as the primary active stage during overlap.
+- [Storage Decision Record](./docs/adr/README.md)
+- [Threat Model (STRIDE)](./docs/threat-modeling-stride.md)
+- [Security Review (STRIDE alignment)](./docs/security-review-stride.md)
+- [DFD diagrams](./docs/dfd-diagrams.md)
+- [v0.14.0 hardening evidence](./docs/remediation/v0.14.0.md)
 
 ---
 
@@ -138,126 +106,96 @@ Read more:
 
 ```mermaid
 flowchart LR
-    A[Browser UI] --> B[GitHub API]
-    A --> X[OAuth Exchange API]
-    A --> C[Local DB: sql.js + OPFS]
-    A --> C2[Chat Backup: IndexedDB/localStorage]
-    A --> D[Embedding Runtime Selector]
-    D --> D1[Browser Capability Test]
-    D1 -->|strong desktop + WebGPU| E[Browser Embeddings: embeddinggemma]
-    D1 -->|mobile / weak / no-WebGPU| E2[Browser Embeddings: Xenova/all-MiniLM-L6-v2]
-    D --> G[Ollama Embeddings: qwen3-embedding:4b / qwen3-embedding:0.6b / mxbai-embed-large :opt-in]
-    C --> Q[Search Pipeline v2]
-    Q --> Q1[Dense Retrieval fetchK]
-    Q1 --> Q2[Dense Confidence Check]
-    Q2 -->|dense suspicious| Q3[Lexical Safety Net conditional]
-    Q2 -->|dense healthy| Q5[MMR plus Repo Cap]
-    Q3 --> Q4[Fusion RRF conditional]
-    Q4 --> Q5[MMR plus Repo Cap]
-    Q5 --> S[Final Top-K Search Results]
-    Q --> M[Retrieval Diagnostics local]
-    A --> F[LLM Provider Adapter]
-    F --> W[WebLLM in Browser - opt-in]
-    F --> L[Local LLM: Ollama/LM Studio - opt-in]
-    F --> R[Remote OpenAI-Compatible - opt-in]
+    UI[Browser UI] --> GH[GitHub REST API]
+    UI --> EX["OAuth Exchange API (stateless)"]
+    UI --> DB[("Local DB: sql.js exported to OPFS")]
+    UI --> EMB[Embedding Runtime Selector]
+    EMB -->|WebGPU or WASM| BR[Browser embeddings]
+    EMB -.->|opt-in, localhost only| OL[Ollama embeddings]
+    BR --> DB
+    OL --> DB
+    DB --> SE["Dense scan, confidence gate, conditional lexical + RRF, MMR + per-repo cap"]
+    SE --> TK[Top-K results and local diagnostics]
+    TK -.->|opt-in, top-K snippets only| LLM[WebLLM / Ollama / LM Studio / Remote]
 ```
 
-
+Full data-flow diagrams with trust boundaries: [docs/dfd-diagrams.md](./docs/dfd-diagrams.md).
 
 Notes:
 
 - Star sync is user-triggered via `Fetch Stars`; search runs on existing local embeddings.
-- Vector data is stored as Float32 blobs in local SQLite tables.
-- Retrieval/search is local; no server-side vector index is required.
-- The authenticated app now uses a route-based shell: `/app` auto-navigates first-time users to `/app/setup`; returning users see a home dashboard with onboarding stepper (if indexing incomplete), interactive workspace guide, and quick-nav cards.
-- Browser embedding model is capability-driven (`embeddinggemma` on strong desktop, `Xenova/all-MiniLM-L6-v2` on mobile/weak/no-WebGPU); local Ollama embedding is opt-in.
-- Retrieval path uses dense fetch + confidence gate + conditional lexical safety net + MMR with per-repo cap.
-- WebLLM/local/remote generation paths are explicit opt-in with consent controls.
+- Persistence is a single sql.js (SQLite WASM) database exported whole to a scoped OPFS file, with a
+  base64 localStorage snapshot as fallback. Embeddings are Float32 blobs in ordinary tables. There is no
+  `sqlite-vec`, no vector virtual table, and no approximate-nearest-neighbour index.
+- Ranking is exact and in-process: brute-force cosine similarity over every candidate vector, then MMR
+  with a per-repo cap. The lexical safety net and RRF fusion engage only when dense confidence is weak.
+- Every local store is scoped per authenticated GitHub identity, and exactly one tab holds the write lease.
+- WebLLM, local, and remote generation paths are opt-in with explicit consent controls.
+
+The storage trade-off is recorded in the [Storage Decision Record](./docs/adr/README.md); the release ledger
+lists the other deferred work.
 
 ---
 
 ## Getting Started
 
-### Prerequisites
+For development or self-hosting. To just use the app, the
+[hosted version](https://git-star-recall.vercel.app/) needs no install.
 
-- Node.js 20+
-- pnpm 9+
-- A GitHub OAuth app (recommended) or GitHub PAT with read access to the repositories you want to import
-
-### Install
+**Prerequisites:** Node.js 22 or 24 (enforced by `engines`), pnpm 11.17.0 (pinned via `packageManager`;
+`corepack enable` selects it), and a GitHub OAuth app or a PAT with read access.
 
 ```bash
 pnpm install
-```
-
-### Configure environment
-
-Copy `.env.example` to `.env` and set values:
-
-```bash
 cp .env.example .env
+pnpm dev          # UI only, on http://localhost:5173
 ```
 
-Then follow the complete setup and environment guide:
+`pnpm dev` does **not** serve `api/github/oauth/exchange.js`, so OAuth code exchange returns 404 under it.
+A PAT works fine, because the PAT path never calls the exchange endpoint. For the full OAuth flow locally,
+run `vercel dev`, which serves the UI and the serverless route together.
 
-- `docs/Usage.md`
-
-### Run dev server
-
-```bash
-pnpm dev
-```
-
-### Production build
-
-```bash
-pnpm build
-pnpm preview
-```
+Environment variables, OAuth app setup, and deployment: [docs/Usage.md](./docs/Usage.md).
 
 ---
 
 ## Developer Commands
 
 - `pnpm dev` - start Vite dev server
-- `pnpm lint` - run ESLint
-- `pnpm test` - run Vitest test suite
+- `pnpm lint` - ESLint at `--max-warnings=0`
+- `pnpm test` - Vitest suite
 - `pnpm build` - typecheck + production build
-- `pnpm ci` - lint + test + build
+- `pnpm ci` - the full gate CI runs (format, lint, types, component, coverage, build, bundle budget, e2e)
+
+`pnpm ci` needs a browser binary once per checkout:
+`pnpm exec playwright install --with-deps chromium`. Full gate breakdown:
+[CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ---
 
-## Usage Guide
+## Docs
 
-For full setup, auth, deployment, runtime modes, tuning, and troubleshooting:
-
-- `docs/Usage.md`
-
----
-
-## Product Docs
-
-- [CODE OF CONDUCT](./CODE_OF_CONDUCT.md)
-- [SECURITY](./SECURITY.md)
-- [Usage](./docs/Usage.md)
-- [Embedding Acceleration Plan](./docs/embedding-acceleration-plan.md)
-- [Architecture and PRD](./docs/tech-stack-architecture-security-prd.md)
-- [Threat Modelling doc using STRIDE](./docs/threat-modeling-stride.md)
-- [STRIDE Review](./docs/threat-modeling-stride.md)
+- [Usage Guide](./docs/Usage.md) - setup, configuration, runtime modes, tuning, troubleshooting
+- [Feature Inventory](./docs/features.md)
+- [Storage Decision Record](./docs/adr/README.md)
+- [DFD Diagrams](./docs/dfd-diagrams.md)
+- [Threat Model (STRIDE)](./docs/threat-modeling-stride.md)
+- [Security Review (STRIDE alignment)](./docs/security-review-stride.md)
+- [v0.14.0 Hardening Evidence](./docs/remediation/v0.14.0.md) - what shipped, what was deferred
+- [Embedding Acceleration Plan](./docs/embedding-acceleration-plan.md) - live performance roadmap
 - [Changelogs](./docs/changelogs.md)
+- [Contributing](./CONTRIBUTING.md) · [Security Policy](./SECURITY.md) · [Code of Conduct](./CODE_OF_CONDUCT.md)
+
+Retained for provenance only, describing an architecture that was never shipped:
+[Tech Stack / PRD](./docs/tech-stack-architecture-security-prd.md) and
+[Build Guide](./docs/codex-claude-build-guide.md).
 
 ---
 
 ## Contributing
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
-
-We prioritize:
-
-- security correctness,
-- local-first behavior,
-- deterministic tests,
-- clear operational diagnostics.
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. We prioritize security correctness,
+local-first behavior, deterministic tests, and clear operational diagnostics.
 
 ---
 
@@ -265,9 +203,6 @@ We prioritize:
 
 [MIT](./LICENSE)
 
----
-
 ## Author
 
-- Made with <3 by [Abhinandan-Khurana](https://github.com/Abhinandan-Khurana)
-
+Made with <3 by [Abhinandan-Khurana](https://github.com/Abhinandan-Khurana)

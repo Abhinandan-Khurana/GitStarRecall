@@ -2,6 +2,41 @@
 
 This document defines the performance roadmap for faster embedding generation while keeping GitStarRecall local-first and secure.
 
+## Delivery Status Addendum (2026-07-28)
+
+This document is a **live roadmap, not a completed record**. Section 2 ("Proposed Target State") is still
+written in the future tense, but most of it has shipped — in different shapes than proposed — and one item
+has been deliberately reversed. Read this addendum before treating Section 2 as outstanding work.
+
+Component mapping for §2.1:
+
+| Proposed component      | Status               | Shipped as                                                    |
+| ----------------------- | -------------------- | ------------------------------------------------------------- |
+| `WorkerPool`            | Shipped as named     | `src/embeddings/WorkerPool.ts`                                |
+| `BackendSelector`       | Shipped, other shape | `src/embeddings/backendSelection.ts` — functions, not a class |
+| `CheckpointWriter`      | Shipped, other shape | Checkpoint policy inline in `src/db/client.ts` (~`:1425`)     |
+| `BatchBuilder`          | Shipped, other shape | Micro-batching exists; no named builder component             |
+| `MetricsCollector`      | Partly shipped       | Embedding run metrics held in `UsagePage` state; no collector |
+| `EmbeddingOrchestrator` | **Not built**        | Orchestration lives in `src/pages/UsagePage.tsx`              |
+
+The execution model in §2.2 is substantially in force: pending chunks are gathered, micro-batched,
+dispatched across a bounded pool, upserted, and persisted on a checkpoint cadence rather than per insert.
+
+Two corrections to Section 2:
+
+- **`EmbeddingOrchestrator` was never built, and its absence has a cost.** `UsagePage.tsx` imports
+  `EmbeddingWorkerPool` directly and drives `generateEmbeddings` itself, which is one reason that component
+  is now ~4,100 lines. Extracting this orchestrator remains a legitimate improvement, but is deliberately
+  deferred from v0.14.0; see [`remediation/v0.14.0.md`](remediation/v0.14.0.md).
+- **The ETA metric in §2.1 was dropped.** The UI shows an indeterminate `Embedding in progress` loader plus
+  a fixed timing note rather than batch-level ETA maths (`Usage.md` §8), and no ETA computation exists in
+  `src/`. Treat the `ETA` entry in §2.1 as superseded, not pending. The reason for the reversal is not
+  recorded anywhere in the repository; only the outcome is verifiable, so it is stated without a rationale
+  here rather than reconstructed after the fact.
+
+For the shipped runtime behavior and its current controls, see [`Usage.md`](Usage.md) and the implementation in
+`src/embeddings/`.
+
 ## Retrieval v2 Addendum (2026-03-05)
 
 The indexing pipeline remains local-first, but query-time retrieval now uses a stronger ranking flow:
@@ -28,6 +63,7 @@ Safety controls:
 - Custom-model warning path for potentially incompatible retrieval assumptions.
 
 Scope requested:
+
 1. Micro-batch embeddings in one worker.
 2. Persist SQLite less frequently (checkpoint strategy).
 3. Small embedding worker pool (parallel workers).
@@ -36,6 +72,7 @@ Scope requested:
 ## Implementation Update (2026-02-23)
 
 Delivered in code:
+
 - Feature-flagged README batch pipeline (`VITE_README_BATCH_PIPELINE_V2`) with staged ingestion.
 - Adaptive README concurrency controller (`min/max/initial`) with rate-limit aware downshift.
 - Incremental README mini-batch callbacks wired to rolling chunk upserts.
@@ -54,6 +91,7 @@ Delivered in code:
 - Embedding model/backend are tracked in `index_meta` (`embedding_active_backend`, `embedding_active_model`) and old embeddings are reset when the active model changes.
 
 Current env controls:
+
 - `VITE_EMBEDDING_BACKEND_PREFERRED`
 - `VITE_EMBEDDING_POOL_SIZE`
 - `VITE_EMBEDDING_WORKER_BATCH_SIZE`
@@ -69,6 +107,7 @@ Current env controls:
 ## 1) Current State (As Implemented)
 
 Embedding pipeline today:
+
 - Worker API accepts `embedBatch(texts[])` and returns ordered vectors with per-item error slots.
 - Main thread uses a small worker pool (default 1-2 workers) with bounded queue and downshift-to-1 on errors/memory pressure.
 - Worker pool now dispatches micro-batches per worker task (`workerBatchSize`, default `8`) instead of one-text jobs.
@@ -76,11 +115,13 @@ Embedding pipeline today:
 - Runtime backend policy is explicit: preferred `webgpu`, automatic fallback to `wasm`, with fallback reason surfaced in UI telemetry.
 
 Strengths:
+
 - Local-first indexing with explicit backend diagnostics.
 - Better throughput from reduced worker-call overhead (micro-batch job dispatch).
 - Safer operational controls (fallback + downshift + checkpoint metrics).
 
 Known bottlenecks:
+
 - Initial model download/compile remains the largest one-time latency.
 - Multi-worker mode duplicates model memory footprint.
 - Throughput remains browser/driver dependent for WebGPU-capable systems.
@@ -92,6 +133,7 @@ Known bottlenecks:
 ### 2.1 New Embedding Architecture
 
 Add an `EmbeddingOrchestrator` in the main thread with:
+
 - `BatchBuilder`: groups chunk texts into micro-batches (`8..32`, adaptive).
 - `WorkerPool`: 1-2 workers by default (configurable upper cap).
 - `BackendSelector`: decides runtime backend (`webgpu` then `wasm`).
@@ -120,10 +162,12 @@ Add an `EmbeddingOrchestrator` in the main thread with:
 ## 3.1 Browser-Only Path (Primary for GitStarRecall)
 
 Backend strategy:
+
 - First try: `webgpu` when available and healthy.
 - Fallback: `wasm` CPU path.
 
 Important clarification:
+
 - In browser, you do not directly choose CUDA or MPS.
 - Browser WebGPU maps to OS/driver GPU stacks:
   - Windows: typically Direct3D 12 backend
@@ -134,6 +178,7 @@ Important clarification:
 ## 3.2 Local Runtime Path (Optional Advanced Mode)
 
 Current optional path via Ollama (UI opt-in):
+
 - Windows/Linux with NVIDIA GPU: CUDA path (runtime-managed).
 - macOS Apple Silicon: Metal path (often described as MPS/Metal acceleration at runtime level).
 - All platforms: CPU fallback when GPU unavailable.
@@ -142,13 +187,13 @@ Use this as optional enhancement, not baseline, to preserve pure in-browser comp
 
 ## 3.3 Compatibility Matrix
 
-| Mode | Windows | macOS (Apple Silicon) | Linux | Notes |
-|---|---|---|---|---|
-| Browser WebGPU | Yes (browser/driver dependent) | Yes (browser/driver dependent; Metal backend) | Yes (browser/driver dependent) | Primary acceleration path |
-| Browser WASM CPU | Yes | Yes | Yes | Guaranteed fallback |
-| Local runtime CUDA (optional) | Yes (NVIDIA) | No | Yes (NVIDIA) | Only via local Ollama runtime |
-| Local runtime Metal/MPS (optional) | No | Yes | No | Only via local Ollama runtime |
-| Local runtime CPU (optional) | Yes | Yes | Yes | Fallback for local runtime mode |
+| Mode                               | Windows                        | macOS (Apple Silicon)                         | Linux                          | Notes                           |
+| ---------------------------------- | ------------------------------ | --------------------------------------------- | ------------------------------ | ------------------------------- |
+| Browser WebGPU                     | Yes (browser/driver dependent) | Yes (browser/driver dependent; Metal backend) | Yes (browser/driver dependent) | Primary acceleration path       |
+| Browser WASM CPU                   | Yes                            | Yes                                           | Yes                            | Guaranteed fallback             |
+| Local runtime CUDA (optional)      | Yes (NVIDIA)                   | No                                            | Yes (NVIDIA)                   | Only via local Ollama runtime   |
+| Local runtime Metal/MPS (optional) | No                             | Yes                                           | No                             | Only via local Ollama runtime   |
+| Local runtime CPU (optional)       | Yes                            | Yes                                           | Yes                            | Fallback for local runtime mode |
 
 ---
 
@@ -157,6 +202,7 @@ Use this as optional enhancement, not baseline, to preserve pure in-browser comp
 ## 4.1 Item 1 - Micro-Batch Embedding
 
 Implementation:
+
 - Change worker API from `embed(text)` to `embedBatch(texts: string[])`.
 - Batch target starts at `16`; dynamic adaptation:
   - Increase batch size gradually if latency and memory are healthy.
@@ -164,15 +210,18 @@ Implementation:
 - Return ordered vectors aligned to input chunk IDs.
 
 Tradeoffs:
+
 - Pros: lower overhead, better throughput.
 - Cons: higher transient memory, more complex error handling for partial failures.
 
 Mitigation:
+
 - If one batch fails, bisect batch (binary split) to isolate problematic text and continue.
 
 ## 4.2 Item 2 - Checkpointed SQLite Persistence
 
 Implementation:
+
 - Keep transactional upsert behavior, but delay `persist()` by policy:
   - `checkpointEveryEmbeddings = 256` (default)
   - `checkpointEveryMs = 3000` (default)
@@ -180,15 +229,18 @@ Implementation:
 - Keep "durability window" visible in diagnostics (e.g., "last checkpoint: 2.1s ago").
 
 Tradeoffs:
+
 - Pros: major speedup by reducing DB export frequency.
 - Cons: small recent window may be lost on hard crash/tab close.
 
 Mitigation:
+
 - Short interval checkpoints + final forced flush.
 
 ## 4.3 Item 3 - Small Worker Pool
 
 Implementation:
+
 - Add orchestrator queue with bounded pool size:
   - Default `poolSize=2`
   - Auto-cap by device memory and hardware concurrency.
@@ -196,16 +248,19 @@ Implementation:
 - Central dedupe cache still in main thread for duplicate chunk text.
 
 Tradeoffs:
+
 - Pros: better CPU/GPU utilization, faster wall-clock indexing.
 - Cons: higher memory pressure (model loaded per worker), more coordination complexity.
 
 Mitigation:
+
 - Hard cap pool size at 2 by default.
 - Auto-downshift to 1 on memory pressure or mobile devices.
 
 ## 4.4 Item 4 - WebGPU + Fallback Policy
 
 Implementation:
+
 - At startup run backend probe:
   - Try `webgpu` backend for embeddings.
   - On probe failure, log reason and switch to `wasm`.
@@ -214,10 +269,12 @@ Implementation:
 - Keep feature flag to disable WebGPU quickly if regressions occur.
 
 Tradeoffs:
+
 - Pros: potentially large speedup on supported hardware.
 - Cons: backend variability by browser/driver, larger operational test matrix.
 
 Mitigation:
+
 - Conservative fallback and runtime telemetry.
 - Keep CPU path fully supported and tested.
 
@@ -226,11 +283,13 @@ Mitigation:
 ## 5) Security and Privacy Impacts
 
 New considerations:
+
 - More workers means larger in-memory footprint of private README-derived text.
 - Deferred persistence introduces a short durability window.
 - WebGPU reveals broader hardware execution path characteristics.
 
 Required controls:
+
 - Keep all embedding text local; never send to remote endpoints unless explicit LLM opt-in.
 - Keep CSP strict and lock model download hosts.
 - Add memory pressure guardrails (max queue size, max pool size).
@@ -241,6 +300,7 @@ Required controls:
 ## 6) Testing and Benchmark Plan
 
 Automated:
+
 - Unit tests for:
   - batch request ordering
   - scheduler fairness and completion
@@ -251,6 +311,7 @@ Automated:
   - chat/session behavior unaffected
 
 Manual benchmark protocol:
+
 - Dataset buckets: 200, 1k, 2k starred repos.
 - Measure:
   - time to first searchable chunk
@@ -262,6 +323,7 @@ Manual benchmark protocol:
   - optimized variants
 
 Acceptance target:
+
 - 30-60% indexing speed improvement on modern laptops without relevance regression.
 
 ---

@@ -28,7 +28,8 @@ const BASE_CSP_DIRECTIVES = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' https: data:",
-  "frame-src https://www.youtube.com https://player.vimeo.com",
+  // No surface embeds a frame. Keep this at 'none' and align vercel.json if that ever changes.
+  "frame-src 'none'",
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'self'",

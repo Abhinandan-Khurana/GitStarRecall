@@ -1,8 +1,30 @@
 # GitStarRecall - Tech Stack, Architecture, Security, Threat Model, PRD
 
+> **HISTORICAL — pre-implementation planning document. Retained for provenance; not accurate for the
+> shipped system.**
+>
+> This was written before implementation and describes choices that were never shipped. At least three
+> are wrong for the current system, and no section of this document should be assumed accurate:
+>
+> - **`sqlite-vec` / `sqlite-vec-wasm`** for vector search (§1.2, §2.3.2, §2.3.4). The shipped app uses
+>   sql.js with Float32 vector blobs in ordinary SQLite tables, ranked in-process with exact cosine
+>   similarity plus MMR, persisted to OPFS with a scoped localStorage snapshot fallback.
+> - **TanStack Query** for data fetching and caching (§1.1). Not a dependency; never used.
+> - **An optional Next.js or Fastify backend** (§1.4). No such backend exists. The only server-side code
+>   is a single stateless serverless OAuth token-exchange function.
+>
+> For the current system, use these sources instead:
+>
+> - Architecture and setup: [`../README.md`](../README.md)
+> - Runtime, configuration, storage, and troubleshooting: [`Usage.md`](Usage.md)
+> - Security posture: [`security-review-stride.md`](security-review-stride.md) and
+>   [`threat-modeling-stride.md`](threat-modeling-stride.md)
+> - v0.14.0 remediation evidence: [`remediation/v0.14.0.md`](remediation/v0.14.0.md)
+
 This document defines the recommended tech stack, architecture, security approach, threat model, and product requirements for GitStarRecall.
 
 Design reference:
+
 - The HTML/CSS in `rought-UI-design` is a reference only, not a pixel-perfect target.
 - The final UI should incorporate creative improvements while respecting the overall layout intent.
 - Emphasize security and local-first behavior visually and in copy.
@@ -15,6 +37,7 @@ Design reference:
 ## 1) Tech Stack (Recommended)
 
 ### 1.1 Frontend (Web App)
+
 - Framework: Vite + React
 - Language: TypeScript
 - Styling: Tailwind CSS or Panda CSS
@@ -24,6 +47,7 @@ Design reference:
 - Background tasks: Web Workers for embedding and indexing
 
 ### 1.2 Client-Side Storage and Search
+
 - Storage: SQLite WASM (browser) with persistent file storage (OPFS where available)
 - Cache: In-memory LRU for hot queries
 - Vector index: `sqlite-vec` via `sqlite-vec-wasm` (WASM-compatible)
@@ -34,6 +58,7 @@ Design reference:
   - Note: sqlite-vec must be statically compiled into the SQLite WASM build (no dynamic extension loading in WASM).
 
 ### 1.3 Embeddings (Local-First)
+
 - Primary: `@huggingface/transformers` (browser worker runtime)
 - Browser model policy (capability-driven):
   - strong desktop + WebGPU -> `onnx-community/embeddinggemma-300m-ONNX`
@@ -53,6 +78,7 @@ Design reference:
 - Fallback: server embeddings (optional, opt-in)
 
 ### 1.3.1 Retrieval v2 (Query-Time)
+
 - Dense candidate retrieval (`fetchK`) with cosine similarity.
 - Dense confidence gate to decide whether lexical safety-net is needed.
 - Lexical retrieval is conditional (safety-net only when dense confidence is weak).
@@ -61,12 +87,14 @@ Design reference:
 - Strict query/index embedding dimension compatibility checks.
 
 ### 1.4 Backend (Optional Hybrid)
+
 - API layer: Next.js API routes or Fastify
 - OAuth callback handling for GitHub login
 - Provider gateway for LLM calls (optional)
 - Rate limiting and request normalization
 
 ### 1.5 LLM Provider Abstraction
+
 - Remote providers: OpenAI, Anthropic, Gemini, DeepSeek, etc.
 - Local providers: Ollama and LM Studio (optional)
 - Browser provider: WebLLM (feature-flagged, opt-in download consent)
@@ -79,12 +107,14 @@ Design reference:
   - Browser WebLLM: in-browser WebGPU runtime + locally cached model assets
 
 WebLLM model policy:
+
 - Primary: `Llama-3.2-1B-Instruct-q4f16_1-MLC`
 - Fallback: `SmolLM2-360M-Instruct-q4f16_1-MLC`
 - Additional selectable models: Qwen2.5 1.5B, Gemma 2 2B, Hermes 3 Llama 3 3B, Llama 3.1 3B
 - No model download starts before explicit user confirmation in UI
 
 ### 1.6 Local Provider Integration (Ollama, LM Studio)
+
 - Ollama:
   - Default base URL: `http://localhost:11434`
   - Model list and availability: `GET /api/tags`
@@ -100,6 +130,7 @@ WebLLM model policy:
 - CORS note: ensure local endpoints allow browser access or provide a local proxy option if needed.
 
 ### 1.7 GitHub API
+
 - Endpoints:
   - `GET /user/starred` for user stars (paginated)
   - `GET /repos/{owner}/{repo}/readme` for README
@@ -108,7 +139,9 @@ WebLLM model policy:
 - Permissions: read-only access for starred public repositories (`read:user` OAuth scope + public-repo filtering at runtime)
 
 ### 1.8 Cross-Platform Compute Compatibility
+
 Browser-only (default local-first path):
+
 - Windows/macOS/Linux: WebGPU when available; automatic fallback to WASM CPU
 - Browser WebGPU maps to OS-native GPU stack:
   - Windows: Direct3D-based WebGPU backend
@@ -116,16 +149,19 @@ Browser-only (default local-first path):
   - Linux: Vulkan-based WebGPU backend
 
 Optional local runtime path (future enhancement):
+
 - Windows/Linux NVIDIA: CUDA via local runtime (Ollama/LM Studio runtime-managed)
 - macOS Apple Silicon: Metal/MPS-style acceleration via local runtime
 - CPU fallback on all platforms
 
 Browser local LLM path (implemented, feature-flagged):
+
 - WebLLM runs in-browser and uses WebGPU when available.
 - Device recommendation policy selects 1B for strong desktop and 360M for mobile/weak profiles.
 - If WebLLM fails, app retries with 360M and can fallback to other configured providers.
 
 Reference:
+
 - Detailed rollout and tradeoffs: `docs/embedding-acceleration-plan.md`
 
 ---
@@ -133,6 +169,7 @@ Reference:
 ## 2) Architecture
 
 ### 2.1 High-Level Flow
+
 1. User authenticates with GitHub OAuth or provides a PAT.
 2. `/app` auto-navigates first-time users (`repoCount === 0`) to `/app/setup`; returning users see the home dashboard with onboarding progress and workspace guide.
 3. App fetches all starred repositories via GitHub REST API (paginated).
@@ -147,6 +184,7 @@ Reference:
 12. Star sync is user-initiated via `Fetch Stars`; search queries run against the current local index.
 
 ### 2.2 Components
+
 - Public landing + authenticated app shell
 - Setup workspace for first-run indexing
 - Recall workspace: search, filters, results, suggestions, session-aware chat
@@ -164,6 +202,7 @@ Reference:
 - Provider gateway (optional): handles LLM calls and OAuth callback
 
 ### 2.3 Data Model (Simplified)
+
 - Repo
   - id, full_name, name, description, topics, language, html_url
   - stars, forks, updated_at, readme_url
@@ -187,6 +226,7 @@ Reference:
   - auth-hash-scoped settings keys for embedding/runtime preferences and session continuity
 
 ### 2.3.1 Chat Schema Sketch (SQLite)
+
 Example tables for persistence:
 
 ```sql
@@ -211,12 +251,15 @@ CREATE INDEX chat_messages_order_idx ON chat_messages(session_id, created_at, se
 ```
 
 Notes:
+
 - Timestamps use UNIX epoch milliseconds (INTEGER).
 - Message ordering is by `(created_at, sequence)` ascending within a session.
 - UI should show a session list and a selected session thread; users can start new sessions or continue an existing one.
 
 ### 2.3.2 Vector Storage + sqlite-vec-wasm (Implementation Note)
+
 Loading sqlite-vec-wasm (high level):
+
 - Initialize a SQLite WASM build that already includes sqlite-vec (static compile).
 - Create a vector table and insert embeddings as float arrays.
 
@@ -282,6 +325,7 @@ ORDER BY knn.distance ASC;
 ```
 
 Notes:
+
 - `vec0` supports metadata columns for filtering in the same query.
 - Store embeddings as float32 arrays (binary) for speed and size.
 - Prefer `k = N` for KNN queries; `LIMIT N` only works on SQLite 3.41+.
@@ -322,28 +366,34 @@ export function l2Normalize(vec: Float32Array): Float32Array {
 ```
 
 Normalization note:
+
 - If the vector distance metric is cosine similarity, L2-normalize both stored embeddings and query vectors.
 - If the metric is dot-product, normalization may be skipped (or still used for stability).
 - Align normalization with the sqlite-vec distance mode used in your build.
 
 Default distance mode recommendation:
+
 - Use `distance_metric=cosine` on the `vec0` table and L2-normalize embeddings and queries.
 - This preserves semantic similarity behavior for text embeddings and avoids scale sensitivity.
 
 ### 2.3.3 Why HNSW Is Not Used (Browser Compatibility)
+
 - HNSW extensions in SQLite are typically native-first and lack reliable browser WASM builds.
 - `sqlite-vec-wasm` is designed for browser compatibility and avoids backend dependencies.
 - This preserves the local-first, privacy-centric goal while keeping acceptable retrieval quality.
 
 ### 2.3.4 Build Recipe (SQLite WASM + sqlite-vec)
+
 Goal: produce a browser-compatible SQLite WASM bundle with sqlite-vec compiled in.
 
 Prereqs:
+
 - SQLite source tree (full checkout, not amalgamation-only).
 - Emscripten SDK installed and activated.
 - sqlite-vec source (single C file extension).
 
 Steps (high-level, from upstream guidance):
+
 1. Build SQLite WASM from the SQLite source tree:
    - `./configure --enable-all`
    - `make sqlite3.c`
@@ -371,13 +421,16 @@ int sqlite3_wasm_extra_init(const char *z){
 ```
 
 Notes:
+
 - WASM builds cannot dynamically load extensions; compile sqlite-vec in at build time.
 - `sqlite3_vec_init` is the sqlite-vec extension entrypoint.
 
 ### 2.4 Performance Strategy
+
 Designed for 1k+ starred repos, with explicit current-state baseline and target-state upgrades.
 
 Current state (implemented):
+
 - Pagination with concurrency limits.
 - README fetching in batches with backoff on rate limit.
 - Incremental sync using checksum diffs.
@@ -385,12 +438,14 @@ Current state (implemented):
 - Single embedding worker with per-text inference loop and frequent DB persistence.
 
 Proposed state (approved):
+
 - Item 1: micro-batch embeddings in each worker (`8..32`, adaptive).
 - Item 2: checkpointed SQLite persistence (record-count and time-based flush).
 - Item 3: bounded worker pool (`2` default; auto-downshift on pressure).
 - Item 4: explicit backend selector (`webgpu` preferred, `wasm` fallback).
 
 Tradeoffs and controls:
+
 - Higher throughput vs. higher peak memory:
   - Control with capped pool size and adaptive batch size.
 - Less frequent persistence vs. small crash-loss window:
@@ -399,11 +454,13 @@ Tradeoffs and controls:
   - Control with deterministic fallback to WASM + backend diagnostics.
 
 Performance requirements:
+
 - Time to first searchable chunks should improve materially over current baseline.
 - Retrieval quality must remain stable (same model, same normalization contract).
 - No UI freeze during indexing on 1k+ stars.
 
 Reference:
+
 - Full execution design, rollout stages, and benchmark protocol: `docs/embedding-acceleration-plan.md`
 
 ---
@@ -411,6 +468,7 @@ Reference:
 ## 3) Security Details
 
 ### 3.1 Data Handling
+
 - Default: all embeddings and repo content stored locally in SQLite WASM DB
 - No server persistence unless user opts in
 - Provide a "Delete all data" button
@@ -419,6 +477,7 @@ Reference:
 - Checksum uses SHA-256 over canonical repo metadata + README content (empty string if missing)
 
 ### 3.2 Token Handling
+
 - GitHub OAuth tokens stored only in memory by default
 - Provider API keys may use optional WebCrypto (AES-GCM) encryption in account-scoped local storage when configured
 - Never log tokens
@@ -426,22 +485,26 @@ Reference:
 - Use OAuth PKCE and avoid tokens in URLs
 
 ### 3.3 External LLM Usage
+
 - Off by default
 - Explicit consent required before sending repo content
 - If enabled, send only top-K chunks (minimized context)
 
 ### 3.4 Content Safety
+
 - Sanitize all README rendering (avoid XSS)
 - Use CSP headers in hosted version
 - Disallow inline scripts in README rendering
 
 ### 3.5 Rate Limits and Abuse Controls
+
 - Respect GitHub rate limit headers
 - Backoff and retry strategy on 403/429
 - Avoid heavy parallel requests
 - Handle GitHub edge cases: missing README and renamed/deleted repos
 
 ### 3.6 Embedding Runtime and Worker Safety
+
 - Cap worker pool size (default `2`) to prevent local resource exhaustion.
 - Cap micro-batch size and auto-downshift on memory pressure.
 - Keep strict allowlist for model download hosts in CSP `connect-src`.
@@ -450,6 +513,7 @@ Reference:
 - Never transmit embedding input text externally as part of optimization path.
 
 ### 3.7 Actionable Security Findings (Pre-Dev Checklist)
+
 - Add strict CSP (no inline scripts, allow only required origins).
 - Sanitize README rendering with `rehype-sanitize`.
 - Enforce OAuth PKCE flow; never place tokens in URLs.
@@ -468,12 +532,14 @@ Reference:
 ## 4) Threat Model
 
 ### 4.1 Assets
+
 - GitHub tokens (OAuth or PAT)
 - Public repo README content
 - Local embeddings and index
 - User query history
 
 ### 4.2 Threats
+
 1. Token exfiltration via XSS or dependency compromise
 2. Leakage of repository content to external LLM providers
 3. Local provider exposure: sending data to a local endpoint that is not trusted
@@ -486,6 +552,7 @@ Reference:
 10. Backend variability causing silent acceleration fallback or unstable behavior
 
 ### 4.3 Mitigations
+
 1. CSP + strict README sanitization
 2. Explicit opt-in for any LLM provider
 3. Separate toggle for Local providers with clear "local endpoint" disclosure
@@ -499,6 +566,7 @@ Reference:
 11. Backend probe and deterministic fallback from `webgpu` to `wasm`
 
 ### 4.4 Residual Risks
+
 - If user enables external LLMs, repo content leaves the browser
 - If local device is compromised, local storage can be accessed
 - GPU/browser driver variability may still affect acceleration consistency
@@ -508,29 +576,35 @@ Reference:
 ## 5) PRD (Product Requirements Document)
 
 ### 5.1 Problem Statement
+
 Developers star many repositories over time and cannot easily recall them when they remember only functionality or details.
 
 ### 5.2 Goals
+
 - Import all starred repos quickly
 - Provide fast natural language search
 - Keep data local by default
 - Support multiple LLM providers optionally
 
 ### 5.3 Non-Goals
+
 - Replace GitHub global search
 - Multi-user enterprise features in MVP
 
 ### 5.4 Target Users
+
 - Developers with 100+ starred repos
 - Open-source heavy users
 - Individuals who prefer privacy-first tooling
 
 ### 5.5 User Stories
+
 1. "Find the repo I starred for a lightweight vector search library in JS."
 2. "Show me repos I starred about OAuth middleware."
 3. "Suggest repos I starred for scraping or crawling."
 
 ### 5.6 Functional Requirements
+
 - GitHub OAuth or PAT login
 - Fetch all starred repos with pagination
 - Fetch README for each repo
@@ -551,6 +625,7 @@ Developers star many repositories over time and cannot easily recall them when t
 - Clear empty states when a user has no stars or no README content
 
 ### 5.7 Non-Functional Requirements
+
 - Fast: indexing visible progress, partial results within 120 seconds for 1k stars
 - Secure: no token leakage, no data sent without consent
 - Reliable: robust error handling, retry strategy
@@ -558,6 +633,7 @@ Developers star many repositories over time and cannot easily recall them when t
 - Compatible: browser-only functionality on Windows/macOS/Linux with graceful CPU fallback
 
 ### 5.8 Success Metrics
+
 - Time to first results < 120 seconds for 1k stars
 - Query response time < 2 seconds after indexing
 - > 80% success in manual relevance evaluation
@@ -566,6 +642,7 @@ Developers star many repositories over time and cannot easily recall them when t
 - No relevance regression on fixed query-set evaluation
 
 ### 5.9 MVP Scope
+
 - OAuth/PAT login
 - Fetch stars + README
 - Local embeddings + SQLite WASM + `sqlite-vec-wasm`
@@ -576,6 +653,7 @@ Developers star many repositories over time and cannot easily recall them when t
 - MVP: use prebuilt sqlite-vec-wasm bundle for speed of iteration
 
 ### 5.10 Post-MVP Enhancements
+
 - Cross-device sync (opt-in)
 - Repo metadata enrichment (topics, tags)
 - Advanced filters (language, date, stars)
@@ -584,6 +662,7 @@ Developers star many repositories over time and cannot easily recall them when t
 - Production hardening: custom-built SQLite WASM + sqlite-vec bundle with pinned versions
 
 ### 5.11 Migration Checklist (Prebuilt -> Custom Bundle)
+
 - Pin SQLite and sqlite-vec versions (document in repo).
 - Build SQLite WASM with sqlite-vec statically compiled.
 - Verify `vec_version()` matches pinned version.
@@ -592,13 +671,16 @@ Developers star many repositories over time and cannot easily recall them when t
 - Update docs to point to the custom bundle artifact.
 
 ### 5.12 Vector Search Sanity Test (Suggested)
+
 Purpose: validate sqlite-vec behavior after a bundle change.
 
 Test dataset:
+
 - 3 vectors with known neighbors (simple 3D or 5D examples).
 - Use a fixed query vector with known nearest results.
 
 Pseudo-test:
+
 ```sql
 -- Create vec table
 CREATE VIRTUAL TABLE vec_test USING vec0(
@@ -621,9 +703,11 @@ ORDER BY distance ASC;
 ```
 
 Expected:
+
 - The first result is `a` and the second is `b`.
 
 TypeScript harness (browser, pseudo-code):
+
 ```ts
 // Assume sqlite-vec-wasm is already initialized as `db`
 await db.exec(`
@@ -656,23 +740,28 @@ console.assert(rows[0][0] === "a" && rows[1][0] === "b");
 ## 6) Implementation Phases (High Level)
 
 ### Phase 1 - Foundations
+
 - Project scaffolding, UI shell, GitHub auth
 - Stars fetching and pagination
 
 ### Phase 2 - Indexing
+
 - README fetcher and chunker
 - Embedding generation in Web Worker
 - SQLite WASM storage and vector index
 
 ### Phase 3 - Search
+
 - Query UI and retrieval
 - Result ranking and filters
 
 ### Phase 4 - Optional LLM
+
 - Provider abstraction
 - Summaries and suggestions
 
 ### Phase 5 - Embedding Acceleration
+
 - Micro-batch worker API
 - Checkpointed DB persistence
 - Worker pool scheduling
@@ -682,13 +771,16 @@ console.assert(rows[0][0] === "a" && rows[1][0] === "b");
 ---
 
 ## 7) Open Decisions
+
 Resolved decisions:
+
 - Frontend: Vite + React
 - Browser embedding model policy: capability-driven (`embeddinggemma` on strong desktop, MiniLM fallback on mobile/weak/no-WebGPU)
 - Ollama recommended embeddings: `qwen3-embedding:4b`, `qwen3-embedding:0.6b`, `mxbai-embed-large`
 - Local vector strategy: SQLite WASM + `sqlite-vec-wasm`
 
 Active decisions:
+
 - Final default batch-size adaptation policy for low-memory devices
 - Whether to enable worker pool by default on first release or behind feature flag
 - Whether optional local Ollama embedding bridge should remain default-off for all users
@@ -698,6 +790,7 @@ Active decisions:
 ## 8) Implementation Update (2026-02-23)
 
 Implemented architecture deltas:
+
 - Embedding queue is materialized once per run (pending chunk preload) instead of repeated DB polling in the hot loop.
 - Pending chunk SQL joins now use normalized key join (`e.chunk_id = c.id`) with dedicated indexes.
 - Embedding compute and DB writes are decoupled through an in-memory buffer and size-based flush policy.
@@ -710,5 +803,6 @@ Implemented architecture deltas:
   - graceful restart to browser embedding when Ollama fails mid-run
 
 Trust-boundary note:
+
 - Ollama embedding bridge remains inside local trust boundary only; non-local endpoints are rejected.
 - GitHub auth tokens remain browser-local and are not included in embedding payloads.
