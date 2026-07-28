@@ -23,6 +23,7 @@ const LEGACY_MESSAGES_KEY = "gitstarrecall.chat.backup.messages.v1";
 const SCOPED_MESSAGES_KEY_A = "gitstarrecall.chat.backup.messages.v2.user-a";
 const SCOPED_SESSIONS_KEY_A = "gitstarrecall.chat.backup.sessions.v2.user-a";
 const LEGACY_MIGRATED_KEY = "gitstarrecall.chat.backup.legacy-migrated.v2.legacy-user";
+const MIGRATION_MARKER_KEY_A = "gitstarrecall.chat.backup.legacy-migrated.v2.user-a";
 const BACKUP_DB_NAME = "gitstarrecall-chat-backup";
 
 /**
@@ -36,6 +37,8 @@ class MemoryStorage implements Storage {
   private throwOnceOnRemoveKey: string | null = null;
   private ignoreOnceOnRemoveKey: string | null = null;
   private throwOnceOnGetKey: string | null = null;
+  private runOnceAfterSet: { key: string; run: () => void } | null = null;
+  private runOnceAfterRemove: { key: string; run: () => void } | null = null;
 
   get length(): number {
     return this.entries.size;
@@ -67,6 +70,11 @@ class MemoryStorage implements Storage {
       return;
     }
     this.entries.delete(key);
+    if (this.runOnceAfterRemove?.key === key) {
+      const hook = this.runOnceAfterRemove;
+      this.runOnceAfterRemove = null;
+      hook.run();
+    }
   }
 
   setItem(key: string, value: string): void {
@@ -75,6 +83,21 @@ class MemoryStorage implements Storage {
       throw new DOMException("quota exceeded", "QuotaExceededError");
     }
     this.entries.set(key, value);
+    if (this.runOnceAfterSet?.key === key) {
+      const hook = this.runOnceAfterSet;
+      this.runOnceAfterSet = null;
+      hook.run();
+    }
+  }
+
+  /** Runs `run` immediately after the next successful write to `key`. */
+  afterNextWrite(key: string, run: () => void): void {
+    this.runOnceAfterSet = { key, run };
+  }
+
+  /** Runs `run` immediately after the next successful removal of `key`. */
+  afterNextRemove(key: string, run: () => void): void {
+    this.runOnceAfterRemove = { key, run };
   }
 
   failNextWriteContaining(marker: string): void {
@@ -508,6 +531,72 @@ describe("scoped chat backup storage", () => {
     const survivors = await loadChatBackup(scopeA);
     expect(survivors.sessions.map((item) => item.id)).toEqual(["s-a"]);
   });
+
+  it("rejects the clear and keeps records when localStorage disappears mid deletion", async () => {
+    expect(typeof indexedDB).toBe("undefined");
+    const backing = new MemoryStorage();
+    let localStorageVisible = true;
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get: () => {
+        if (!localStorageVisible) {
+          throw new DOMException("localStorage access denied", "SecurityError");
+        }
+        return backing;
+      },
+    });
+    backing.setItem(MIGRATION_MARKER_KEY_A, "1");
+    await backupChatSession(scopeA, session({ id: "a", query: "a" }));
+    await backupChatMessage(scopeA, message({ id: "ma", sessionId: "a" }));
+
+    // localStorage vanishes once the deletion marker is committed: after the
+    // capability proof, before the scoped rows are removed.
+    backing.afterNextWrite(MIGRATION_MARKER_KEY_A, () => {
+      localStorageVisible = false;
+    });
+
+    const failure = await clearChatBackup(scopeA).then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors.map((item) => (item as Error).message)).toContain(
+      "A required chat backup backend became unavailable during scoped deletion",
+    );
+
+    // The clear must not have removed the rows it could no longer verify.
+    localStorageVisible = true;
+    const survivors = await loadChatBackup(scopeA);
+    expect(survivors.sessions.map((item) => item.id)).toEqual(["a"]);
+    expect(survivors.messagesBySessionId.a?.map((item) => item.id)).toEqual(["ma"]);
+  });
+
+  it("treats throwing storage accessors as unavailable capabilities", async () => {
+    expect(typeof indexedDB).toBe("undefined");
+
+    try {
+      Object.defineProperty(globalThis, "indexedDB", {
+        configurable: true,
+        get: () => {
+          throw new DOMException("IndexedDB access denied", "SecurityError");
+        },
+      });
+      await expect(
+        backupChatSession(scopeA, session({ id: "s-local", query: "local fallback" })),
+      ).resolves.toBe(true);
+
+      Object.defineProperty(globalThis, "localStorage", {
+        configurable: true,
+        get: () => {
+          throw new DOMException("localStorage access denied", "SecurityError");
+        },
+      });
+      await expect(clearChatBackup(scopeA)).rejects.toThrow(/no usable chat backup storage/i);
+    } finally {
+      delete (globalThis as { indexedDB?: IDBFactory }).indexedDB;
+    }
+  });
 });
 
 function openDatabase(name: string, version?: number): Promise<IDBDatabase> {
@@ -707,6 +796,49 @@ describe("scoped chat backup IndexedDB storage", () => {
     const other = await loadChatBackup(scopeB);
     expect(other.sessions.map((item) => item.id)).toEqual(["b"]);
     expect(other.messagesBySessionId.b?.map((item) => item.id)).toEqual(["mb"]);
+  });
+
+  it("rejects the clear when a captured backend disappears after the capability proof", async () => {
+    const storage = installStorage();
+    await backupChatSession(scopeA, session({ id: "a", query: "a" }));
+    await backupChatMessage(scopeA, message({ id: "ma", sessionId: "a" }));
+
+    const factory = globalThis.indexedDB;
+    let indexedDbVisible = true;
+    Object.defineProperty(globalThis, "indexedDB", {
+      configurable: true,
+      get: () => {
+        if (!indexedDbVisible) {
+          throw new DOMException("IndexedDB access denied", "SecurityError");
+        }
+        return factory;
+      },
+    });
+
+    // Hide IndexedDB right after the deletion marker lands in localStorage, then
+    // restore it before the final backend-history write. Both bookend writes
+    // therefore observe a healthy backend while the deletion itself does not.
+    storage.afterNextWrite(MIGRATION_MARKER_KEY_A, () => {
+      indexedDbVisible = false;
+    });
+    storage.afterNextRemove(SCOPED_MESSAGES_KEY_A, () => {
+      indexedDbVisible = true;
+    });
+
+    const failure = await clearChatBackup(scopeA).then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors.map((item) => (item as Error).message)).toContain(
+      "A required chat backup backend became unavailable during scoped deletion",
+    );
+    // The skipped backend still holds the scoped rows, so reporting success
+    // would have let them resurface on the next load.
+    expect(indexedDbVisible).toBe(true);
+    const survivors = await loadChatBackup(scopeA);
+    expect(survivors.sessions.map((item) => item.id)).toEqual(["a"]);
   });
 
   it("uses count-based writes under the limit and prunes exactly the oldest overflow", async () => {

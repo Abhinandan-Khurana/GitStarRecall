@@ -5,7 +5,9 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatBackupSnapshot } from "../db/chatBackup";
+import { EMBEDDING_DIMENSION_META_KEY } from "../db/embeddingIntegrity";
 import type { ChatMessageRecord, ChatSessionRecord, SearchResult } from "../db/types";
+import { DEFAULT_BROWSER_EMBEDDING_MODEL } from "../embeddings/retrievalProfile";
 import UsagePage from "./UsagePage";
 
 const mocks = vi.hoisted(() => {
@@ -24,13 +26,17 @@ const mocks = vi.hoisted(() => {
     storageMode: "opfs",
     getRepoCount: vi.fn(() => 1),
     getEmbeddingCount: vi.fn(() => 1),
-    getEmbeddingHealth: vi.fn(() => ({ status: "ready" })),
-    getDominantEmbeddingModel: vi.fn(() => null),
+    getEmbeddingHealth: vi.fn<() => { status: "ready"; dimension: number | null }>(() => ({
+      status: "ready",
+      dimension: null,
+    })),
+    getDominantEmbeddingModel: vi.fn<() => string | null>(() => null),
     listChatSessions: vi.fn<() => ChatSessionRecord[]>(() => []),
     listChatMessages: vi.fn<() => ChatMessageRecord[]>(() => []),
     upsertChatSession: vi.fn<(record: ChatSessionRecord) => Promise<void>>(async () => undefined),
     addChatMessage: vi.fn<(record: ChatMessageRecord) => Promise<void>>(async () => undefined),
     upsertIndexMeta: vi.fn(async () => undefined),
+    clearIndexMetaValue: vi.fn(async () => undefined),
     getIndexMetaValue: vi.fn(() => null),
     findSimilarChunks: vi.fn<() => Promise<SearchResult[]>>(async () => []),
     clearAllData: vi.fn(async () => undefined),
@@ -69,7 +75,7 @@ vi.mock("../auth/useAuth", () => ({
 
 vi.mock("react-router-dom", () => ({
   useNavigate: () => vi.fn(),
-  useSearchParams: () => [new URLSearchParams()],
+  useSearchParams: () => [new URLSearchParams(), vi.fn()] as const,
 }));
 
 vi.mock("../db/client", () => ({
@@ -369,13 +375,14 @@ describe("UsagePage scoped history and deletion integration", () => {
     });
     mocks.database.getRepoCount.mockReturnValue(1);
     mocks.database.getEmbeddingCount.mockReturnValue(1);
-    mocks.database.getEmbeddingHealth.mockReturnValue({ status: "ready" });
+    mocks.database.getEmbeddingHealth.mockReturnValue({ status: "ready", dimension: null });
     mocks.database.getDominantEmbeddingModel.mockReturnValue(null);
     mocks.database.listChatSessions.mockReturnValue([]);
     mocks.database.listChatMessages.mockReturnValue([]);
     mocks.database.upsertChatSession.mockResolvedValue(undefined);
     mocks.database.addChatMessage.mockResolvedValue(undefined);
     mocks.database.upsertIndexMeta.mockResolvedValue(undefined);
+    mocks.database.clearIndexMetaValue.mockResolvedValue(undefined);
     mocks.database.clearAllData.mockResolvedValue(undefined);
     mocks.database.findSimilarChunks.mockResolvedValue([]);
     mocks.getLocalDatabase.mockResolvedValue(mocks.database);
@@ -471,7 +478,7 @@ describe("UsagePage scoped history and deletion integration", () => {
     mocks.getLocalDatabase.mockResolvedValue(mocks.database);
     mocks.database.getRepoCount.mockReturnValue(1);
     mocks.database.getEmbeddingCount.mockReturnValue(1);
-    mocks.database.getEmbeddingHealth.mockReturnValue({ status: "ready" });
+    mocks.database.getEmbeddingHealth.mockReturnValue({ status: "ready", dimension: null });
     mocks.database.listChatSessions.mockImplementation(() => {
       throw new Error("sqlite unavailable");
     });
@@ -677,6 +684,58 @@ describe("UsagePage scoped history and deletion integration", () => {
     generation.resolve();
     await waitFor(() => expect(mocks.database.clearAllData).toHaveBeenCalledOnce());
     expect(mocks.auth.logout).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to start a new generation while deletion is in progress", async () => {
+    const user = userEvent.setup();
+    const clearing = deferred<void>();
+    mocks.database.findSimilarChunks.mockResolvedValue([searchResult()]);
+    mocks.database.clearAllData.mockImplementationOnce(async () => {
+      await clearing.promise;
+    });
+    await renderSettled("legacy");
+
+    await user.type(screen.getByRole("textbox", { name: "Search query" }), "security");
+    await user.click(screen.getByRole("button", { name: "Run search" }));
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Chat prompt" })).toBeInTheDocument(),
+    );
+    await user.type(screen.getByRole("textbox", { name: "Chat prompt" }), "Summarize");
+
+    // Prove the same click reaches generation while no deletion is running, so
+    // the refusal below cannot pass for an unrelated missing precondition.
+    await user.click(screen.getByRole("button", { name: "Send prompt" }));
+    await waitFor(() => expect(mocks.executeUsageGeneration).toHaveBeenCalledOnce());
+
+    await user.click(screen.getByRole("button", { name: "Delete local data" }));
+    await user.click(screen.getByRole("button", { name: "Confirm deletion" }));
+    await waitFor(() => expect(mocks.database.clearAllData).toHaveBeenCalledOnce());
+
+    await user.click(screen.getByRole("button", { name: "Send prompt" }));
+
+    expect(mocks.executeUsageGeneration).toHaveBeenCalledOnce();
+
+    clearing.resolve();
+    await waitFor(() => expect(mocks.auth.logout).toHaveBeenCalledOnce());
+    expect(mocks.executeUsageGeneration).toHaveBeenCalledOnce();
+  });
+
+  it("clears unknown embedding dimension metadata instead of persisting an empty sentinel", async () => {
+    const user = userEvent.setup();
+    mocks.database.getDominantEmbeddingModel.mockReturnValue(DEFAULT_BROWSER_EMBEDDING_MODEL);
+    mocks.database.getEmbeddingHealth.mockReturnValue({ status: "ready", dimension: null });
+    mocks.database.findSimilarChunks.mockResolvedValue([searchResult()]);
+    await renderSettled("legacy");
+
+    await user.type(screen.getByRole("textbox", { name: "Search query" }), "security");
+    await user.click(screen.getByRole("button", { name: "Run search" }));
+
+    await waitFor(() =>
+      expect(mocks.database.clearIndexMetaValue).toHaveBeenCalledWith(EMBEDDING_DIMENSION_META_KEY),
+    );
+    expect(mocks.database.upsertIndexMeta).not.toHaveBeenCalledWith(
+      expect.objectContaining({ key: EMBEDDING_DIMENSION_META_KEY, value: "" }),
+    );
   });
 
   it("keeps partial failures visible, stays signed in, and permits retry", async () => {

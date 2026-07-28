@@ -3,6 +3,7 @@ import {
   applyUsagePageDeletionResult,
   deleteUsagePageLocalData,
   getUsagePageDeletionBlockReason,
+  settleUsagePageGenerations,
   type UsagePageDeletionDependencies,
 } from "./usagePageDeletion";
 
@@ -118,6 +119,45 @@ describe("deleteUsagePageLocalData", () => {
       { category: "provider-settings", message: "settings remained" },
     ]);
     expect(events.at(-1)).toBe("clearLogs");
+  });
+
+  test("continues deletion when generation cancellation and settlement fail", async () => {
+    const events: string[] = [];
+
+    const result = await deleteUsagePageLocalData(
+      createDependencies(events, {
+        abortGenerations: new Error("cancel failed"),
+        awaitGenerations: new Error("settlement failed"),
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(events).toEqual([
+      "abortGenerations",
+      "awaitGenerations",
+      "clearRepositoryData",
+      "unloadWebLLM",
+      "clearModelCaches",
+      "clearProviderSettings",
+      "clearPreferences",
+      "clearLogs",
+    ]);
+  });
+});
+
+describe("settleUsagePageGenerations", () => {
+  test("waits for a finite snapshot and does not absorb later generations", async () => {
+    let settleInitial!: () => void;
+    const initial = new Promise<void>((resolve) => {
+      settleInitial = resolve;
+    });
+    const active = new Set<Promise<unknown>>([initial]);
+
+    const settlement = settleUsagePageGenerations(active);
+    active.add(new Promise<void>(() => undefined));
+    settleInitial();
+
+    await expect(settlement).resolves.toBeUndefined();
   });
 });
 

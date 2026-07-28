@@ -71,15 +71,17 @@ export function useProviderSettingsPersistence({
   store = providerSettingsStore,
   onPersistenceError,
 }: ProviderSettingsPersistenceOptions): ProviderSettingsPersistence {
+  const onPersistenceErrorRef = useRef(onPersistenceError);
+  onPersistenceErrorRef.current = onPersistenceError;
   const reportPersistenceError = useCallback(
     (event: string, error: unknown) => {
-      if (onPersistenceError) {
-        onPersistenceError(event, error);
+      if (onPersistenceErrorRef.current) {
+        onPersistenceErrorRef.current(event, error);
         return;
       }
       captureLocalError(scopeIdentity, event, error);
     },
-    [onPersistenceError, scopeIdentity],
+    [scopeIdentity],
   );
   const providerDefinitionsKey = getProviderDefinitionsKey(providerDefinitions);
   const providerDefinitionsCacheRef = useRef({

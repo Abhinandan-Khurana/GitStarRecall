@@ -328,6 +328,25 @@ describe("clearLocalLogsStrict", () => {
     expect(storage.getItem(accountAKey)).not.toBeNull();
   });
 
+  it("throws a domain error when localStorage is unavailable or access is denied", () => {
+    vi.unstubAllGlobals();
+    expect(() => clearLocalLogsStrict("github-user:1")).toThrow("Local log storage is unavailable");
+
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get: () => {
+        throw new DOMException("storage access denied", "SecurityError");
+      },
+    });
+    try {
+      expect(() => clearLocalLogsStrict("github-user:1")).toThrow(
+        "Local log storage is unavailable",
+      );
+    } finally {
+      delete (globalThis as { localStorage?: Storage }).localStorage;
+    }
+  });
+
   it("removes the scope key and the legacy global key on success", () => {
     captureLocalWarn("github-user:1", "search_diagnostics", "account A");
     storage.setItem("gitstarrecall.local_logs.v1", JSON.stringify([{ legacy: true }]));

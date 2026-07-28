@@ -61,25 +61,39 @@ function getScopeKey(scopeIdentity: string): string {
   return `${LOCAL_LOG_KEY_PREFIX}${encodeURIComponent(scopeIdentity)}`;
 }
 
-function purgeLegacyLogs(): void {
+function getStorage(): Storage | null {
   try {
-    localStorage.removeItem(LEGACY_LOCAL_LOG_KEY);
+    if (typeof localStorage === "undefined") return null;
+    const storage = localStorage as Partial<Storage>;
+    return typeof storage.getItem === "function" &&
+      typeof storage.setItem === "function" &&
+      typeof storage.removeItem === "function"
+      ? (storage as Storage)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function purgeLegacyLogs(): void {
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    storage.removeItem(LEGACY_LOCAL_LOG_KEY);
   } catch {
     // Ignore storage failures. The legacy log is never read or reassigned.
   }
 }
 
-function purgeLegacyLogsStrict(): void {
-  localStorage.removeItem(LEGACY_LOCAL_LOG_KEY);
+function purgeLegacyLogsStrict(storage: Storage): void {
+  storage.removeItem(LEGACY_LOCAL_LOG_KEY);
 
-  if (localStorage.getItem(LEGACY_LOCAL_LOG_KEY) !== null) {
+  if (storage.getItem(LEGACY_LOCAL_LOG_KEY) !== null) {
     throw new Error("Failed to clear legacy local logs");
   }
 }
 
-if (typeof localStorage !== "undefined") {
-  purgeLegacyLogs();
-}
+purgeLegacyLogs();
 
 function isLogEntry(value: unknown): value is LocalLogEntry {
   if (!value || typeof value !== "object") return false;
@@ -198,6 +212,8 @@ function normalizeEvent(event: string): string {
       return "chat_message_backup_failed";
     case "chat_session_backup_failed":
       return "chat_session_backup_failed";
+    case "chat_backup_scope_migration_failed":
+      return "chat_backup_scope_migration_failed";
     case "embedding_batch_item_recovered":
       return "embedding_batch_item_recovered";
     case "embedding_generation_failed":
@@ -282,8 +298,10 @@ function protectLogEntry(entry: LocalLogEntry): LocalLogEntry {
 
 function readLogs(scopeIdentity: string, now = Date.now()): LocalLogEntry[] {
   purgeLegacyLogs();
+  const storage = getStorage();
+  if (!storage) return [];
   try {
-    const raw = localStorage.getItem(getScopeKey(scopeIdentity));
+    const raw = storage.getItem(getScopeKey(scopeIdentity));
     if (!raw) return [];
 
     const parsed = JSON.parse(raw) as unknown;
@@ -299,9 +317,11 @@ function readLogs(scopeIdentity: string, now = Date.now()): LocalLogEntry[] {
 
 function writeLogs(scopeIdentity: string, entries: LocalLogEntry[], now = Date.now()): void {
   purgeLegacyLogs();
+  const storage = getStorage();
+  if (!storage) return;
   try {
     const retained = entries.filter((entry) => entry.ts >= now - RETENTION_MS).slice(-MAX_ENTRIES);
-    localStorage.setItem(getScopeKey(scopeIdentity), JSON.stringify(retained));
+    storage.setItem(getScopeKey(scopeIdentity), JSON.stringify(retained));
   } catch {
     // Ignore storage write failures.
   }
@@ -354,12 +374,16 @@ export function clearLocalLogsStrict(scopeIdentity: string): void {
     throw new Error("clearLocalLogsStrict requires a non-empty scope identity");
   }
 
-  purgeLegacyLogsStrict();
+  const storage = getStorage();
+  if (!storage) {
+    throw new Error("Local log storage is unavailable");
+  }
 
+  purgeLegacyLogsStrict(storage);
   const scopeKey = getScopeKey(scopeIdentity);
-  localStorage.removeItem(scopeKey);
+  storage.removeItem(scopeKey);
 
-  if (localStorage.getItem(scopeKey) !== null) {
+  if (storage.getItem(scopeKey) !== null) {
     throw new Error(`Failed to clear local logs for scope ${scopeIdentity}`);
   }
 }
@@ -369,8 +393,10 @@ export function clearLocalLogs(scopeIdentity: string): void {
   // removal are attempted independently so a legacy-key failure cannot block
   // scoped cleanup.
   purgeLegacyLogs();
+  const storage = getStorage();
+  if (!storage) return;
   try {
-    localStorage.removeItem(getScopeKey(scopeIdentity));
+    storage.removeItem(getScopeKey(scopeIdentity));
   } catch {
     // Ignore storage removal failures.
   }

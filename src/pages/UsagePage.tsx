@@ -116,6 +116,7 @@ import {
   applyUsagePageDeletionResult,
   deleteUsagePageLocalData,
   getUsagePageDeletionBlockReason,
+  settleUsagePageGenerations,
 } from "./usagePageDeletion";
 import {
   getWebLLMSelectableModels,
@@ -748,6 +749,9 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const generationControllerRef = useRef<AbortController | null>(null);
   const activeGenerationPromisesRef = useRef(new Set<Promise<unknown>>());
   const pendingWebllmGenerationRef = useRef<PendingGeneration | null>(null);
+  // Synchronous so a generation started in the same tick as the deletion click
+  // cannot slip past the async `deleteLocalDataPending` state update.
+  const deletionInProgressRef = useRef(false);
   const [deleteLocalDataOpen, setDeleteLocalDataOpen] = useState(false);
   const [deleteLocalDataPending, setDeleteLocalDataPending] = useState(false);
   const [deleteLocalDataFailures, setDeleteLocalDataFailures] = useState<
@@ -766,13 +770,16 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const webllmPreviousRecommendationRef = useRef<WebLLMRecommendation | null>(null);
   const previousIsAuthenticatedRef = useRef(isAuthenticated);
   const chatScopeKey = useMemo(() => buildChatScopeKey(authScopeIdentity), [authScopeIdentity]);
-  currentHistoryScopeRef.current = chatScopeKey;
   const chatBackupScope = useMemo(() => buildChatBackupScope(chatScopeKey), [chatScopeKey]);
   const embeddingPreferenceScopeKey = useMemo(
     () => buildEmbeddingPreferenceScopeKey(authScopeIdentity),
     [authScopeIdentity],
   );
   const previousChatScopeKeyRef = useRef<string | null>(chatScopeKey);
+
+  useEffect(() => {
+    currentHistoryScopeRef.current = chatScopeKey;
+  }, [chatScopeKey]);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
@@ -2209,11 +2216,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         value: activeEmbeddingModel,
         updatedAt: Date.now(),
       });
-      await database.upsertIndexMeta({
-        key: EMBEDDING_DIMENSION_META_KEY,
-        value: "",
-        updatedAt: Date.now(),
-      });
+      await database.clearIndexMetaValue(EMBEDDING_DIMENSION_META_KEY);
 
       const repoCount = database.getRepoCount();
       const largeLibraryMode = largeLibraryModeEnabled && repoCount > largeLibraryThreshold;
@@ -2518,11 +2521,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                 value: activeEmbeddingModel,
                 updatedAt: Date.now(),
               });
-              await database.upsertIndexMeta({
-                key: EMBEDDING_DIMENSION_META_KEY,
-                value: "",
-                updatedAt: Date.now(),
-              });
+              await database.clearIndexMetaValue(EMBEDDING_DIMENSION_META_KEY);
             }
             vectors = batchResults.map((item) => item.embedding);
           }
@@ -2740,11 +2739,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           value: BROWSER_EMBEDDING_MODEL,
           updatedAt: Date.now(),
         });
-        await database.upsertIndexMeta({
-          key: EMBEDDING_DIMENSION_META_KEY,
-          value: "",
-          updatedAt: Date.now(),
-        });
+        await database.clearIndexMetaValue(EMBEDDING_DIMENSION_META_KEY);
         await database.upsertIndexMeta({
           key: "embedding_job_cursor",
           value: "",
@@ -2812,10 +2807,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       restoringHistory: historyLoadState === "loading",
       downloadingWebLLM: webllmRuntimeState === "downloading",
     });
-    if (liveBlockReason || deleteLocalDataPending) {
+    if (liveBlockReason || deleteLocalDataPending || deletionInProgressRef.current) {
       return;
     }
 
+    deletionInProgressRef.current = true;
     setDeleteLocalDataPending(true);
     setDeleteLocalDataFailures([]);
 
@@ -2827,9 +2823,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           setWebllmDialogOpen(false);
         },
         awaitGenerations: async () => {
-          while (activeGenerationPromisesRef.current.size > 0) {
-            await Promise.allSettled([...activeGenerationPromisesRef.current]);
-          }
+          await settleUsagePageGenerations(activeGenerationPromisesRef.current);
         },
         clearRepositoryData: async () => {
           const database = await getLocalDatabase();
@@ -2862,6 +2856,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setDeleteLocalDataFailures(result.failures);
       setError("Some local data could not be deleted. Review the details and retry.");
     } finally {
+      deletionInProgressRef.current = false;
       setDeleteLocalDataPending(false);
     }
   };
@@ -2919,11 +2914,15 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
             updatedAt: Date.now(),
           });
           const inferredDimension = database.getEmbeddingHealth().dimension;
-          await database.upsertIndexMeta({
-            key: EMBEDDING_DIMENSION_META_KEY,
-            value: inferredDimension === null ? "" : String(inferredDimension),
-            updatedAt: Date.now(),
-          });
+          if (inferredDimension === null) {
+            await database.clearIndexMetaValue(EMBEDDING_DIMENSION_META_KEY);
+          } else {
+            await database.upsertIndexMeta({
+              key: EMBEDDING_DIMENSION_META_KEY,
+              value: String(inferredDimension),
+              updatedAt: Date.now(),
+            });
+          }
         }
       }
       let browserEmbeddingPlan: BrowserEmbeddingRecommendation | null = null;
@@ -3118,6 +3117,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   };
 
   const executePendingGeneration = async (generation: PendingGeneration): Promise<void> => {
+    // Deletion already settled the generations it knew about; starting another
+    // one now would persist chat rows after the store was cleared.
+    if (deletionInProgressRef.current) {
+      return;
+    }
     const execution = executeUsageGeneration(generation, {
       controllerRef: generationControllerRef,
       pendingGenerationRef: pendingWebllmGenerationRef,
@@ -3157,6 +3161,10 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   };
 
   const handleGenerateAnswer = async () => {
+    if (deletionInProgressRef.current) {
+      return;
+    }
+
     if (!activeSession) {
       setLlmError("No active session. Run a search first.");
       return;
@@ -3253,6 +3261,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   };
 
   const handleConfirmWebllmDownload = () => {
+    // Refuse before consuming the pending request or granting consent, so the
+    // resume can be retried once deletion has settled.
+    if (deletionInProgressRef.current) {
+      return;
+    }
     const resumed = resumePendingWebLLMGeneration(
       pendingWebllmGenerationRef.current,
       resolveHermesModelSelection(webllmSelectedModel),

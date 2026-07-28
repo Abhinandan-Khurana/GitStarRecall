@@ -96,9 +96,20 @@ function describeFailures(failedChecks) {
 }
 
 export function buildReport({ javaScript, wasm }) {
+  if (javaScript.length === 0) {
+    throw new Error(`No JavaScript chunks were found under ${distDirectory}.`);
+  }
+
   const ortWasm = wasm.filter((file) => file.runtime === "onnxruntime");
+  if (ortWasm.length === 0) {
+    throw new Error(`No ONNX Runtime WASM asset was found under ${distDirectory}.`);
+  }
+
   const metrics = {
-    largestJavaScriptRawBytes: javaScript[0].rawBytes,
+    largestJavaScriptRawBytes: javaScript.reduce(
+      (largest, file) => Math.max(largest, file.rawBytes),
+      0,
+    ),
     totalJavaScriptRawBytes: sum(javaScript, "rawBytes"),
     totalJavaScriptGzipBytes: sum(javaScript, "gzipBytes"),
     ortWasmRawBytes: sum(ortWasm, "rawBytes"),
@@ -150,14 +161,6 @@ async function main() {
           : "other",
     }))
     .sort((a, b) => b.rawBytes - a.rawBytes);
-
-  if (javaScript.length === 0) {
-    throw new Error(`No JavaScript chunks were found under ${distDirectory}.`);
-  }
-
-  if (wasm.every((file) => file.runtime !== "onnxruntime")) {
-    throw new Error(`No ONNX Runtime WASM asset was found under ${distDirectory}.`);
-  }
 
   const report = buildReport({ javaScript, wasm });
   const metrics = report.result.metrics;

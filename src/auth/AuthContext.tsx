@@ -15,7 +15,7 @@ import { migrateLocalDatabaseScope, setLocalDatabaseScope } from "@/db/client";
 import { migrateChatBackupScope } from "@/db/chatBackup";
 import { migrateLegacySettingsScope } from "@/lib/settings";
 import { normalizeGitHubToken } from "@/lib/normalizeGitHubToken";
-import { clearLocalLogs } from "@/observability/localLog";
+import { captureLocalError, clearLocalLogs } from "@/observability/localLog";
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -50,7 +50,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
       toChatScopeKey: nextChatScope?.key,
     });
     if (legacyChatScope && nextChatScope) {
-      await migrateChatBackupScope(legacyChatScope, nextChatScope);
+      try {
+        await migrateChatBackupScope(legacyChatScope, nextChatScope);
+      } catch (error) {
+        // Chat backup is auxiliary to the primary database scope. Its migration
+        // retains the source on failure, so login can continue and retry later.
+        captureLocalError(nextAuthScopeIdentity, "chat_backup_scope_migration_failed", error);
+      }
     }
     await migrateLegacySettingsScope(normalizedToken, nextAuthScopeIdentity);
 

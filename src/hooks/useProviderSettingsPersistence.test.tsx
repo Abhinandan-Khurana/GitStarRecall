@@ -146,6 +146,47 @@ describe("useProviderSettingsPersistence", () => {
     expect(onPersistenceError).not.toHaveBeenCalled();
   });
 
+  it("does not rehydrate or resave when an inline error handler changes identity", async () => {
+    const latestSaveError = new Error("latest save failed");
+    const store: ProviderSettingsStore = {
+      hydrate: vi.fn().mockResolvedValue(null),
+      save: vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(latestSaveError),
+    };
+    const observedErrors: unknown[] = [];
+    const hook = renderHook(
+      ({ renderMarker }) =>
+        useProviderSettingsPersistence({
+          scopeIdentity: "github:1",
+          webLLMEnabled: true,
+          webLLMPrimaryModel: "primary-web-model",
+          providerDefinitions,
+          store,
+          onPersistenceError: (event, error) => {
+            observedErrors.push({ renderMarker, event, error });
+          },
+        }),
+      { initialProps: { renderMarker: 1 } },
+    );
+    await waitFor(() => expect(hook.result.current.saveState).toBe("saved"));
+
+    hook.rerender({ renderMarker: 2 });
+    await waitFor(() => expect(hook.result.current.saveState).toBe("saved"));
+
+    expect(store.hydrate).toHaveBeenCalledOnce();
+    expect(store.save).toHaveBeenCalledOnce();
+
+    act(() => hook.result.current.setProviderModel("changed-model"));
+    await waitFor(() => expect(hook.result.current.saveState).toBe("error"));
+    expect(store.save).toHaveBeenCalledTimes(2);
+    expect(observedErrors).toEqual([
+      {
+        renderMarker: 2,
+        event: "provider_settings_save_failed",
+        error: latestSaveError,
+      },
+    ]);
+  });
+
   it("rehydrates and saves when provider defaults change semantically", async () => {
     const store: ProviderSettingsStore = {
       hydrate: vi.fn().mockResolvedValue(

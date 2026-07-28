@@ -328,6 +328,36 @@ describe("LocalDatabase durability ordering", () => {
 });
 
 describe("LocalDatabase exclusive writer lease", () => {
+  it("allows empty deletes without a writer lease", async () => {
+    const scopeKey = "auth:empty-delete-without-lease";
+    const locks = new ExclusiveIfAvailableLocks();
+    const root = new ControlledOpfsRoot();
+    installOpfs(root, locks);
+    const holder = new LocalDatabase({
+      sql: SQL,
+      db: rawDatabase(),
+      storageMode: "opfs",
+      scopeKey,
+    });
+    const leaseName = `gitstarrecall:database-writer:${scopeKey}`;
+    await vi.waitFor(() => expect(locks.isHeld(leaseName)).toBe(true));
+    const blocked = new LocalDatabase({
+      sql: SQL,
+      db: rawDatabase(),
+      storageMode: "opfs",
+      scopeKey,
+    });
+
+    await expect(blocked.deleteReposByIds([])).resolves.toBeUndefined();
+    await expect(blocked.deleteChunksByRepoIds([])).resolves.toBeUndefined();
+    await expect(blocked.deleteReposByIds([1])).rejects.toBeInstanceOf(
+      LocalDatabaseWriterLeaseError,
+    );
+
+    holder.releaseWriterLeaseForTests();
+    await vi.waitFor(() => expect(locks.isHeld(leaseName)).toBe(false));
+  });
+
   it("fails a second writer closed before changing SQL and releases explicitly", async () => {
     const scopeKey = "auth:exclusive-writer";
     const locks = new ExclusiveIfAvailableLocks();

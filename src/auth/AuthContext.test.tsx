@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   setLocalDatabaseScope: vi.fn(),
   migrateChatBackupScope: vi.fn(),
   migrateLegacySettingsScope: vi.fn(),
+  captureLocalError: vi.fn(),
 }));
 
 vi.mock("@/github/client", () => ({
@@ -44,7 +45,10 @@ vi.mock("./githubOAuth", () => ({
   }),
 }));
 
-vi.mock("@/observability/localLog", () => ({ clearLocalLogs: vi.fn() }));
+vi.mock("@/observability/localLog", () => ({
+  captureLocalError: mocks.captureLocalError,
+  clearLocalLogs: vi.fn(),
+}));
 
 function Harness() {
   const auth = useAuth();
@@ -100,9 +104,10 @@ describe("AuthProvider scoped storage migration", () => {
     });
   });
 
-  it("does not install the target scope or auth state when chat migration rejects", async () => {
+  it("installs the target scope and reports diagnostics when chat migration rejects", async () => {
     const user = userEvent.setup();
-    mocks.migrateChatBackupScope.mockRejectedValueOnce(new Error("backup unavailable"));
+    const migrationError = new Error("backup unavailable");
+    mocks.migrateChatBackupScope.mockRejectedValueOnce(migrationError);
     render(
       <AuthProvider>
         <Harness />
@@ -111,8 +116,35 @@ describe("AuthProvider scoped storage migration", () => {
 
     await user.click(screen.getByRole("button", { name: "Login" }));
 
-    await waitFor(() => expect(mocks.migrateChatBackupScope).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(screen.getByTestId("state")).toHaveTextContent("github:42:ghp_token"),
+    );
+    expect(mocks.captureLocalError).toHaveBeenCalledWith(
+      "github:42",
+      "chat_backup_scope_migration_failed",
+      migrationError,
+    );
+    expect(mocks.migrateLegacySettingsScope).toHaveBeenCalledOnce();
+    expect(mocks.setLocalDatabaseScope).toHaveBeenCalledWith("auth:github:42", {
+      key: "chat:github:42",
+      legacySessionPrefix: "chat:github:42:",
+    });
+  });
+
+  it("does not install auth state when the primary database migration rejects", async () => {
+    const user = userEvent.setup();
+    mocks.migrateLocalDatabaseScope.mockRejectedValueOnce(new Error("database migration failed"));
+    render(
+      <AuthProvider>
+        <Harness />
+      </AuthProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Login" }));
+
+    await waitFor(() => expect(mocks.migrateLocalDatabaseScope).toHaveBeenCalledOnce());
     expect(screen.getByTestId("state")).toHaveTextContent("none:none");
+    expect(mocks.migrateChatBackupScope).not.toHaveBeenCalled();
     expect(mocks.migrateLegacySettingsScope).not.toHaveBeenCalled();
     expect(mocks.setLocalDatabaseScope).not.toHaveBeenCalled();
   });

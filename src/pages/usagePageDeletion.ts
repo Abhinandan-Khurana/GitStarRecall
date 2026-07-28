@@ -25,6 +25,14 @@ export type UsagePageDeletionCompletion = {
   logout(): void;
 };
 
+/** Waits only for the generations that were active when settlement began. */
+export async function settleUsagePageGenerations(
+  activeGenerations: ReadonlySet<Promise<unknown>>,
+): Promise<void> {
+  const generationSnapshot = [...activeGenerations];
+  await Promise.allSettled(generationSnapshot);
+}
+
 /** Returns the first active operation that makes destructive deletion unsafe. */
 export function getUsagePageDeletionBlockReason(
   blockers: Readonly<UsagePageDeletionBlockers>,
@@ -45,8 +53,16 @@ export function getUsagePageDeletionBlockReason(
 export async function deleteUsagePageLocalData(
   dependencies: Readonly<UsagePageDeletionDependencies>,
 ): Promise<DeleteLocalDataResult> {
-  dependencies.abortGenerations();
-  await dependencies.awaitGenerations();
+  try {
+    dependencies.abortGenerations();
+  } catch {
+    // Generation cancellation is best effort and must not prevent deletion.
+  }
+  try {
+    await dependencies.awaitGenerations();
+  } catch {
+    // A failed generation settlement must not prevent deletion categories.
+  }
 
   return runLocalDataDeletion([
     { category: "repository-data", run: dependencies.clearRepositoryData },

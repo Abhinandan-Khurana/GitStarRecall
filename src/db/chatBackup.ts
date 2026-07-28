@@ -20,6 +20,8 @@ const BACKEND_HISTORY_PREFIX = "gitstarrecall.chat.backup.backends.v2.";
 const MAX_BACKUP_SESSIONS = 200;
 const MAX_BACKUP_MESSAGES = 5000;
 const OPEN_DATABASE_TIMEOUT_MS = 5000;
+const BACKEND_LOST_DURING_CLEAR_MESSAGE =
+  "A required chat backup backend became unavailable during scoped deletion";
 
 type BackupSource = "indexeddb" | "local-storage";
 
@@ -143,19 +145,27 @@ function enqueueScope<T>(scope: ChatBackupScope, operation: () => Promise<T>): P
 }
 
 function isIndexedDbAvailable(): boolean {
-  return typeof indexedDB !== "undefined";
+  try {
+    return typeof indexedDB !== "undefined";
+  } catch {
+    return false;
+  }
 }
 
 function getStorage(): Storage | null {
-  if (typeof localStorage === "undefined") {
+  try {
+    if (typeof localStorage === "undefined") {
+      return null;
+    }
+    const candidate = localStorage as Partial<Storage>;
+    return typeof candidate.getItem === "function" &&
+      typeof candidate.setItem === "function" &&
+      typeof candidate.removeItem === "function"
+      ? (candidate as Storage)
+      : null;
+  } catch {
     return null;
   }
-  const candidate = localStorage as Partial<Storage>;
-  return typeof candidate.getItem === "function" &&
-    typeof candidate.setItem === "function" &&
-    typeof candidate.removeItem === "function"
-    ? localStorage
-    : null;
 }
 
 function scopedSuffix(scope: ChatBackupScope): string {
@@ -471,6 +481,7 @@ async function readBackendHistory(scope: ChatBackupScope): Promise<BackendHistor
 async function writeBackendHistory(
   scope: ChatBackupScope,
   authorities: BackupSource[],
+  requiredBackends?: ReadonlySet<BackupSource>,
 ): Promise<void> {
   const previous = await readBackendHistory(scope);
   const indexedDbAvailable = isIndexedDbAvailable();
@@ -490,6 +501,7 @@ async function writeBackendHistory(
     ],
   };
   const errors: unknown[] = [];
+  const written = new Set<BackupSource>();
   if (isIndexedDbAvailable()) {
     try {
       await withBackupDb(async (database) => {
@@ -502,6 +514,7 @@ async function writeBackendHistory(
         } satisfies BackendHistory);
         await completion;
       });
+      written.add("indexeddb");
     } catch (error) {
       errors.push(error);
     }
@@ -510,12 +523,16 @@ async function writeBackendHistory(
   if (storage) {
     try {
       writeAndVerify(storage, backendHistoryKey(scope), JSON.stringify(payload));
+      written.add("local-storage");
     } catch (error) {
       errors.push(error);
     }
   }
   if (errors.length > 0) {
     throw new AggregateError(errors, "Failed to persist chat backup backend history");
+  }
+  if (requiredBackends && [...requiredBackends].some((backend) => !written.has(backend))) {
+    throw new Error(BACKEND_LOST_DURING_CLEAR_MESSAGE);
   }
 }
 
@@ -844,9 +861,11 @@ async function hasMigrationMarker(scope: ChatBackupScope): Promise<boolean> {
 async function writeMigrationMarker(
   scope: ChatBackupScope,
   requireEveryBackend = false,
+  requiredBackends?: ReadonlySet<BackupSource>,
 ): Promise<void> {
   let wrote = false;
   const errors: unknown[] = [];
+  const written = new Set<BackupSource>();
   if (isIndexedDbAvailable()) {
     try {
       await withBackupDb(async (database) => {
@@ -859,6 +878,7 @@ async function writeMigrationMarker(
         await completion;
       });
       wrote = true;
+      written.add("indexeddb");
     } catch (error) {
       errors.push(error);
     }
@@ -868,12 +888,16 @@ async function writeMigrationMarker(
     try {
       writeAndVerify(storage, migrationMarkerKey(scope), "1");
       wrote = true;
+      written.add("local-storage");
     } catch (error) {
       errors.push(error);
     }
   }
   if (requireEveryBackend && errors.length > 0) {
     throw new AggregateError(errors, "Failed to persist the chat backup deletion marker");
+  }
+  if (requiredBackends && [...requiredBackends].some((backend) => !written.has(backend))) {
+    throw new Error(BACKEND_LOST_DURING_CLEAR_MESSAGE);
   }
   if (!wrote && errors.length > 0) throw errors[0];
 }
@@ -977,7 +1001,11 @@ async function ensureLegacyMigrated(scope: ChatBackupScope): Promise<void> {
 async function clearScopeInternal(scope: ChatBackupScope): Promise<void> {
   await assertKnownBackendsAvailable(scope, "clear");
   const storage = getStorage();
-  if (!isIndexedDbAvailable() && !storage) {
+  const requiredBackends = new Set<BackupSource>([
+    ...(isIndexedDbAvailable() ? (["indexeddb"] as const) : []),
+    ...(storage ? (["local-storage"] as const) : []),
+  ]);
+  if (requiredBackends.size === 0) {
     // Reporting success here would tell the caller the backup is gone while the
     // bytes are simply out of reach.
     throw new Error(
@@ -985,34 +1013,45 @@ async function clearScopeInternal(scope: ChatBackupScope): Promise<void> {
     );
   }
   // The marker is committed first so legacy data cannot resurrect after a partial clear.
-  await writeMigrationMarker(scope, true);
+  await writeMigrationMarker(scope, true, requiredBackends);
   const errors: unknown[] = [];
-  if (isIndexedDbAvailable()) {
-    try {
-      await withBackupDb(async (database) => {
-        await deleteIndexedDbRecordsByScope(database, SCOPED_SESSIONS_STORE, scope);
-        await deleteIndexedDbRecordsByScope(database, SCOPED_MESSAGES_STORE, scope);
-      });
-      const remaining = await readIndexedDbScoped(scope);
-      if (remaining.sessions.length || Object.keys(remaining.messagesBySessionId).length) {
-        throw new Error("IndexedDB retained scoped chat backup records after deletion");
+  // Each captured backend must be cleared now. Skipping one that vanished mid
+  // operation would report success while its scoped bytes survive to resurface.
+  if (requiredBackends.has("indexeddb")) {
+    if (!isIndexedDbAvailable()) {
+      errors.push(new Error(BACKEND_LOST_DURING_CLEAR_MESSAGE));
+    } else {
+      try {
+        await withBackupDb(async (database) => {
+          await deleteIndexedDbRecordsByScope(database, SCOPED_SESSIONS_STORE, scope);
+          await deleteIndexedDbRecordsByScope(database, SCOPED_MESSAGES_STORE, scope);
+        });
+        const remaining = await readIndexedDbScoped(scope);
+        if (remaining.sessions.length || Object.keys(remaining.messagesBySessionId).length) {
+          throw new Error("IndexedDB retained scoped chat backup records after deletion");
+        }
+      } catch (error) {
+        errors.push(error);
       }
-    } catch (error) {
-      errors.push(error);
     }
   }
-  if (storage) {
-    try {
-      removeAndVerify(storage, localSessionsKey(scope));
-      removeAndVerify(storage, localMessagesKey(scope));
-    } catch (error) {
-      errors.push(error);
+  if (requiredBackends.has("local-storage")) {
+    const currentStorage = getStorage();
+    if (!currentStorage) {
+      errors.push(new Error(BACKEND_LOST_DURING_CLEAR_MESSAGE));
+    } else {
+      try {
+        removeAndVerify(currentStorage, localSessionsKey(scope));
+        removeAndVerify(currentStorage, localMessagesKey(scope));
+      } catch (error) {
+        errors.push(error);
+      }
     }
   }
   if (errors.length > 0) {
     throw new AggregateError(errors, "Failed to clear the scoped chat backup");
   }
-  await writeBackendHistory(scope, []);
+  await writeBackendHistory(scope, [], requiredBackends);
 }
 
 async function upsertSessionInternal(

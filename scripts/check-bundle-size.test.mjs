@@ -97,4 +97,42 @@ describe("bundle budget policy", () => {
       totalWasmGzipBytes: 5_369_848,
     });
   });
+
+  it("enforces required bundle composition for direct callers", () => {
+    expect(() => buildReport({ javaScript: [], wasm: [] })).toThrow(
+      "No JavaScript chunks were found",
+    );
+    expect(() =>
+      buildReport({
+        javaScript: [{ path: "dist/app.js", rawBytes: 1, gzipBytes: 1 }],
+        wasm: [
+          {
+            path: "dist/sql-wasm.wasm",
+            rawBytes: 1,
+            gzipBytes: 1,
+            runtime: "sql.js",
+          },
+        ],
+      }),
+    ).toThrow("No ONNX Runtime WASM asset was found");
+  });
+
+  it("measures the largest JavaScript chunk independent of input order", () => {
+    const report = buildReport({
+      javaScript: [
+        { path: "dist/small.js", rawBytes: 100, gzipBytes: 50 },
+        { path: "dist/large.js", rawBytes: 200, gzipBytes: 80 },
+      ],
+      wasm: [
+        {
+          path: "dist/ort-wasm.wasm",
+          rawBytes: 1,
+          gzipBytes: 1,
+          runtime: "onnxruntime",
+        },
+      ],
+    });
+
+    expect(report.result.metrics.largestJavaScriptRawBytes).toBe(200);
+  });
 });

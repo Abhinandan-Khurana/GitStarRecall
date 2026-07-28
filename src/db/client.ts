@@ -1938,8 +1938,8 @@ export class LocalDatabase {
     const statement = this.db.prepare(`
       INSERT INTO embeddings (id, chunk_id, model, dimension, vector_blob, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(chunk_id) DO UPDATE SET
-        id = excluded.id,
+      ON CONFLICT(id) DO UPDATE SET
+        chunk_id = excluded.chunk_id,
         model = excluded.model,
         dimension = excluded.dimension,
         vector_blob = excluded.vector_blob,
@@ -1949,6 +1949,13 @@ export class LocalDatabase {
     try {
       this.db.run("BEGIN");
       embeddings.forEach((embedding) => {
+        // Legacy databases may not yet have the UNIQUE(chunk_id) index installed by
+        // runSchema. Remove any prior row explicitly so the upsert remains safe
+        // before that migration has run.
+        this.db.run("DELETE FROM embeddings WHERE chunk_id = ? AND id <> ?;", [
+          embedding.chunkId,
+          embedding.id,
+        ]);
         statement.run([
           embedding.id,
           embedding.chunkId,
@@ -2063,10 +2070,10 @@ export class LocalDatabase {
   }
 
   async deleteReposByIds(repoIds: number[]): Promise<void> {
-    await this.beginMutation();
     if (repoIds.length === 0) {
       return;
     }
+    await this.beginMutation();
 
     const placeholders = repoIds.map(() => "?").join(",");
     this.db.run(`DELETE FROM repos WHERE id IN (${placeholders});`, repoIds);
@@ -2076,10 +2083,10 @@ export class LocalDatabase {
   }
 
   async deleteChunksByRepoIds(repoIds: number[]): Promise<void> {
-    await this.beginMutation();
     if (repoIds.length === 0) {
       return;
     }
+    await this.beginMutation();
 
     const placeholders = repoIds.map(() => "?").join(",");
     this.db.run(`DELETE FROM chunks WHERE repo_id IN (${placeholders});`, repoIds);
