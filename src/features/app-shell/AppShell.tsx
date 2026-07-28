@@ -1,6 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { BookOpen, Command, History, Home, LogOut, Menu, Search, Settings, Sparkles, Workflow } from "lucide-react";
+import {
+  BookOpen,
+  Command,
+  History,
+  Home,
+  LogOut,
+  Menu,
+  Search,
+  Settings,
+  Sparkles,
+  Workflow,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggleButton } from "@/components/ui/ThemeToggleButton";
 import { Badge } from "@/components/ui/badge";
@@ -8,12 +19,16 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { getLocalDatabase } from "@/db/client";
 import { useAuth } from "@/auth/useAuth";
 import { CommandPalette } from "@/features/command/CommandPalette";
-import { detectClientShortcutPlatform, formatPrimaryModifierShortcut } from "@/lib/platformShortcuts";
+import {
+  detectClientShortcutPlatform,
+  formatPrimaryModifierShortcut,
+} from "@/lib/platformShortcuts";
 import { cn } from "@/lib/utils";
 
 type WorkspaceStats = {
   repoCount: number;
   embeddingCount: number;
+  embeddingReady: boolean;
   sessionCount: number;
 };
 
@@ -35,12 +50,24 @@ function getTitle(pathname: string): string {
 }
 
 function getDescription(pathname: string): string {
-  if (pathname === "/app") return "Open setup, recall, browsing, history, and settings from one place.";
+  if (pathname === "/app")
+    return "Open setup, recall, browsing, history, and settings from one place.";
   if (pathname.startsWith("/app/library")) return "Browse your indexed stars as a local inventory.";
   if (pathname.startsWith("/app/sessions")) return "Resume and inspect prior recall threads.";
-  if (pathname.startsWith("/app/settings")) return "Manage providers, sync settings, privacy, and local data.";
-  if (pathname.startsWith("/app/setup")) return "Connect GitHub, build your local index, and get ready.";
+  if (pathname.startsWith("/app/settings"))
+    return "Manage providers, sync settings, privacy, and local data.";
+  if (pathname.startsWith("/app/setup"))
+    return "Connect GitHub, build your local index, and get ready.";
   return "Search, review matches, and build explicit chat context.";
+}
+
+function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest(
+      'input, textarea, select, [role="textbox"], [contenteditable]:not([contenteditable="false"])',
+    ) !== null
+  );
 }
 
 export function AppShell() {
@@ -50,9 +77,11 @@ export function AppShell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [syncCenterOpen, setSyncCenterOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const waitingForNavigationKey = useRef(false);
   const [stats, setStats] = useState<WorkspaceStats>({
     repoCount: 0,
     embeddingCount: 0,
+    embeddingReady: false,
     sessionCount: 0,
   });
   const shortcutPlatform = useMemo(() => detectClientShortcutPlatform(), []);
@@ -72,6 +101,7 @@ export function AppShell() {
       const nextStats = {
         repoCount: database.getRepoCount(),
         embeddingCount: database.getEmbeddingCount(),
+        embeddingReady: database.getEmbeddingHealth().status === "ready",
         sessionCount: database.listChatSessions().length,
       };
       if (!cancelled) {
@@ -88,6 +118,11 @@ export function AppShell() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isEditableShortcutTarget(event.target)) {
+        waitingForNavigationKey.current = false;
+        return;
+      }
+
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setPaletteOpen((current) => !current);
@@ -100,30 +135,32 @@ export function AppShell() {
         return;
       }
 
-      if (event.key.toLowerCase() === "g") {
-        const handleSecondKey = (nextEvent: KeyboardEvent) => {
-          const key = nextEvent.key.toLowerCase();
-          if (key === "r") navigate("/app/recall");
-          if (key === "l") navigate("/app/library");
-          if (key === "s") navigate("/app/sessions");
-          window.removeEventListener("keydown", handleSecondKey);
-        };
+      const key = event.key.toLowerCase();
+      if (waitingForNavigationKey.current) {
+        waitingForNavigationKey.current = false;
+        if (key === "r") navigate("/app/recall");
+        if (key === "l") navigate("/app/library");
+        if (key === "s") navigate("/app/sessions");
+        return;
+      }
 
-        window.addEventListener("keydown", handleSecondKey, { once: true });
+      if (key === "g") {
+        waitingForNavigationKey.current = true;
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => {
+      waitingForNavigationKey.current = false;
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [navigate]);
 
   const healthLabel = useMemo(() => {
     if (stats.repoCount === 0) return "Setup required";
-    if (stats.embeddingCount === 0) return "Indexing incomplete";
+    if (!stats.embeddingReady) return "Indexing incomplete";
     return "Ready";
-  }, [stats.embeddingCount, stats.repoCount]);
+  }, [stats.embeddingReady, stats.repoCount]);
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-foreground">
@@ -139,7 +176,9 @@ export function AppShell() {
             </div>
             <div className="min-w-0">
               <p className="font-display text-base font-semibold">GitStarRecall</p>
-              <p className="truncate text-xs text-muted-foreground">Local memory for GitHub stars</p>
+              <p className="truncate text-xs text-muted-foreground">
+                Local memory for GitHub stars
+              </p>
             </div>
           </Link>
 
@@ -152,7 +191,9 @@ export function AppShell() {
               <Command className="h-4 w-4 shrink-0" />
               <span className="truncate">Command palette</span>
             </span>
-            <span className="shrink-0 text-[11px] text-muted-foreground">{openPaletteShortcut}</span>
+            <span className="shrink-0 text-[11px] text-muted-foreground">
+              {openPaletteShortcut}
+            </span>
           </Button>
 
           <nav className="mt-6 space-y-1">
@@ -163,7 +204,9 @@ export function AppShell() {
                   key={item.to}
                   to={item.to}
                   end={item.to === "/app"}
-                  title={item.to === "/app/settings" ? `Settings (${openSettingsShortcut})` : undefined}
+                  title={
+                    item.to === "/app/settings" ? `Settings (${openSettingsShortcut})` : undefined
+                  }
                   className={({ isActive }) =>
                     cn(
                       "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-200",
@@ -198,16 +241,28 @@ export function AppShell() {
                   <div className="mt-6 space-y-4 text-sm">
                     <div className="grid grid-cols-3 gap-3">
                       <div className="rounded-md border border-border bg-muted/50 p-4">
-                        <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Repos</p>
-                        <p className="mt-2 text-lg font-semibold text-foreground">{stats.repoCount}</p>
+                        <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                          Repos
+                        </p>
+                        <p className="mt-2 text-lg font-semibold text-foreground">
+                          {stats.repoCount}
+                        </p>
                       </div>
                       <div className="rounded-md border border-border bg-muted/50 p-4">
-                        <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Embeddings</p>
-                        <p className="mt-2 text-lg font-semibold text-foreground">{stats.embeddingCount}</p>
+                        <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                          Embeddings
+                        </p>
+                        <p className="mt-2 text-lg font-semibold text-foreground">
+                          {stats.embeddingCount}
+                        </p>
                       </div>
                       <div className="rounded-md border border-border bg-muted/50 p-4">
-                        <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Sessions</p>
-                        <p className="mt-2 text-lg font-semibold text-foreground">{stats.sessionCount}</p>
+                        <p className="text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                          Sessions
+                        </p>
+                        <p className="mt-2 text-lg font-semibold text-foreground">
+                          {stats.sessionCount}
+                        </p>
                       </div>
                     </div>
                     <div className="rounded-md border border-border bg-muted/50 p-4 text-muted-foreground">
@@ -215,7 +270,7 @@ export function AppShell() {
                       <p className="mt-2">
                         {stats.repoCount === 0
                           ? "Indexing has not started yet."
-                          : stats.embeddingCount === 0
+                          : !stats.embeddingReady
                             ? "Stars are present, but embeddings still need to be generated."
                             : "The local index is ready for Recall, Library, and Sessions."}
                       </p>
@@ -224,7 +279,11 @@ export function AppShell() {
                       <Button className="rounded-md" onClick={() => navigate("/app/setup")}>
                         Open setup
                       </Button>
-                      <Button variant="outline" className="rounded-md" onClick={() => navigate("/app/settings")}>
+                      <Button
+                        variant="outline"
+                        className="rounded-md"
+                        onClick={() => navigate("/app/settings")}
+                      >
                         Open settings
                       </Button>
                     </div>
@@ -261,33 +320,49 @@ export function AppShell() {
             <div className="flex items-center justify-between gap-4 px-4 py-4 sm:px-6">
               <Link to="/app" className="min-w-0 transition-opacity hover:opacity-80">
                 <p className="font-display text-xl font-semibold">{getTitle(location.pathname)}</p>
-                <p className="truncate text-sm text-muted-foreground">{getDescription(location.pathname)}</p>
+                <p className="truncate text-sm text-muted-foreground">
+                  {getDescription(location.pathname)}
+                </p>
               </Link>
               <div className="flex items-center gap-2">
                 <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
                   <SheetTrigger asChild>
-                    <Button variant="outline" size="icon" className="rounded-md lg:hidden" aria-label="Open navigation">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="rounded-md lg:hidden"
+                      aria-label="Open navigation"
+                    >
                       <Menu className="h-4 w-4" />
                     </Button>
                   </SheetTrigger>
-                  <SheetContent side="left" className="w-[88vw] border-border bg-[var(--app-panel)] sm:max-w-sm">
+                  <SheetContent
+                    side="left"
+                    className="w-[88vw] border-border bg-[var(--app-panel)] sm:max-w-sm"
+                  >
                     <SheetHeader>
                       <SheetTitle className="font-display text-xl">Workspace</SheetTitle>
                     </SheetHeader>
                     <div className="mt-6 space-y-5">
                       <div className="rounded-md border border-border bg-muted/50 p-4">
-                        <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Status</p>
+                        <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                          Status
+                        </p>
                         <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
                           <div>
                             <p className="font-display text-lg font-semibold">{stats.repoCount}</p>
                             <p className="text-xs text-muted-foreground">Repos</p>
                           </div>
                           <div>
-                            <p className="font-display text-lg font-semibold">{stats.embeddingCount}</p>
+                            <p className="font-display text-lg font-semibold">
+                              {stats.embeddingCount}
+                            </p>
                             <p className="text-xs text-muted-foreground">Embeds</p>
                           </div>
                           <div>
-                            <p className="font-display text-lg font-semibold">{stats.sessionCount}</p>
+                            <p className="font-display text-lg font-semibold">
+                              {stats.sessionCount}
+                            </p>
                             <p className="text-xs text-muted-foreground">Sessions</p>
                           </div>
                         </div>
@@ -316,12 +391,23 @@ export function AppShell() {
                         })}
                       </nav>
                       <div className="grid gap-2">
-                        <Button variant="outline" className="justify-start rounded-md" onClick={() => { setPaletteOpen(true); setMobileNavOpen(false); }}>
+                        <Button
+                          variant="outline"
+                          className="justify-start rounded-md"
+                          onClick={() => {
+                            setPaletteOpen(true);
+                            setMobileNavOpen(false);
+                          }}
+                        >
                           <Command className="mr-2 h-4 w-4" />
                           Command palette
                         </Button>
                         <ThemeToggleButton showLabel longLabel className="w-full justify-start" />
-                        <Button variant="ghost" className="justify-start rounded-md" onClick={logout}>
+                        <Button
+                          variant="ghost"
+                          className="justify-start rounded-md"
+                          onClick={logout}
+                        >
                           <LogOut className="mr-2 h-4 w-4" />
                           Logout
                         </Button>
@@ -329,7 +415,10 @@ export function AppShell() {
                     </div>
                   </SheetContent>
                 </Sheet>
-                <Badge variant="outline" className="hidden rounded-md px-3 py-1 text-xs md:inline-flex">
+                <Badge
+                  variant="outline"
+                  className="hidden rounded-md px-3 py-1 text-xs md:inline-flex"
+                >
                   <Workflow className="mr-1.5 h-3.5 w-3.5" />
                   Local-first workspace
                 </Badge>

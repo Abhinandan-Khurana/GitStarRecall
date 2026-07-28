@@ -92,7 +92,6 @@ CREATE TABLE IF NOT EXISTS session_context_items (
 
 CREATE INDEX IF NOT EXISTS idx_chunks_repo_id ON chunks(repo_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_created_at ON chunks(created_at);
-CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id);
 CREATE INDEX IF NOT EXISTS idx_repo_tag_assignments_repo_id ON repo_tag_assignments(repo_id);
 CREATE INDEX IF NOT EXISTS idx_session_context_items_session_id ON session_context_items(session_id);
 `;

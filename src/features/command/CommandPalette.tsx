@@ -10,10 +10,14 @@ import {
   CommandSeparator,
   CommandShortcut,
 } from "@/components/ui/command";
+import { DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { getLocalDatabase } from "@/db/client";
 import type { ChatSessionRecord, RepoRecord } from "@/db/types";
 import { useTheme } from "@/features/theme/useTheme";
-import { detectClientShortcutPlatform, formatPrimaryModifierShortcut } from "@/lib/platformShortcuts";
+import {
+  detectClientShortcutPlatform,
+  formatPrimaryModifierShortcut,
+} from "@/lib/platformShortcuts";
 
 type CommandPaletteProps = {
   open: boolean;
@@ -48,8 +52,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     let cancelled = false;
     const run = async () => {
       const database = await getLocalDatabase();
-      const nextRepos = database.listRepos().slice(0, 12);
-      const nextSessions = database.listChatSessions().slice(0, 12);
+      const nextRepos = database.listRepos();
+      const nextSessions = database.listChatSessions();
       if (!cancelled) {
         setRepos(nextRepos);
         setSessions(nextSessions);
@@ -105,7 +109,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   );
 
   const trimmedQuery = query.trim();
-  const mode = trimmedQuery[0] ?? "";
+  const firstCharacter = trimmedQuery[0] ?? "";
+  const mode =
+    firstCharacter === "/" || firstCharacter === "@" || firstCharacter === "#"
+      ? firstCharacter
+      : "";
   const searchBody = mode ? trimmedQuery.slice(1).trim().toLowerCase() : trimmedQuery.toLowerCase();
 
   const filteredActions = actions.filter((action) => {
@@ -115,13 +123,15 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     return action.label.toLowerCase().includes(searchBody);
   });
 
-  const filteredSessions = sessions.filter((session) =>
-    formatSessionQuery(session).toLowerCase().includes(searchBody),
-  );
-  const filteredRepos = repos.filter((repo) => {
-    const text = `${repo.fullName} ${repo.language ?? ""} ${repo.topics.join(" ")}`.toLowerCase();
-    return text.includes(searchBody);
-  });
+  const filteredSessions = sessions
+    .filter((session) => formatSessionQuery(session).toLowerCase().includes(searchBody))
+    .slice(0, 12);
+  const filteredRepos = repos
+    .filter((repo) => {
+      const text = `${repo.fullName} ${repo.language ?? ""} ${repo.topics.join(" ")}`.toLowerCase();
+      return text.includes(searchBody);
+    })
+    .slice(0, 12);
 
   const handleSelect = (run: () => void) => {
     onOpenChange(false);
@@ -131,6 +141,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
+      <DialogTitle className="sr-only">Command palette</DialogTitle>
+      <DialogDescription className="sr-only">
+        Search navigation, recall commands, sessions, and indexed repositories.
+      </DialogDescription>
       <CommandInput
         placeholder="Search routes, sessions, and repos..."
         value={query}
@@ -141,7 +155,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         {mode === "/" && searchBody ? (
           <>
             <CommandGroup heading="Recall">
-              <CommandItem onSelect={() => handleSelect(() => navigate(`/app/recall?q=${encodeURIComponent(searchBody)}`))}>
+              <CommandItem
+                value={`${query} recall-query`}
+                onSelect={() =>
+                  handleSelect(() =>
+                    navigate(`/app/recall?query=${encodeURIComponent(searchBody)}`),
+                  )
+                }
+              >
                 <span>Open Recall with "{searchBody}"</span>
               </CommandItem>
             </CommandGroup>
@@ -151,7 +172,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         {mode !== "@" && mode !== "#" ? (
           <CommandGroup heading="Navigation">
             {filteredActions.map((action) => (
-              <CommandItem key={action.id} onSelect={() => handleSelect(action.run)}>
+              <CommandItem
+                key={action.id}
+                value={`${query} ${action.id}`}
+                onSelect={() => handleSelect(action.run)}
+              >
                 <span className="min-w-0 truncate">{action.label}</span>
                 {action.shortcut ? <CommandShortcut>{action.shortcut}</CommandShortcut> : null}
               </CommandItem>
@@ -163,12 +188,19 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             <CommandSeparator />
             <CommandGroup heading="Sessions">
               {filteredSessions.length === 0 ? (
-                <CommandItem disabled>No sessions yet</CommandItem>
+                <CommandItem value={`${query} no-sessions`} disabled>
+                  No sessions yet
+                </CommandItem>
               ) : (
                 filteredSessions.map((session) => (
                   <CommandItem
                     key={session.id}
-                    onSelect={() => handleSelect(() => navigate(`/app/sessions?session=${encodeURIComponent(session.id)}`))}
+                    value={`${query} ${session.id}`}
+                    onSelect={() =>
+                      handleSelect(() =>
+                        navigate(`/app/sessions?session=${encodeURIComponent(session.id)}`),
+                      )
+                    }
                   >
                     <span className="truncate">{formatSessionQuery(session)}</span>
                   </CommandItem>
@@ -182,13 +214,18 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             <CommandSeparator />
             <CommandGroup heading="Repos">
               {filteredRepos.length === 0 ? (
-                <CommandItem disabled>No repos indexed yet</CommandItem>
+                <CommandItem value={`${query} no-repos`} disabled>
+                  No repos indexed yet
+                </CommandItem>
               ) : (
                 filteredRepos.map((repo) => (
                   <CommandItem
                     key={repo.id}
+                    value={`${query} ${repo.id}`}
                     onSelect={() =>
-                      handleSelect(() => navigate(`/app/library?repo=${encodeURIComponent(String(repo.id))}`))
+                      handleSelect(() =>
+                        navigate(`/app/library?repo=${encodeURIComponent(String(repo.id))}`),
+                      )
                     }
                   >
                     <span className="truncate">{repo.fullName}</span>

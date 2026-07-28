@@ -1,4 +1,4 @@
-import { getProviderById } from "./providers";
+import { getProviderById, unloadWebLLM } from "./providers";
 import type { LLMProviderId, LLMStreamRequest } from "./types";
 import { getWebLLMEngineManager } from "./webllm/engine";
 
@@ -94,6 +94,15 @@ describe("provider transports", () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.mocked(getWebLLMEngineManager).mockReset();
+  });
+
+  test("WebLLM unload uses the existing provider engine manager", async () => {
+    const unload = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(getWebLLMEngineManager).mockReturnValue({ unload } as never);
+
+    await unloadWebLLM();
+
+    expect(unload).toHaveBeenCalledOnce();
   });
 
   test("LM Studio SSE emits a valid terminal record across every byte split", async () => {

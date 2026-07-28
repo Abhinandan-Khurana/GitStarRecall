@@ -3,6 +3,8 @@ import type { ChatMessageRecord, ChatSessionRecord } from "../db/types";
 import {
   buildHistoryRestoreResult,
   createRestoreRequestTracker,
+  invalidateHistoryRestore,
+  loadHistoryBackupAfterPrimaryFailure,
   reconcileActiveSessionId,
   shouldRestoreOnAuthTransition,
 } from "./historyRestore";
@@ -74,5 +76,68 @@ describe("history restore flow", () => {
 
     expect(tracker.isCurrent(first)).toBe(false);
     expect(tracker.isCurrent(second)).toBe(true);
+  });
+
+  it("invalidates a delayed account restore when its scope becomes unavailable", async () => {
+    const tracker = createRestoreRequestTracker();
+    const accountARequest = tracker.nextRequestId();
+    let finishAccountARestore: (() => void) | undefined;
+    const accountARestore = new Promise<void>((resolve) => {
+      finishAccountARestore = resolve;
+    }).then(() => tracker.isCurrent(accountARequest));
+
+    invalidateHistoryRestore(tracker);
+    finishAccountARestore?.();
+
+    await expect(accountARestore).resolves.toBe(false);
+  });
+
+  it("contains a second backup-load rejection after the primary restore fails", async () => {
+    const load = vi.fn().mockRejectedValue(new Error("backup unavailable"));
+    const isCurrent = vi.fn(() => true);
+    const onError = vi.fn();
+    const onUnavailable = vi.fn();
+
+    await expect(load()).rejects.toThrow("backup unavailable");
+    await expect(
+      loadHistoryBackupAfterPrimaryFailure({ load, isCurrent, onError, onUnavailable }),
+    ).resolves.toBeNull();
+
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "backup unavailable" }),
+    );
+    expect(onUnavailable).toHaveBeenCalledOnce();
+  });
+
+  it("silently discards a fallback that resolves after logout invalidates its scope", async () => {
+    const tracker = createRestoreRequestTracker();
+    const accountARequest = tracker.nextRequestId();
+    let currentScope: string | null = "chat:github:42";
+    let resolveFallback: ((value: { sessions: never[] }) => void) | undefined;
+    const load = vi.fn(
+      () =>
+        new Promise<{ sessions: never[] }>((resolve) => {
+          resolveFallback = resolve;
+        }),
+    );
+    const isCurrent = () => tracker.isCurrent(accountARequest) && currentScope === "chat:github:42";
+    const onError = vi.fn();
+    const onUnavailable = vi.fn();
+
+    const fallback = loadHistoryBackupAfterPrimaryFailure({
+      load,
+      isCurrent,
+      onError,
+      onUnavailable,
+    });
+    currentScope = null;
+    invalidateHistoryRestore(tracker);
+    resolveFallback?.({ sessions: [] });
+
+    await expect(fallback).resolves.toBeNull();
+    expect(onError).not.toHaveBeenCalled();
+    expect(onUnavailable).not.toHaveBeenCalled();
   });
 });

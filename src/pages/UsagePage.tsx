@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
-import { buildChatScopeKey, buildEmbeddingPreferenceScopeKey } from "../auth/authScope";
+import {
+  buildChatBackupScope,
+  buildChatScopeKey,
+  buildEmbeddingPreferenceScopeKey,
+} from "../auth/authScope";
 import { createGitHubApiClient } from "../github/client";
 import type { RepoReadmeRecord } from "../github/types";
 import { getLocalDatabase } from "../db/client";
@@ -22,6 +26,12 @@ import {
 } from "../embeddings/ollamaClient";
 import { fetchOllamaModelCatalog, type OllamaModelCatalog } from "../ollama/modelCatalog";
 import { float32ToBlob } from "../embeddings/vector";
+import {
+  EMBEDDING_DIMENSION_META_KEY,
+  EMBEDDING_MODEL_META_KEY,
+  EMBEDDING_REINDEX_REQUIRED_META_KEY,
+  type EmbeddingReadinessStatus,
+} from "../db/embeddingIntegrity";
 import {
   BROWSER_EMBEDDING_FALLBACK_MODEL,
   DEFAULT_BROWSER_EMBEDDING_MODEL,
@@ -50,9 +60,14 @@ import {
   toPreviousReadmeStateByRepoId,
 } from "./readmeSyncOutcome";
 import { sortChatMessages } from "../chat/order";
-import { captureLocalError, captureLocalWarn } from "../observability/localLog";
+import {
+  captureLocalError,
+  captureLocalWarn,
+  clearLocalLogsStrict,
+} from "../observability/localLog";
 import { SessionChat } from "../components/SessionChat";
 import { WebLLMDownloadDialog } from "../components/WebLLMDownloadDialog";
+import { DeleteLocalDataDialog } from "../components/DeleteLocalDataDialog";
 import { SearchBar } from "../components/SearchBar";
 import { SyncStatusBar } from "../components/SyncStatusBar";
 import { OllamaConfigPanel } from "../components/OllamaConfigPanel";
@@ -67,6 +82,8 @@ import { EmptyState } from "../components/EmptyState";
 import {
   buildHistoryRestoreResult,
   createRestoreRequestTracker,
+  invalidateHistoryRestore,
+  loadHistoryBackupAfterPrimaryFailure,
   shouldRestoreOnAuthTransition,
   type HistoryLoadState,
   type SearchSession,
@@ -76,6 +93,7 @@ import {
   getProviderById,
   getProviderDefinitions,
   isWebLLMEnabled,
+  unloadWebLLM,
 } from "../llm/providers";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
 import {
@@ -88,6 +106,18 @@ import {
 } from "../llm/generationState";
 import { executeUsageGeneration } from "../llm/usageGenerationAdapter";
 import { useProviderSettingsPersistence } from "../hooks/useProviderSettingsPersistence";
+import { clearSettingsStrict } from "../lib/settings";
+import {
+  clearModelCaches,
+  clearScopedPreferences,
+} from "../localData/clearLocalDataPrimitives";
+import type { DeleteLocalDataFailure } from "../localData/deleteLocalData";
+import {
+  applyUsagePageDeletionResult,
+  deleteUsagePageLocalData,
+  getUsagePageDeletionBlockReason,
+  settleUsagePageGenerations,
+} from "./usagePageDeletion";
 import {
   getWebLLMSelectableModels,
   WEBLLM_FALLBACK_MODEL_ID,
@@ -454,7 +484,6 @@ function scoreRepoForEmbeddingPriority(repo: RepoRecord): number {
 const OLLAMA_EMBEDDING_CONSENT_KEY_PREFIX = "gitstarrecall.embedding.ollama.consent";
 const OLLAMA_EMBEDDING_PREF_KEY_PREFIX = "gitstarrecall.embedding.ollama.pref";
 const EMBEDDING_BACKEND_META_KEY = "embedding_active_backend";
-const EMBEDDING_MODEL_META_KEY = "embedding_active_model";
 const BROWSER_EMBEDDING_MODEL = DEFAULT_BROWSER_EMBEDDING_MODEL;
 const BROWSER_EMBEDDING_MODEL_CANDIDATES_DEFAULT = [
   DEFAULT_BROWSER_EMBEDDING_MODEL,
@@ -646,22 +675,6 @@ function getEmbeddingWorkerBatchSize(): number {
   return 8;
 }
 
-async function clearWebLLMRuntimeCaches(): Promise<void> {
-  if (!("caches" in globalThis)) {
-    return;
-  }
-
-  const keys = await caches.keys();
-  await Promise.all(
-    keys
-      .filter((key) => {
-        const lower = key.toLowerCase();
-        return lower.includes("webllm") || lower.includes("mlc") || lower.includes("model");
-      })
-      .map((key) => caches.delete(key)),
-  );
-}
-
 export type UsagePageView = "legacy" | "recall" | "settings" | "setup";
 
 type UsagePageProps = {
@@ -686,6 +699,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const [sessionsExpanded, setSessionsExpanded] = useState(true);
   const [repoInventoryCount, setRepoInventoryCount] = useState(0);
   const [storedEmbeddingCount, setStoredEmbeddingCount] = useState(0);
+  const [embeddingReadiness, setEmbeddingReadiness] = useState<EmbeddingReadinessStatus>("empty");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
@@ -733,7 +747,16 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const [llmError, setLlmError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const generationControllerRef = useRef<AbortController | null>(null);
+  const activeGenerationPromisesRef = useRef(new Set<Promise<unknown>>());
   const pendingWebllmGenerationRef = useRef<PendingGeneration | null>(null);
+  // Synchronous so a generation started in the same tick as the deletion click
+  // cannot slip past the async `deleteLocalDataPending` state update.
+  const deletionInProgressRef = useRef(false);
+  const [deleteLocalDataOpen, setDeleteLocalDataOpen] = useState(false);
+  const [deleteLocalDataPending, setDeleteLocalDataPending] = useState(false);
+  const [deleteLocalDataFailures, setDeleteLocalDataFailures] = useState<
+    DeleteLocalDataFailure[]
+  >([]);
   const ollamaCatalogRequestIdRef = useRef(0);
   const ollamaEmbeddingModelManuallySetRef = useRef(false);
   const ollamaChatModelManuallySetRef = useRef(false);
@@ -742,14 +765,21 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   const browserEmbeddingRecommendationPromiseRef = useRef<Promise<BrowserEmbeddingRecommendation> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const restoreRequestTrackerRef = useRef(createRestoreRequestTracker());
+  const currentHistoryScopeRef = useRef<string | null>(null);
+  const suppressNextHistoryRestoreRef = useRef(false);
   const webllmPreviousRecommendationRef = useRef<WebLLMRecommendation | null>(null);
   const previousIsAuthenticatedRef = useRef(isAuthenticated);
   const chatScopeKey = useMemo(() => buildChatScopeKey(authScopeIdentity), [authScopeIdentity]);
+  const chatBackupScope = useMemo(() => buildChatBackupScope(chatScopeKey), [chatScopeKey]);
   const embeddingPreferenceScopeKey = useMemo(
     () => buildEmbeddingPreferenceScopeKey(authScopeIdentity),
     [authScopeIdentity],
   );
   const previousChatScopeKeyRef = useRef<string | null>(chatScopeKey);
+
+  useEffect(() => {
+    currentHistoryScopeRef.current = chatScopeKey;
+  }, [chatScopeKey]);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
@@ -891,7 +921,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   }, [ensureBrowserEmbeddingRecommendation]);
 
   const activeResults = useMemo(() => activeSession?.results ?? [], [activeSession]);
-  const workspaceReady = repoInventoryCount > 0 && storedEmbeddingCount > 0;
+  const workspaceReady = repoInventoryCount > 0 && embeddingReadiness === "ready";
   const activeSessionMessages = useMemo(() => {
     if (!activeSessionId) {
       return [];
@@ -910,6 +940,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     if (!isAuthenticated) {
       setRepoInventoryCount(0);
       setStoredEmbeddingCount(0);
+      setEmbeddingReadiness("empty");
       return;
     }
 
@@ -921,6 +952,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
 
       setRepoInventoryCount(database.getRepoCount());
       setStoredEmbeddingCount(database.getEmbeddingCount());
+      setEmbeddingReadiness(database.getEmbeddingHealth().status);
     });
 
     return () => {
@@ -1073,7 +1105,8 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   }, [activeResults, activeSessionId]);
 
   const restoreHistory = useCallback(async () => {
-    if (!chatScopeKey) {
+    if (!chatScopeKey || !chatBackupScope) {
+      invalidateHistoryRestore(restoreRequestTrackerRef.current);
       setSessions([]);
       setSelectedContextChunkIdsBySessionId({});
       setSessionMessagesById({});
@@ -1086,6 +1119,9 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
     }
 
     const requestId = restoreRequestTrackerRef.current.nextRequestId();
+    const isCurrentRestore = () =>
+      restoreRequestTrackerRef.current.isCurrent(requestId) &&
+      currentHistoryScopeRef.current === chatScopeKey;
     setHistoryLoadState("loading");
 
     const applyRestore = async (params: {
@@ -1093,7 +1129,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       source: "sqlite" | "indexeddb" | "local-storage";
       database?: Awaited<ReturnType<typeof getLocalDatabase>>;
     }) => {
-      if (!restoreRequestTrackerRef.current.isCurrent(requestId)) {
+      if (!isCurrentRestore()) {
         return;
       }
 
@@ -1151,7 +1187,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       let source: "sqlite" | "indexeddb" | "local-storage" = "sqlite";
 
       if (restoreResult.sessions.length === 0) {
-        const backupSnapshot = await loadChatBackup();
+        const backupSnapshot = await loadChatBackup(chatBackupScope);
         const scopedBackupSessions = backupSnapshot.sessions.filter((session) =>
           isSessionInScope(session.id, chatScopeKey),
         );
@@ -1190,20 +1226,40 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
         }));
-        void backupChatSnapshot({
+        void backupChatSnapshot(chatBackupScope, {
           sessions: sessionsForBackup,
           messagesBySessionId: restoreResult.messagesBySessionId,
+        }).catch((error) => {
+          if (isCurrentRestore()) {
+            captureLocalError(authScopeIdentity, "history_backup_failed", error);
+          }
         });
       }
 
       await applyRestore({ restoreResult, source, database });
     } catch (err) {
-      captureLocalError("history_restore_failed", err);
-      if (!restoreRequestTrackerRef.current.isCurrent(requestId)) {
+      if (!isCurrentRestore()) {
         return;
       }
+      captureLocalError(authScopeIdentity, "history_restore_failed", err);
 
-      const backupSnapshot = await loadChatBackup();
+      const backupSnapshot = await loadHistoryBackupAfterPrimaryFailure({
+        load: () => loadChatBackup(chatBackupScope),
+        isCurrent: isCurrentRestore,
+        onError: (backupError) => {
+          if (isCurrentRestore()) {
+            captureLocalError(authScopeIdentity, "history_backup_restore_failed", backupError);
+          }
+        },
+        onUnavailable: () => {
+          if (isCurrentRestore()) {
+            setHistoryDataSource(null);
+            setHistoryLastRestoredAt(null);
+            setHistoryLoadState("error");
+          }
+        },
+      });
+      if (!backupSnapshot || !isCurrentRestore()) return;
       const scopedBackupSessions = backupSnapshot.sessions.filter((session) =>
         isSessionInScope(session.id, chatScopeKey),
       );
@@ -1220,13 +1276,19 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         return;
       }
 
-      setHistoryDataSource(null);
-      setHistoryLastRestoredAt(null);
-      setHistoryLoadState("error");
+      if (isCurrentRestore()) {
+        setHistoryDataSource(null);
+        setHistoryLastRestoredAt(null);
+        setHistoryLoadState("error");
+      }
     }
-  }, [activeSessionId, chatScopeKey]);
+  }, [activeSessionId, authScopeIdentity, chatBackupScope, chatScopeKey]);
 
   useEffect(() => {
+    if (suppressNextHistoryRestoreRef.current) {
+      suppressNextHistoryRestoreRef.current = false;
+      return;
+    }
     void restoreHistory();
   }, [restoreHistory]);
 
@@ -1542,7 +1604,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setError(null);
       await beginOAuthLogin();
     } catch (err) {
-      captureLocalError("oauth_login_start_failed", err);
+      captureLocalError(authScopeIdentity, "oauth_login_start_failed", err);
       setError(err instanceof Error ? err.message : "Unable to start OAuth");
     }
   };
@@ -1962,7 +2024,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       const database = await getLocalDatabase();
       await syncStarsToLocal(database, "manual");
     } catch (err) {
-      captureLocalError("fetch_stars_failed", err);
+      captureLocalError(authScopeIdentity, "fetch_stars_failed", err);
       setIndexingStatus((previous) =>
         previous
           ? {
@@ -2011,7 +2073,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setStarsSummary("Rebuilding embeddings with current settings…");
       await generateEmbeddings(database);
     } catch (err) {
-      captureLocalError("rebuild_embeddings_failed", err);
+      captureLocalError(authScopeIdentity, "rebuild_embeddings_failed", err);
       setError(err instanceof Error ? err.message : "Failed to rebuild embeddings");
     } finally {
       setIsRebuildingEmbeddings(false);
@@ -2114,6 +2176,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           );
         } catch (ollamaError) {
           captureLocalWarn(
+            authScopeIdentity,
             "ollama_embedding_unavailable",
             ollamaError instanceof Error ? ollamaError.message : String(ollamaError),
           );
@@ -2153,6 +2216,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         value: activeEmbeddingModel,
         updatedAt: Date.now(),
       });
+      await database.clearIndexMetaValue(EMBEDDING_DIMENSION_META_KEY);
 
       const repoCount = database.getRepoCount();
       const largeLibraryMode = largeLibraryModeEnabled && repoCount > largeLibraryThreshold;
@@ -2207,6 +2271,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           queueCursor = foundIndex;
         } else if (foundIndex > 0) {
           captureLocalWarn(
+            authScopeIdentity,
             "embedding_resume_cursor_reset",
             `resetting cursor to pending head because ${foundIndex} pending chunks exist before cursor`,
           );
@@ -2426,6 +2491,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
               vectors = ollamaVectors;
             } catch (ollamaError) {
               captureLocalWarn(
+                authScopeIdentity,
                 "ollama_embedding_batch_failed",
                 ollamaError instanceof Error ? ollamaError.message : String(ollamaError),
               );
@@ -2455,6 +2521,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                 value: activeEmbeddingModel,
                 updatedAt: Date.now(),
               });
+              await database.clearIndexMetaValue(EMBEDDING_DIMENSION_META_KEY);
             }
             vectors = batchResults.map((item) => item.embedding);
           }
@@ -2474,7 +2541,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
               try {
                 vector = await embedder.embed(formatForEmbedding(item.text, activeRetrievalProfile.documentPrefix));
                 vectorModel = embedder.getRuntimeInfo().selectedModel ?? activeEmbeddingModel;
-                captureLocalWarn("embedding_batch_item_recovered", `chunk_id=${item.chunkId}`);
+                captureLocalWarn(authScopeIdentity, "embedding_batch_item_recovered", `chunk_id=${item.chunkId}`);
               } catch (singleErr) {
                 throw new Error(
                   `embedding batch item failed for chunk ${item.chunkId}; single_retry=${
@@ -2524,6 +2591,24 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
       await flushEmbeddingBuffer(true);
+
+      const completedEmbeddingDimension = database.getEmbeddingHealth().dimension;
+      if (completedEmbeddingDimension !== null) {
+        await database.upsertIndexMeta({
+          key: EMBEDDING_DIMENSION_META_KEY,
+          value: String(completedEmbeddingDimension),
+          updatedAt: Date.now(),
+        });
+      }
+      if (!incrementalMode && database.getIndexMetaValue(EMBEDDING_REINDEX_REQUIRED_META_KEY)) {
+        const completedHealth = database.getEmbeddingHealth();
+        if (
+          completedHealth.issues.length === 1 &&
+          completedHealth.issues[0] === "reindex_required"
+        ) {
+          await database.clearIndexMetaValue(EMBEDDING_REINDEX_REQUIRED_META_KEY);
+        }
+      }
 
       const finalRepoCount = database.getRepoCount();
       const finalChunkCount = database.getChunkCount();
@@ -2605,6 +2690,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setEmbeddingRunMetrics(finalMetrics);
       if (!incrementalMode) {
         captureLocalWarn(
+          authScopeIdentity,
           "embedding_instrumentation_run",
           JSON.stringify({
             backendIdentity: finalMetrics.backendIdentity,
@@ -2632,7 +2718,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         const msg = err instanceof Error ? err.message : String(err);
         if (import.meta.env.DEV) console.error("Embedding generation failed", err);
         else console.error("Embedding generation failed:", msg);
-        captureLocalError("embedding_generation_failed", err);
+        captureLocalError(authScopeIdentity, "embedding_generation_failed", err);
         setError(formatEmbeddingError(err));
       }
     } finally {
@@ -2653,6 +2739,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           value: BROWSER_EMBEDDING_MODEL,
           updatedAt: Date.now(),
         });
+        await database.clearIndexMetaValue(EMBEDDING_DIMENSION_META_KEY);
         await database.upsertIndexMeta({
           key: "embedding_job_cursor",
           value: "",
@@ -2661,32 +2748,116 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         setFetchPhase("Ollama unavailable. Restarting embedding generation with browser backend…");
         await generateEmbeddings(database, { forceBrowser: true });
       } catch (restartError) {
-        captureLocalError("ollama_restart_with_browser_failed", restartError);
+        captureLocalError(authScopeIdentity, "ollama_restart_with_browser_failed", restartError);
         setError(formatEmbeddingError(restartError));
       }
     }
   };
 
-  const handleClearLocalData = async () => {
+  const deleteLocalDataBlockReason = getUsagePageDeletionBlockReason({
+    hasAuthenticatedScope: Boolean(authScopeIdentity?.trim()),
+    fetchingStars,
+    rebuildingEmbeddings: isRebuildingEmbeddings,
+    searching: isSearching,
+    restoringHistory: historyLoadState === "loading",
+    downloadingWebLLM: webllmRuntimeState === "downloading",
+  });
+
+  const openDeleteLocalDataDialog = () => {
+    setDeleteLocalDataFailures([]);
+    setDeleteLocalDataOpen(true);
+  };
+
+  const clearRepositoryUiState = () => {
+    // Invalidate a restore that settled at the deletion boundary. Clearing a
+    // non-null active session changes restoreHistory's identity, so suppress
+    // that single dependency-driven restore instead of repopulating the DB.
+    restoreRequestTrackerRef.current.nextRequestId();
+    if (activeSessionId !== null) {
+      suppressNextHistoryRestoreRef.current = true;
+    }
+    setStarsSummary("Local repository data cleared.");
+    setIndexingStatus(null);
+    setEmbeddingRunMetrics(null);
+    setRepoInventoryCount(0);
+    setStoredEmbeddingCount(0);
+    setEmbeddingReadiness("empty");
+    setSessions([]);
+    setSelectedContextChunkIdsBySessionId({});
+    setSessionMessagesById({});
+    setActiveSessionId(null);
+    setSessionMode("new");
+    setHistoryLoadState("empty");
+    setHistoryLastRestoredAt(null);
+    setHistoryDataSource(null);
+    setSearchQuery("");
+    setSearchProgress(null);
+    setLlmPrompt("");
+    setLlmAnswer("");
+    setLlmError(null);
+  };
+
+  const handleConfirmDeleteLocalData = async () => {
+    const scopeIdentity = authScopeIdentity?.trim() ?? "";
+    const liveBlockReason = getUsagePageDeletionBlockReason({
+      hasAuthenticatedScope: Boolean(scopeIdentity),
+      fetchingStars,
+      rebuildingEmbeddings: isRebuildingEmbeddings,
+      searching: isSearching,
+      restoringHistory: historyLoadState === "loading",
+      downloadingWebLLM: webllmRuntimeState === "downloading",
+    });
+    if (liveBlockReason || deleteLocalDataPending || deletionInProgressRef.current) {
+      return;
+    }
+
+    deletionInProgressRef.current = true;
+    setDeleteLocalDataPending(true);
+    setDeleteLocalDataFailures([]);
+
     try {
-      resetSearchEmbedder();
-      const database = await getLocalDatabase();
-      await database.clearAllData();
-      await clearWebLLMRuntimeCaches();
-      setStarsSummary("Local database cleared.");
-      setIndexingStatus(null);
-      setSessions([]);
-      setSessionMessagesById({});
-      setActiveSessionId(null);
-      setSessionMode("new");
-      setHistoryLoadState("empty");
-      setHistoryLastRestoredAt(null);
-      setHistoryDataSource(null);
-      setDbStorageMode(database.storageMode);
-      setError(null);
-    } catch (err) {
-      captureLocalError("clear_local_data_failed", err);
-      setError(err instanceof Error ? err.message : "Failed to clear local database");
+      const result = await deleteUsagePageLocalData({
+        abortGenerations: () => {
+          pendingWebllmGenerationRef.current = cancelPendingGeneration();
+          generationControllerRef.current?.abort();
+          setWebllmDialogOpen(false);
+        },
+        awaitGenerations: async () => {
+          await settleUsagePageGenerations(activeGenerationPromisesRef.current);
+        },
+        clearRepositoryData: async () => {
+          const database = await getLocalDatabase();
+          await database.clearAllData();
+        },
+        unloadWebLLM: async () => {
+          resetSearchEmbedder();
+          await unloadWebLLM();
+          setWebllmRuntimeState("idle");
+          setWebllmDownloadProgress(0);
+          setWebllmProgressText(null);
+        },
+        clearModelCaches,
+        clearProviderSettings: () => clearSettingsStrict(scopeIdentity),
+        clearPreferences: async () => clearScopedPreferences(scopeIdentity),
+        clearLogs: async () => clearLocalLogsStrict(scopeIdentity),
+      });
+
+      applyUsagePageDeletionResult(result, {
+        clearRepositoryUi: clearRepositoryUiState,
+        logout,
+      });
+
+      if (result.success) {
+        setError(null);
+        setDeleteLocalDataOpen(false);
+        return;
+      }
+
+      setDeleteLocalDataFailures(result.failures);
+      setError("Some local data could not be deleted. Review the details and retry.");
+    } finally {
+      deletionInProgressRef.current = false;
+      setDeleteLocalDataPending(false);
     }
   };
 
@@ -2742,6 +2913,16 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
             value: activeEmbeddingModel,
             updatedAt: Date.now(),
           });
+          const inferredDimension = database.getEmbeddingHealth().dimension;
+          if (inferredDimension === null) {
+            await database.clearIndexMetaValue(EMBEDDING_DIMENSION_META_KEY);
+          } else {
+            await database.upsertIndexMeta({
+              key: EMBEDDING_DIMENSION_META_KEY,
+              value: String(inferredDimension),
+              updatedAt: Date.now(),
+            });
+          }
         }
       }
       let browserEmbeddingPlan: BrowserEmbeddingRecommendation | null = null;
@@ -2769,6 +2950,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           setOllamaConnectionMessage(`Search using Ollama model ${activeEmbeddingModel}.`);
         } catch (ollamaError) {
           captureLocalWarn(
+            authScopeIdentity,
             "ollama_query_embedding_failed",
             ollamaError instanceof Error ? ollamaError.message : String(ollamaError),
           );
@@ -2800,7 +2982,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         queryText: trimmedQuery,
         tuning: retrievalTuning,
         onDiagnostics: (payload) => {
-          captureLocalWarn("search_diagnostics", JSON.stringify({
+          captureLocalWarn(authScopeIdentity, "search_diagnostics", JSON.stringify({
             ...payload,
             topScores: payload.denseTopScores.map((score) => Number(score.toFixed(6))),
           }));
@@ -2881,7 +3063,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       const msg = err instanceof Error ? err.message : String(err);
       if (import.meta.env.DEV) console.error("Search failed", err);
       else console.error("Search failed:", msg);
-      captureLocalError("search_failed", err);
+      captureLocalError(authScopeIdentity, "search_failed", err);
       setIndexingStatus((previous) =>
         previous
           ? {
@@ -2935,7 +3117,12 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   };
 
   const executePendingGeneration = async (generation: PendingGeneration): Promise<void> => {
-    await executeUsageGeneration(generation, {
+    // Deletion already settled the generations it knew about; starting another
+    // one now would persist chat rows after the store was cleared.
+    if (deletionInProgressRef.current) {
+      return;
+    }
+    const execution = executeUsageGeneration(generation, {
       controllerRef: generationControllerRef,
       pendingGenerationRef: pendingWebllmGenerationRef,
       fallbackWebLLMModelId: WEBLLM_FALLBACK_MODEL_ID,
@@ -2960,14 +3147,24 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
       setSelectedWebLLMModel: setWebllmSelectedModel,
       setError: setLlmError,
       reportError: (error, failedProviderId) => {
-        captureLocalError("llm_generation_failed", error);
+        captureLocalError(authScopeIdentity, "llm_generation_failed", error);
         const providerKind = getProviderById(failedProviderId).definition.kind;
         setLlmError(formatProviderError(error, providerKind));
       },
     });
+    activeGenerationPromisesRef.current.add(execution);
+    try {
+      await execution;
+    } finally {
+      activeGenerationPromisesRef.current.delete(execution);
+    }
   };
 
   const handleGenerateAnswer = async () => {
+    if (deletionInProgressRef.current) {
+      return;
+    }
+
     if (!activeSession) {
       setLlmError("No active session. Run a search first.");
       return;
@@ -3019,7 +3216,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
           `filters={language:${languageFilter},topic:${topicFilter},updatedWithinDays:${updatedWithinDaysFilter}}; ` +
           `pass_counts={language:${debug.languagePassCount},topic:${debug.topicPassCount},recency:${debug.recencyPassCount},invalidUpdatedAt:${debug.invalidUpdatedAtCount}}. ` +
           "Select snippets from the result list or reset filters.";
-      captureLocalError("llm_no_context_available", new Error(debugMessage));
+      captureLocalError(authScopeIdentity, "llm_no_context_available", new Error(debugMessage));
       setLlmError(debugMessage);
       return;
     }
@@ -3064,6 +3261,11 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
   };
 
   const handleConfirmWebllmDownload = () => {
+    // Refuse before consuming the pending request or granting consent, so the
+    // resume can be retried once deletion has settled.
+    if (deletionInProgressRef.current) {
+      return;
+    }
     const resumed = resumePendingWebLLMGeneration(
       pendingWebllmGenerationRef.current,
       resolveHermesModelSelection(webllmSelectedModel),
@@ -3109,6 +3311,20 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
         }}
         onConfirm={handleConfirmWebllmDownload}
         onCancel={handleCancelWebllmDownload}
+      />
+      <DeleteLocalDataDialog
+        open={deleteLocalDataOpen}
+        pending={deleteLocalDataPending}
+        blocked={deleteLocalDataBlockReason !== null}
+        blockReason={deleteLocalDataBlockReason ?? undefined}
+        failures={deleteLocalDataFailures}
+        onCancel={() => {
+          if (!deleteLocalDataPending) {
+            setDeleteLocalDataOpen(false);
+            setDeleteLocalDataFailures([]);
+          }
+        }}
+        onConfirm={() => void handleConfirmDeleteLocalData()}
       />
 
       {error && (
@@ -3182,7 +3398,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                       <span className="font-medium text-foreground">3. Generate embeddings</span>
                       <span className="mt-1 block">Build the semantic index used by Recall and chat context.</span>
                       <span className="mt-2 block text-xs">
-                        {storedEmbeddingCount > 0
+                        {embeddingReadiness === "ready"
                           ? `${storedEmbeddingCount} embeddings ready`
                           : isRebuildingEmbeddings || indexingStatus?.embeddingTarget
                             ? "In progress"
@@ -3438,7 +3654,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                     <Button variant="outline" className="rounded-md" onClick={logout}>
                       {authMethod === "oauth" ? "Sign out of GitHub" : "Clear PAT session"}
                     </Button>
-                    <Button variant="destructive" className="rounded-md" onClick={() => void handleClearLocalData()}>
+                    <Button variant="destructive" className="rounded-md" onClick={openDeleteLocalDataDialog}>
                       Delete local data
                     </Button>
                   </div>
@@ -3904,7 +4120,7 @@ export default function UsagePage({ view = "legacy" }: UsagePageProps) {
                       variant="destructive"
                       size="sm"
                       className="h-7 rounded-lg text-xs"
-                      onClick={() => void handleClearLocalData()}
+                      onClick={openDeleteLocalDataDialog}
                     >
                       Delete local data
                     </Button>

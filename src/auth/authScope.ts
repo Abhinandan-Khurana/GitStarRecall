@@ -1,4 +1,5 @@
 import type { GitHubAuthenticatedUser } from "../github/types";
+import type { ChatBackupScope } from "../db/chatBackup";
 
 export function hashAuthScopeToken(raw: string): string {
   let hash = 0;
@@ -9,13 +10,17 @@ export function hashAuthScopeToken(raw: string): string {
   return Math.abs(hash).toString(36);
 }
 
-export function buildGitHubUserScopeIdentity(user: Pick<GitHubAuthenticatedUser, "id" | "login">): string {
+export function buildGitHubUserScopeIdentity(
+  user: Pick<GitHubAuthenticatedUser, "id" | "login">,
+): string {
   const numericId = Number(user.id);
   if (Number.isFinite(numericId) && numericId > 0) {
     return `github:${numericId}`;
   }
 
-  const normalizedLogin = String(user.login ?? "").trim().toLowerCase();
+  const normalizedLogin = String(user.login ?? "")
+    .trim()
+    .toLowerCase();
   if (normalizedLogin) {
     return `github-login:${normalizedLogin}`;
   }
@@ -49,6 +54,18 @@ export function buildChatScopeKey(scopeIdentity: string | null): string | null {
     return null;
   }
   return `chat:${scopeIdentity}`;
+}
+
+export function buildChatBackupScope(chatScopeKey: string | null): ChatBackupScope | null {
+  const key = String(chatScopeKey ?? "").trim();
+  if (!key) {
+    return null;
+  }
+
+  return Object.freeze({
+    key,
+    legacySessionPrefix: `${key}:`,
+  });
 }
 
 export function buildEmbeddingPreferenceScopeKey(scopeIdentity: string | null): string {

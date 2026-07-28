@@ -1,11 +1,22 @@
 import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import wasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import { DATABASE_SCHEMA_SQL } from "./schema";
-import { backupChatMessage, backupChatSession, clearChatBackup } from "./chatBackup";
+import {
+  backupChatMessage,
+  backupChatSession,
+  clearChatBackup,
+  type ChatBackupScope,
+} from "./chatBackup";
+import { captureLocalError } from "../observability/localLog";
 import { reciprocalRankFusion } from "../search/fusion";
 import { lexicalOverlapScore, countRareLikeTokens } from "../search/lexical";
 import { mmrSelect, type DenseCandidate } from "../search/rerank";
 import { cosineSimilaritySafe } from "../search/vectorMath";
+import {
+  ensureEmbeddingIntegritySchema,
+  getEmbeddingHealth as readEmbeddingHealth,
+  type EmbeddingHealth,
+} from "./embeddingIntegrity";
 import type {
   ChatMessageRecord,
   ChatSessionRecord,
@@ -23,9 +34,11 @@ const LOCAL_STORAGE_KEY_PREFIX = "gitstarrecall.sqlite.base64";
 const LOCAL_STORAGE_UPDATED_AT_KEY_PREFIX = "gitstarrecall.sqlite.updated-at";
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_EMBEDDINGS = 256;
 const DEFAULT_EMBEDDING_CHECKPOINT_EVERY_MS = 3000;
+const DATABASE_WRITER_LOCK_PREFIX = "gitstarrecall:database-writer";
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
 let currentDatabaseScopeKey = "anon";
+let currentChatBackupScope: ChatBackupScope | null = null;
 const dbPromiseByScope = new Map<string, Promise<LocalDatabase>>();
 
 type EmbeddingCheckpointPolicy = {
@@ -34,6 +47,19 @@ type EmbeddingCheckpointPolicy = {
 };
 
 type SqlRowValue = string | number | Uint8Array | null;
+
+export class LocalDatabaseWriterLeaseError extends Error {
+  readonly code = "DATABASE_WRITER_LEASE_UNAVAILABLE";
+  readonly scopeKey: string;
+
+  constructor(scopeKey: string) {
+    super(
+      `Another tab is already writing local data for scope ${scopeKey}. Close the other tab or finish its operation, then retry.`,
+    );
+    this.name = "LocalDatabaseWriterLeaseError";
+    this.scopeKey = scopeKey;
+  }
+}
 
 function toBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -65,6 +91,10 @@ function normalizeDatabaseScopeKey(scopeKey: string): string {
     return "anon";
   }
   return trimmed.replace(/[^a-z0-9:_-]/gi, "_");
+}
+
+function getChatBackupLogScope(scope: ChatBackupScope): string {
+  return scope.key.startsWith("chat:") ? scope.key.slice("chat:".length) : scope.key;
 }
 
 export function getScopedDatabaseFileName(scopeKey: string): string {
@@ -132,6 +162,16 @@ async function writeBytesToOpfs(bytes: Uint8Array, scopeKey: string): Promise<bo
   }
 }
 
+/** A missing entry means the snapshot is already gone, which is a successful clear. */
+function isMissingOpfsEntryError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "NotFoundError";
+}
+
+/**
+ * Removes the scoped OPFS snapshot. Anything other than an absent entry is
+ * propagated: swallowing it would let `clearAllData` report success while an old
+ * snapshot survives to win a later freshness comparison.
+ */
 async function clearOpfsFile(scopeKey: string): Promise<void> {
   if (!isOpfsSupported()) {
     return;
@@ -140,8 +180,11 @@ async function clearOpfsFile(scopeKey: string): Promise<void> {
   try {
     const root = await navigator.storage.getDirectory();
     await root.removeEntry(getScopedDatabaseFileName(scopeKey));
-  } catch {
-    // noop: best effort
+  } catch (error) {
+    if (isMissingOpfsEntryError(error)) {
+      return;
+    }
+    throw error;
   }
 }
 
@@ -637,7 +680,7 @@ function ensureChatSchema(database: Database): void {
   normalizeChatRows(database);
 }
 
-export function runSchema(database: Database): void {
+export function runSchema(database: Database): boolean {
   database.run(DATABASE_SCHEMA_SQL);
   // Lightweight migration: older local DBs may not have new columns.
   const repoColumnsResult = database.exec("PRAGMA table_info(repos);");
@@ -660,57 +703,7 @@ export function runSchema(database: Database): void {
   }
 
   ensureChatSchema(database);
-
-  // Self-heal embeddings schema if an older local DB used incompatible column types.
-  const embeddingsColumnsResult = database.exec("PRAGMA table_info(embeddings);");
-  const embeddingsInfo =
-    embeddingsColumnsResult.length > 0
-      ? embeddingsColumnsResult[0].values.map((row) => ({
-          name: String(row[1]),
-          type: String(row[2]).toUpperCase(),
-        }))
-      : [];
-
-  const embeddingsTypeByName = new Map(embeddingsInfo.map((column) => [column.name, column.type]));
-  const embeddingsCompatible =
-    embeddingsTypeByName.get("id") === "TEXT" &&
-    embeddingsTypeByName.get("chunk_id") === "TEXT" &&
-    embeddingsTypeByName.get("model") === "TEXT" &&
-    embeddingsTypeByName.get("dimension") === "INTEGER" &&
-    embeddingsTypeByName.get("vector_blob") === "BLOB" &&
-    embeddingsTypeByName.get("created_at") === "INTEGER";
-
-  if (!embeddingsCompatible) {
-    database.run("DROP TABLE IF EXISTS embeddings;");
-    database.run(`
-      CREATE TABLE IF NOT EXISTS embeddings (
-        id TEXT PRIMARY KEY,
-        chunk_id TEXT NOT NULL,
-        model TEXT NOT NULL,
-        dimension INTEGER NOT NULL,
-        vector_blob BLOB NOT NULL,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY (chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
-      );
-    `);
-  }
-
-  // Self-heal index_meta shape if an older/corrupt local DB exists.
-  const indexMetaColumnsResult = database.exec("PRAGMA table_info(index_meta);");
-  const indexMetaColumns =
-    indexMetaColumnsResult.length > 0
-      ? new Set(indexMetaColumnsResult[0].values.map((row) => String(row[1])))
-      : new Set<string>();
-  if (!indexMetaColumns.has("key") || !indexMetaColumns.has("value") || !indexMetaColumns.has("updated_at")) {
-    database.run("DROP TABLE IF EXISTS index_meta;");
-    database.run(`
-      CREATE TABLE IF NOT EXISTS index_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-    `);
-  }
+  return ensureEmbeddingIntegritySchema(database);
 }
 
 function normalizeTimestamp(value: unknown, fallback: number): number {
@@ -880,24 +873,33 @@ export class LocalDatabase {
   private db: Database;
   private _storageMode: StorageMode;
   private scopeKey: string;
+  private readonly chatBackupScope: ChatBackupScope | null;
   private vectorIndexCache: Array<{ chunkId: string; vector: Float32Array }> | null = null;
   private vectorIndexCacheCount = -1;
   private embeddingCheckpointPolicy: EmbeddingCheckpointPolicy;
   private pendingEmbeddingsSinceCheckpoint = 0;
   private pendingEmbeddingsStartedAt = 0;
   private lastEmbeddingCheckpointAt: number | null = null;
+  private persistenceTail: Promise<void> = Promise.resolve();
+  private destructiveOperationBarrier: Promise<void> = Promise.resolve();
+  private writerLeaseAvailable: Promise<boolean>;
+  private releaseWriterLease: (() => void) | null = null;
 
   constructor(args: {
     sql: SqlJsStatic;
     db: Database;
     storageMode: StorageMode;
     scopeKey?: string;
+    chatBackupScope?: ChatBackupScope | null;
     embeddingCheckpointPolicy?: EmbeddingCheckpointPolicy;
   }) {
     this.sql = args.sql;
     this.db = args.db;
     this._storageMode = args.storageMode;
     this.scopeKey = normalizeDatabaseScopeKey(args.scopeKey ?? "anon");
+    this.chatBackupScope = args.chatBackupScope
+      ? Object.freeze({ ...args.chatBackupScope })
+      : null;
     this.embeddingCheckpointPolicy = {
       everyEmbeddings: normalizePositiveInt(
         args.embeddingCheckpointPolicy?.everyEmbeddings,
@@ -908,6 +910,7 @@ export class LocalDatabase {
         DEFAULT_EMBEDDING_CHECKPOINT_EVERY_MS,
       ),
     };
+    this.writerLeaseAvailable = this.acquireWriterLease();
   }
 
   get storageMode(): StorageMode {
@@ -1326,9 +1329,59 @@ export class LocalDatabase {
       .slice(0, tuning.topK);
   }
 
-  private async persist(): Promise<void> {
-    const bytes = this.db.export();
+  private acquireWriterLease(): Promise<boolean> {
+    if (this._storageMode === "memory" || typeof navigator === "undefined" || !navigator.locks) {
+      return Promise.resolve(true);
+    }
 
+    let reportAvailability: (available: boolean) => void;
+    const availability = new Promise<boolean>((resolve) => {
+      reportAvailability = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      this.releaseWriterLease = resolve;
+    });
+
+    void navigator.locks
+      .request(
+        `${DATABASE_WRITER_LOCK_PREFIX}:${this.scopeKey}`,
+        { mode: "exclusive", ifAvailable: true },
+        async (lock) => {
+          reportAvailability(Boolean(lock));
+          if (lock) {
+            await held;
+          }
+        },
+      )
+      .catch(() => {
+        reportAvailability(false);
+      });
+
+    return availability;
+  }
+
+  private beginMutation(): Promise<void> {
+    const destructiveBarrier = this.destructiveOperationBarrier;
+    return this.writerLeaseAvailable.then(async (available) => {
+      if (!available) {
+        throw new LocalDatabaseWriterLeaseError(this.scopeKey);
+      }
+      await destructiveBarrier;
+    });
+  }
+
+  releaseWriterLeaseForTests(): void {
+    this.releaseWriterLease?.();
+    this.releaseWriterLease = null;
+  }
+
+  private enqueuePersistence(task: () => Promise<void>): Promise<void> {
+    const ownResult = this.persistenceTail.then(task);
+    this.persistenceTail = ownResult.catch(() => undefined);
+    return ownResult;
+  }
+
+  private async writeSnapshot(bytes: Uint8Array): Promise<void> {
     if (this._storageMode === "opfs") {
       const written = await writeBytesToOpfs(bytes, this.scopeKey);
 
@@ -1341,13 +1394,23 @@ export class LocalDatabase {
 
     if (this._storageMode === "local-storage") {
       try {
+        if (typeof localStorage === "undefined") {
+          throw new Error("localStorage is unavailable");
+        }
         writeBytesToLocalStorage(bytes, this.scopeKey);
-      } catch {
-        // localStorage quota can be exceeded for large DB snapshots; degrade to in-memory
-        // mode instead of failing the active operation.
-        this._storageMode = "memory";
+      } catch (error) {
+        throw new Error(`Unable to persist local database for scope ${this.scopeKey}`, {
+          cause: error,
+        });
       }
     }
+  }
+
+  private persist(): Promise<void> {
+    return this.enqueuePersistence(async () => {
+      const bytes = this.db.export();
+      await this.writeSnapshot(bytes);
+    });
   }
 
   private shouldCheckpointEmbeddings(now: number): boolean {
@@ -1390,6 +1453,7 @@ export class LocalDatabase {
   }
 
   async flushPendingEmbeddingCheckpoint(): Promise<boolean> {
+    await this.beginMutation();
     if (this.pendingEmbeddingsSinceCheckpoint <= 0) {
       return false;
     }
@@ -1402,6 +1466,7 @@ export class LocalDatabase {
   }
 
   async upsertRepos(repos: RepoRecord[]): Promise<void> {
+    await this.beginMutation();
     const statement = this.db.prepare(`
       INSERT INTO repos (
         id, full_name, name, description, topics_json, language, html_url, stars, forks,
@@ -1562,20 +1627,7 @@ export class LocalDatabase {
       LIMIT ${safeLimit};
     `;
 
-    let result;
-    try {
-      result = this.db.exec(query);
-    } catch (error) {
-      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-      if (!message.includes("datatype mismatch")) {
-        throw error;
-      }
-
-      // Some legacy local DBs can carry incompatible embeddings affinity.
-      // Recreate embeddings table and retry chunk selection once.
-      this.recreateEmbeddingsTable();
-      result = this.db.exec(query);
-    }
+    const result = this.db.exec(query);
 
     if (result.length === 0) {
       return [];
@@ -1618,6 +1670,10 @@ export class LocalDatabase {
     return Number(result[0].values[0][0]);
   }
 
+  getEmbeddingHealth(): EmbeddingHealth {
+    return readEmbeddingHealth(this.db);
+  }
+
   getDominantEmbeddingModel(): string | null {
     const result = this.db.exec(`
       SELECT model, COUNT(*) AS count
@@ -1637,6 +1693,7 @@ export class LocalDatabase {
   }
 
   async clearEmbeddings(): Promise<void> {
+    await this.beginMutation();
     this.db.run("DELETE FROM embeddings;");
     this.vectorIndexCache = null;
     this.vectorIndexCacheCount = -1;
@@ -1644,22 +1701,6 @@ export class LocalDatabase {
     this.pendingEmbeddingsStartedAt = 0;
     this.lastEmbeddingCheckpointAt = null;
     await this.persist();
-  }
-
-  private recreateEmbeddingsTable(): void {
-    this.db.run("DROP TABLE IF EXISTS embeddings;");
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS embeddings (
-        id TEXT PRIMARY KEY,
-        chunk_id TEXT NOT NULL,
-        model TEXT NOT NULL,
-        dimension INTEGER NOT NULL,
-        vector_blob BLOB NOT NULL,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY (chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
-      );
-    `);
-    this.db.run("CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id);");
   }
 
   listPendingChunksForEmbedding(args?: { limit?: number; repoIds?: number[] }): ChunkRecord[] {
@@ -1733,26 +1774,6 @@ export class LocalDatabase {
 
   private rebuildChatTablesPreservingData(): void {
     rebuildChatTablesPreservingData(this.db);
-  }
-
-  private getEmbeddingsTableDiagnostic(): string {
-    const tableSqlResult = this.db.exec(
-      `SELECT sql FROM sqlite_master WHERE type='table' AND name='embeddings';`,
-    );
-    const tableSql =
-      tableSqlResult.length > 0 && tableSqlResult[0].values.length > 0
-        ? String(tableSqlResult[0].values[0][0] ?? "")
-        : "";
-
-    const columnsResult = this.db.exec("PRAGMA table_info(embeddings);");
-    const columns =
-      columnsResult.length > 0
-        ? columnsResult[0].values
-            .map((row) => `${String(row[1])}:${String(row[2])}`)
-            .join(",")
-        : "none";
-
-    return `embeddings_table_sql=${tableSql}; embeddings_columns=${columns}`;
   }
 
   private getChatSessionsTableDiagnostic(): string {
@@ -1941,6 +1962,13 @@ export class LocalDatabase {
     try {
       this.db.run("BEGIN");
       embeddings.forEach((embedding) => {
+        // Legacy databases may not yet have the UNIQUE(chunk_id) index installed by
+        // runSchema. Remove any prior row explicitly so the upsert remains safe
+        // before that migration has run.
+        this.db.run("DELETE FROM embeddings WHERE chunk_id = ? AND id <> ?;", [
+          embedding.chunkId,
+          embedding.id,
+        ]);
         statement.run([
           embedding.id,
           embedding.chunkId,
@@ -2017,6 +2045,7 @@ export class LocalDatabase {
   }
 
   async upsertChunks(chunks: ChunkRecord[]): Promise<void> {
+    await this.beginMutation();
     const statement = this.db.prepare(`
       INSERT INTO chunks (id, repo_id, chunk_id, text, source, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -2057,6 +2086,7 @@ export class LocalDatabase {
     if (repoIds.length === 0) {
       return;
     }
+    await this.beginMutation();
 
     const placeholders = repoIds.map(() => "?").join(",");
     this.db.run(`DELETE FROM repos WHERE id IN (${placeholders});`, repoIds);
@@ -2069,6 +2099,7 @@ export class LocalDatabase {
     if (repoIds.length === 0) {
       return;
     }
+    await this.beginMutation();
 
     const placeholders = repoIds.map(() => "?").join(",");
     this.db.run(`DELETE FROM chunks WHERE repo_id IN (${placeholders});`, repoIds);
@@ -2078,6 +2109,7 @@ export class LocalDatabase {
   }
 
   async upsertEmbeddings(embeddings: EmbeddingRecord[]): Promise<void> {
+    await this.beginMutation();
     const normalized = embeddings.map((embedding) => {
       const dimension = Number(embedding.dimension);
       const createdAt = Number(embedding.createdAt);
@@ -2086,12 +2118,16 @@ export class LocalDatabase {
           ? embedding.vectorBlob
           : new Uint8Array(embedding.vectorBlob);
 
-      if (!Number.isFinite(dimension) || dimension <= 0) {
+      if (!Number.isInteger(dimension) || dimension <= 0) {
         throw new Error(`Invalid embedding dimension for chunk ${embedding.chunkId}`);
       }
 
-      if (!Number.isFinite(createdAt) || createdAt <= 0) {
+      if (!Number.isInteger(createdAt) || createdAt <= 0) {
         throw new Error(`Invalid embedding created_at for chunk ${embedding.chunkId}`);
+      }
+
+      if (vectorBlob.byteLength !== dimension * Float32Array.BYTES_PER_ELEMENT) {
+        throw new Error(`Invalid embedding vector length for chunk ${embedding.chunkId}`);
       }
 
       return {
@@ -2106,27 +2142,7 @@ export class LocalDatabase {
       return;
     }
 
-    try {
-      this.runEmbeddingUpsert(normalized);
-    } catch (error) {
-      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-      const shouldHeal = message.includes("datatype mismatch") || message.includes("no such table");
-      if (!shouldHeal) {
-        throw error;
-      }
-
-      // Heal legacy/corrupt local schema and retry once.
-      this.recreateEmbeddingsTable();
-
-      try {
-        this.runEmbeddingUpsert(normalized);
-      } catch (retryError) {
-        const diagnostic = this.getEmbeddingsTableDiagnostic();
-        throw new Error(
-          `${retryError instanceof Error ? retryError.message : String(retryError)} | ${diagnostic}`,
-        );
-      }
-    }
+    this.runEmbeddingUpsert(normalized);
 
     this.vectorIndexCache = null;
     this.vectorIndexCacheCount = -1;
@@ -2137,6 +2153,7 @@ export class LocalDatabase {
   }
 
   async upsertIndexMeta(record: IndexMetaRecord): Promise<void> {
+    await this.beginMutation();
     const key = String(record.key ?? "").trim();
     const value = record.value == null ? "" : String(record.value);
     const now = normalizeTimestamp(Date.now(), 1);
@@ -2160,7 +2177,18 @@ export class LocalDatabase {
     await this.persist();
   }
 
+  async clearIndexMetaValue(key: string): Promise<void> {
+    await this.beginMutation();
+    const normalizedKey = String(key ?? "").trim();
+    if (!normalizedKey) {
+      throw new Error("index_meta key is required");
+    }
+    this.db.run("DELETE FROM index_meta WHERE key = ?;", [normalizedKey]);
+    await this.persist();
+  }
+
   async upsertChatSession(session: ChatSessionRecord): Promise<void> {
+    await this.beginMutation();
     const id = String(session.id ?? "").trim();
     const query = session.query == null ? "" : String(session.query).trim();
     const now = normalizeTimestamp(Date.now(), 1);
@@ -2218,14 +2246,24 @@ export class LocalDatabase {
       }
     }
 
-    await backupChatSession({
-      id,
-      query,
-      createdAt,
-      updatedAt,
-    });
-
     await this.persist();
+
+    if (this.chatBackupScope) {
+      try {
+        await backupChatSession(this.chatBackupScope, {
+          id,
+          query,
+          createdAt,
+          updatedAt,
+        });
+      } catch (error) {
+        captureLocalError(
+          getChatBackupLogScope(this.chatBackupScope),
+          "chat_session_backup_failed",
+          error,
+        );
+      }
+    }
   }
 
   listChatSessions(): ChatSessionRecord[] {
@@ -2302,6 +2340,7 @@ export class LocalDatabase {
   }
 
   async addChatMessage(message: ChatMessageRecord): Promise<void> {
+    await this.beginMutation();
     const id = String(message.id ?? "").trim();
     const sessionId = String(message.sessionId ?? "").trim();
     const role: ChatMessageRecord["role"] =
@@ -2373,32 +2412,55 @@ export class LocalDatabase {
       }
     }
 
-    await backupChatMessage({
-      id,
-      sessionId,
-      role,
-      content,
-      sequence,
-      createdAt,
-    });
-
     await this.persist();
+
+    if (this.chatBackupScope) {
+      try {
+        await backupChatMessage(this.chatBackupScope, {
+          id,
+          sessionId,
+          role,
+          content,
+          sequence,
+          createdAt,
+        });
+      } catch (error) {
+        captureLocalError(
+          getChatBackupLogScope(this.chatBackupScope),
+          "chat_message_backup_failed",
+          error,
+        );
+      }
+    }
   }
 
-  async clearAllData(): Promise<void> {
-    this.db.close();
-    this.db = new this.sql.Database();
-    runSchema(this.db);
-    this.vectorIndexCache = null;
-    this.vectorIndexCacheCount = -1;
-    this.pendingEmbeddingsSinceCheckpoint = 0;
-    this.pendingEmbeddingsStartedAt = 0;
-    this.lastEmbeddingCheckpointAt = null;
+  clearAllData(): Promise<void> {
+    const priorDestructiveOperation = this.destructiveOperationBarrier;
+    const clearOperation = priorDestructiveOperation.then(async () => {
+      if (!(await this.writerLeaseAvailable)) {
+        throw new LocalDatabaseWriterLeaseError(this.scopeKey);
+      }
+      await this.enqueuePersistence(async () => {
+        this.db.close();
+        this.db = new this.sql.Database();
+        runSchema(this.db);
+        this.vectorIndexCache = null;
+        this.vectorIndexCacheCount = -1;
+        this.pendingEmbeddingsSinceCheckpoint = 0;
+        this.pendingEmbeddingsStartedAt = 0;
+        this.lastEmbeddingCheckpointAt = null;
 
-    await clearOpfsFile(this.scopeKey);
-    clearLocalStorageBytes(this.scopeKey);
-    await clearChatBackup();
-    await this.persist();
+        await clearOpfsFile(this.scopeKey);
+        clearLocalStorageBytes(this.scopeKey);
+        if (this.chatBackupScope) {
+          await clearChatBackup(this.chatBackupScope);
+        }
+        const bytes = this.db.export();
+        await this.writeSnapshot(bytes);
+      });
+    });
+    this.destructiveOperationBarrier = clearOperation.catch(() => undefined);
+    return clearOperation;
   }
 }
 
@@ -2409,7 +2471,10 @@ export async function migrateLocalDatabaseScope(args: {
   toChatScopeKey?: string | null;
 }): Promise<boolean> {
   async function clearLegacyScopeSnapshot(scopeKey: string): Promise<void> {
-    await clearOpfsFile(scopeKey);
+    // Source-snapshot cleanup stays best effort: migration runs on sign-in, and
+    // failing it would block access to the already-migrated target scope. Unlike
+    // clearAllData this promises no erasure to the user.
+    await clearOpfsFile(scopeKey).catch(() => undefined);
     clearLocalStorageBytes(scopeKey);
     dbPromiseByScope.delete(scopeKey);
   }
@@ -2468,12 +2533,17 @@ export async function migrateLocalDatabaseScope(args: {
   return true;
 }
 
-export function setLocalDatabaseScope(scopeKey: string): void {
+export function setLocalDatabaseScope(
+  scopeKey: string,
+  chatBackupScope: ChatBackupScope | null = null,
+): void {
   currentDatabaseScopeKey = normalizeDatabaseScopeKey(scopeKey);
+  currentChatBackupScope = chatBackupScope ? Object.freeze({ ...chatBackupScope }) : null;
 }
 
 export async function getLocalDatabase(): Promise<LocalDatabase> {
   const scopeKey = currentDatabaseScopeKey;
+  const chatBackupScope = currentChatBackupScope;
   const existingPromise = dbPromiseByScope.get(scopeKey);
   if (existingPromise) {
     return existingPromise;
@@ -2492,6 +2562,7 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
           db,
           storageMode,
           scopeKey,
+          chatBackupScope,
           embeddingCheckpointPolicy,
         });
         try {
@@ -2511,12 +2582,17 @@ export async function getLocalDatabase(): Promise<LocalDatabase> {
         let db: Database | null = null;
         try {
           db = new sql.Database(persistedSnapshot.bytes);
-          runSchema(db);
+          const embeddingDimensionBackfilled = runSchema(db);
+          let storageMode = persistedSnapshot.storageMode;
+          if (embeddingDimensionBackfilled) {
+            storageMode = await writePersistedScopeSnapshot(db.export(), scopeKey, storageMode);
+          }
           return new LocalDatabase({
             sql,
             db,
-            storageMode: persistedSnapshot.storageMode,
+            storageMode,
             scopeKey,
+            chatBackupScope,
             embeddingCheckpointPolicy,
           });
         } catch (error) {

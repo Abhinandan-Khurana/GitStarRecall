@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import type { LLMProviderDefinition, LLMProviderId } from "../llm/types";
 import {
   deriveHydratedProviderSettingsView,
@@ -61,8 +69,20 @@ export function useProviderSettingsPersistence({
   webLLMPrimaryModel,
   providerDefinitions,
   store = providerSettingsStore,
-  onPersistenceError = captureLocalError,
+  onPersistenceError,
 }: ProviderSettingsPersistenceOptions): ProviderSettingsPersistence {
+  const onPersistenceErrorRef = useRef(onPersistenceError);
+  onPersistenceErrorRef.current = onPersistenceError;
+  const reportPersistenceError = useCallback(
+    (event: string, error: unknown) => {
+      if (onPersistenceErrorRef.current) {
+        onPersistenceErrorRef.current(event, error);
+        return;
+      }
+      captureLocalError(scopeIdentity, event, error);
+    },
+    [scopeIdentity],
+  );
   const providerDefinitionsKey = getProviderDefinitionsKey(providerDefinitions);
   const providerDefinitionsCacheRef = useRef({
     key: providerDefinitionsKey,
@@ -160,14 +180,14 @@ export function useProviderSettingsPersistence({
         setHydrationState("error");
         setSaveState("error");
         setPersistenceError(error instanceof Error ? error.message : String(error));
-        onPersistenceError("provider_settings_hydration_failed", error);
+        reportPersistenceError("provider_settings_hydration_failed", error);
       });
     return () => {
       cancelled = true;
     };
   }, [
     initial,
-    onPersistenceError,
+    reportPersistenceError,
     scopeIdentity,
     stableProviderDefinitions,
     store,
@@ -204,14 +224,14 @@ export function useProviderSettingsPersistence({
         if (saveRevisionRef.current !== revision) return;
         setSaveState("error");
         setPersistenceError(error instanceof Error ? error.message : String(error));
-        onPersistenceError("provider_settings_save_failed", error);
+        reportPersistenceError("provider_settings_save_failed", error);
       });
   }, [
     allowLocalProvider,
     allowRemoteProvider,
     hydrationState,
     ollamaPreferredChatModel,
-    onPersistenceError,
+    reportPersistenceError,
     providerApiKey,
     providerBaseUrl,
     providerId,

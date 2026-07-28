@@ -345,6 +345,10 @@ export function getProviderDefinitions(): LLMProviderDefinition[] {
   return definitions;
 }
 
+export async function unloadWebLLM(): Promise<void> {
+  await getWebLLMEngineManager().unload();
+}
+
 export function getProviderById(providerId: LLMProviderId): LLMStreamProvider {
   return providersById[providerId];
 }

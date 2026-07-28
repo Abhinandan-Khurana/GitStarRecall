@@ -21,6 +21,40 @@ function createDatabase(): LocalDatabase {
 }
 
 describe("LocalDatabase pending embedding queue", () => {
+  test("upserts embeddings before a legacy database has a unique chunk index", async () => {
+    const rawDb = new SQL.Database();
+    runSchema(rawDb);
+    rawDb.run("DROP INDEX idx_embeddings_chunk_id_unique;");
+    rawDb.run(`
+      INSERT INTO repos (
+        id, full_name, name, topics_json, html_url, stars, forks, updated_at, last_synced_at
+      ) VALUES (1, 'repo/legacy', 'legacy', '[]', 'https://github.com/repo/legacy', 0, 0, '2026-01-01', 1);
+    `);
+    rawDb.run(
+      "INSERT INTO chunks (id, repo_id, chunk_id, text, source, created_at) VALUES ('c-legacy', 1, 'c-legacy', 'legacy', 'readme', 1);",
+    );
+    rawDb.run(
+      "INSERT INTO embeddings (id, chunk_id, model, dimension, vector_blob, created_at) VALUES (?, ?, ?, ?, ?, ?);",
+      ["e-old", "c-legacy", "old-model", 2, new Uint8Array(new Float32Array([1, 2]).buffer), 1],
+    );
+    const database = new LocalDatabase({ sql: SQL, db: rawDb, storageMode: "memory" });
+
+    await database.upsertEmbeddings([
+      {
+        id: "e-new",
+        chunkId: "c-legacy",
+        model: "new-model",
+        dimension: 2,
+        vectorBlob: new Uint8Array(new Float32Array([3, 4]).buffer),
+        createdAt: 2,
+      },
+    ]);
+
+    expect(rawDb.exec("SELECT id, model FROM embeddings;")[0]?.values).toEqual([
+      ["e-new", "new-model"],
+    ]);
+  });
+
   test("lists pending chunks in created_at order and excludes embedded chunks", async () => {
     const database = createDatabase();
     const now = Date.now();
@@ -127,6 +161,9 @@ describe("LocalDatabase pending embedding queue", () => {
     await database.clearEmbeddings();
     expect(database.getEmbeddingCount()).toBe(0);
     expect(database.getPendingEmbeddingChunkCount()).toBe(2);
-    expect(database.listPendingChunksForEmbedding().map((chunk) => chunk.id)).toEqual(["c-1", "c-2"]);
+    expect(database.listPendingChunksForEmbedding().map((chunk) => chunk.id)).toEqual([
+      "c-1",
+      "c-2",
+    ]);
   });
 });

@@ -47,7 +47,10 @@ export function reconcileActiveSessionId(
   if (sessions.length === 0) {
     return null;
   }
-  if (previousActiveSessionId && sessions.some((session) => session.id === previousActiveSessionId)) {
+  if (
+    previousActiveSessionId &&
+    sessions.some((session) => session.id === previousActiveSessionId)
+  ) {
     return previousActiveSessionId;
   }
   return sessions[0].id;
@@ -71,6 +74,32 @@ export function createRestoreRequestTracker(): RestoreRequestTracker {
       return requestId === activeRequestId;
     },
   };
+}
+
+export function invalidateHistoryRestore(tracker: RestoreRequestTracker): void {
+  tracker.nextRequestId();
+}
+
+export async function loadHistoryBackupAfterPrimaryFailure<T>(params: {
+  load: () => Promise<T>;
+  isCurrent: () => boolean;
+  onError: (error: unknown) => void;
+  onUnavailable: () => void;
+}): Promise<T | null> {
+  try {
+    const snapshot = await params.load();
+    return params.isCurrent() ? snapshot : null;
+  } catch (error) {
+    if (!params.isCurrent()) {
+      return null;
+    }
+    try {
+      params.onError(error);
+    } finally {
+      params.onUnavailable();
+    }
+    return null;
+  }
 }
 
 export function buildHistoryRestoreResult(params: {

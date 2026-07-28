@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAuthStorageScope,
+  buildChatBackupScope,
   buildChatScopeKey,
   buildEmbeddingPreferenceScopeKey,
   buildGitHubUserScopeIdentity,
@@ -19,16 +20,23 @@ describe("authScope", () => {
     expect(scopeIdentity).toBe("github:42");
     expect(buildAuthStorageScope(scopeIdentity)).toBe("auth:github:42");
     expect(buildChatScopeKey(scopeIdentity)).toBe("chat:github:42");
+    expect(buildChatBackupScope(buildChatScopeKey(scopeIdentity))).toEqual({
+      key: "chat:github:42",
+      legacySessionPrefix: "chat:github:42:",
+    });
   });
 
   it("keeps legacy token-derived scopes distinct from the new user-derived scope", () => {
     expect(buildLegacyTokenStorageScope("ghp_example")).toMatch(/^token:/);
-    expect(buildLegacyTokenStorageScope("ghp_example")).not.toBe(buildAuthStorageScope("github:42"));
+    expect(buildLegacyTokenStorageScope("ghp_example")).not.toBe(
+      buildAuthStorageScope("github:42"),
+    );
   });
 
   it("falls back to anon scope when token is missing", () => {
     expect(buildAuthStorageScope(null)).toBe("anon");
     expect(buildChatScopeKey(null)).toBeNull();
+    expect(buildChatBackupScope(null)).toBeNull();
     expect(buildEmbeddingPreferenceScopeKey(null)).toBe("anon");
   });
 });
