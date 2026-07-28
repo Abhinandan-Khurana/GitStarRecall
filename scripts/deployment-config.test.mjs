@@ -42,6 +42,7 @@ describe("production deployment configuration", () => {
 
     expect(headers["Content-Security-Policy"]).toContain("default-src 'self'");
     expect(headers["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
+    expect(headers["Content-Security-Policy"]).toContain("frame-src 'none'");
     expect(headers["Content-Security-Policy"]).toContain("worker-src 'self' blob:");
     expect(headers["Content-Security-Policy"]).toContain(
       "connect-src 'self' https: http://localhost:* http://127.0.0.1:*",
