@@ -23,13 +23,18 @@ If a proposed change improves UX but weakens security or privacy defaults, it sh
 ## Before You Start
 
 Read these first:
+
 - `CODE_OF_CONDUCT.md`
 - `SECURITY.md`
-- `docs/Usage.md`
-- `docs/tech-stack-architecture-security-prd.md`
+- `docs/Usage.md` - canonical runtime, configuration, storage, and troubleshooting reference
+- `docs/adr/README.md` - current multi-tab storage decision
 - `docs/threat-modeling-stride.md`
 - `docs/security-review-stride.md`
 - `docs/embedding-acceleration-plan.md`
+
+`docs/tech-stack-architecture-security-prd.md` and `docs/codex-claude-build-guide.md` are retained for
+provenance only. Both are marked HISTORICAL and describe an architecture that was never shipped (most
+notably `sqlite-vec` for vector search). Do not treat either as a description of the current system.
 
 If your change affects authentication, storage, or data flow, include a short threat-impact note in the PR description.
 
@@ -44,8 +49,9 @@ pnpm dev
 ```
 
 Required runtime assumptions:
-- Node.js 20+
-- pnpm 9+
+
+- Node.js 22 or 24 (active LTS lines; enforced by `engines`)
+- pnpm 11.17.0 (pinned via `packageManager`)
 - Browser with modern Worker and Indexed storage support
 
 ---
@@ -58,6 +64,7 @@ Required runtime assumptions:
 - If you change user-facing or security behavior, update docs in same PR.
 
 Suggested commit style:
+
 - `feat: ...`
 - `fix: ...`
 - `perf: ...`
@@ -75,21 +82,38 @@ Suggested commit style:
 
 ## Code Quality Gate (Required)
 
-Run this before opening a PR:
-
-```bash
-pnpm lint
-pnpm test
-pnpm build
-```
-
-Or run the combined check:
+Run the full gate before opening a PR. It is the same sequence CI runs in
+`.github/workflows/quality.yml`:
 
 ```bash
 pnpm ci
 ```
 
-PRs that fail lint/test/build should not be merged.
+`pnpm ci` expands to, in order:
+
+| Step                       | Command               |
+| -------------------------- | --------------------- |
+| Formatting                 | `pnpm format:check`   |
+| Lint (zero warnings)       | `pnpm lint`           |
+| Types                      | `pnpm typecheck`      |
+| Component tests (jsdom)    | `pnpm test:component` |
+| Unit tests with coverage   | `pnpm test:coverage`  |
+| Coverage gates             | `pnpm check:coverage` |
+| Production build           | `pnpm build`          |
+| Bundle budget              | `pnpm check:bundle`   |
+| Browser smoke (Playwright) | `pnpm test:e2e`       |
+
+The last step needs a browser binary. Install it once before your first `pnpm ci` run, or that step
+fails on a clean checkout:
+
+```bash
+pnpm exec playwright install --with-deps chromium
+```
+
+For a faster inner loop while developing, `pnpm lint`, `pnpm test`, and `pnpm build` are the useful
+subset. `pnpm ci` is what must pass before review.
+
+PRs that fail any gate step should not be merged.
 
 ---
 
@@ -109,6 +133,7 @@ When touching auth/storage/network code, add or update tests.
 ## Performance Rules
 
 For embedding/indexing changes:
+
 - Measure impact, do not assume impact.
 - Avoid regressions in throughput or UI responsiveness.
 - Keep fallback behavior deterministic.
@@ -116,6 +141,7 @@ For embedding/indexing changes:
 - For retrieval changes, include dense candidate policy, lexical trigger policy, and MMR/per-repo cap rationale.
 
 When changing worker/batching/checkpoint logic:
+
 - add or adjust unit tests.
 - include benchmark notes in PR description (quick local numbers are acceptable).
 
@@ -124,6 +150,7 @@ When changing worker/batching/checkpoint logic:
 ## Testing Guidance
 
 Add tests for:
+
 - deterministic behavior,
 - schema/data integrity,
 - failure paths and fallback paths,
@@ -137,6 +164,7 @@ Add integration-style tests only where unit tests are insufficient.
 ## Documentation Requirements
 
 You must update docs when any of these change:
+
 - architecture or data flow,
 - security controls,
 - env variables,
@@ -144,8 +172,9 @@ You must update docs when any of these change:
 - operational usage instructions.
 
 Likely docs to touch:
+
 - `docs/Usage.md`
-- `docs/tech-stack-architecture-security-prd.md`
+- `docs/adr/0005-single-writer-web-locks-lease.md` when changing multi-tab storage behavior
 - `docs/embedding-acceleration-plan.md`
 - `docs/dfd-diagrams.md`
 - `docs/threat-modeling-stride.md`
@@ -153,43 +182,26 @@ Likely docs to touch:
 - `docs/changelogs.md`
 - `README.md` architecture Mermaid snapshot
 
+Do not update `docs/tech-stack-architecture-security-prd.md` or `docs/codex-claude-build-guide.md`. Both
+are frozen historical records.
+
 ---
 
 ## PR Template
 
-GitHub now preloads the repository PR template automatically. Keep those sections filled in for any non-trivial change.
+GitHub preloads [`.github/pull_request_template.md`](./.github/pull_request_template.md) automatically.
+Fill in every applicable section for any non-trivial change.
 
-Current template structure:
+Read that file directly rather than a copy reproduced here, so the two cannot drift. It asks for, among
+other things:
 
-```md
-## Summary
+- finding IDs, baseline commit, and the baseline failure or risk,
+- a regression proof that fails before the fix and passes after,
+- migration, compatibility, and rollback notes, including evidence that rollback does not delete user data,
+- security, privacy, storage-scope, and dependency impact,
+- exact verification commands with pasted results.
 
-## Problem
-
-## Solution
-
-## Security Impact
-- [ ] No change
-- [ ] Change (details below)
-
-## Performance Impact
-- [ ] No change
-- [ ] Improved
-- [ ] Regressed (explain)
-
-## Tests
-- [ ] pnpm lint
-- [ ] pnpm test
-- [ ] pnpm build
-
-## Docs Updated
-- [ ] Yes
-- [ ] Not needed (reason)
-
-## Threat / Data-Flow Notes
-- [ ] Not applicable
-- [ ] Included in this PR description
-```
+"CI is green" is explicitly not accepted in place of pasted evidence.
 
 ---
 
@@ -199,6 +211,7 @@ Do not open public exploit details in regular issues.
 Follow `SECURITY.md` and use the private disclosure path for sensitive reports.
 
 Include:
+
 - attack preconditions,
 - reproduction steps,
 - impact,
@@ -218,4 +231,5 @@ Include:
 ## Maintainer Notes
 
 Author:
+
 - [Abhinandan-Khurana](https://github.com/Abhinandan-Khurana)

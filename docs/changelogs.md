@@ -61,9 +61,12 @@ Release slice (this PR):
 
 - Authenticated app route pages load lazily behind an accessible Suspense boundary; `/` and
   `/auth/callback` stay eager.
+- Lazy route failures preserve the app shell and expose an accessible reload action. The Setup, Recall, and
+  Settings routes share the `UsagePage` chunk directly instead of loading three wrapper chunks first.
 - Version metadata aligned to 0.14.0 (`package.json`, JSON-LD `softwareVersion`).
 - Documentation corrected for supported runtimes, `pnpm dev` versus `vercel dev`, and the actual
-  persistence/search architecture. Pre-implementation planning documents are marked historical.
+  persistence/search architecture. The multi-tab storage trade-off is recorded in one focused ADR, and
+  pre-implementation planning documents are marked historical.
 
 ## 2026-04-07 (Footer Redesign and Stacking Fix)
 

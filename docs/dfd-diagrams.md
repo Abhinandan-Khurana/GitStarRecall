@@ -74,7 +74,7 @@ flowchart LR
   Gate -.->|suspicious| Lex
   Lex -.-> Fuse
   Fuse --> Diversify
-  Diversify -->|KNN + Filters| DB
+  Diversify -->|"exact scan + filters"| DB
   Diversify --> Diag
   UI --> Query
   Query --> Chat
@@ -108,7 +108,7 @@ flowchart TD
   Orchestrator2[Embedding Orchestrator]
   Orchestrator2 --> Selector2[Backend Selector]
   Orchestrator2 --> Pool2[Worker Pool]
-  Pool2 --> VecStore[(SQLite vec0)]
+  Pool2 --> VecStore[("SQLite: embeddings (Float32 blobs)")]
   Orchestrator2 --> Checkpoint2[Checkpoint Writer]
   Checkpoint2 --> RepoStore
   Pool2 --> ModelCDN2["Model CDN/HF"]

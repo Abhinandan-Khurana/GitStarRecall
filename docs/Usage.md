@@ -55,7 +55,7 @@ serve on, and register that exact callback URL on the GitHub OAuth app.
 
 ## 4) Environment Configuration
 
-## 4.1 Required (OAuth client-side)
+### 4.1 Required (OAuth client-side)
 
 - `VITE_GITHUB_CLIENT_ID`
 - `VITE_GITHUB_REDIRECT_URI`
@@ -66,7 +66,7 @@ For local dev, typical values:
 - `VITE_GITHUB_REDIRECT_URI=http://localhost:5173/auth/callback`
 - `VITE_GITHUB_OAUTH_EXCHANGE_URL=/api/github/oauth/exchange`
 
-## 4.2 Required (OAuth server-side exchange endpoint)
+### 4.2 Required (OAuth server-side exchange endpoint)
 
 Used by `api/github/oauth/exchange.js`:
 
@@ -76,11 +76,17 @@ Used by `api/github/oauth/exchange.js`:
 
 These must match your GitHub OAuth app settings exactly.
 
-## 4.3 Optional Runtime Flags
+### 4.3 Optional Runtime Flags
 
 - `VITE_WEBLLM_ENABLED=1` enables Browser WebLLM provider.
 - `VITE_EMBEDDING_BACKEND_PREFERRED=webgpu|wasm`
 - `VITE_README_BATCH_PIPELINE_V2=1` enables staged README pipeline.
+- `VITE_DB_CHECKPOINT_EVERY_EMBEDDINGS` and `VITE_DB_CHECKPOINT_EVERY_MS` control how often the in-memory
+  database is exported and persisted during an embedding run. Code defaults are `256` embeddings and
+  `3000` ms (`src/db/client.ts`). Any positive integer is accepted; a non-numeric or non-positive value
+  silently falls back to the default. Lower values persist more often and lose less work if the tab dies,
+  at the cost of write throughput. Note that `.env.example` ships `100` and `30000`, so copying it
+  verbatim checkpoints about 10x less often by elapsed time than the built-in default.
 - `VITE_OLLAMA_BASE_URL`, `VITE_OLLAMA_TIMEOUT_MS`
 - `VITE_LLM_SETTINGS_ENCRYPTION_KEY` for encrypted provider API key storage. Keep this stable across deployments if users already have encrypted provider API keys stored locally; removing it prevents decrypt/re-encrypt migration of those saved keys.
 
@@ -130,7 +136,7 @@ The public landing page uses a conversion-first flow:
 - A lean "How it works" section sits downstream of auth, not upstream.
 - The landing copy uses a read-only trust badge in the hero and auth section.
 
-## 7.1 OAuth (recommended)
+### 7.1 OAuth (recommended)
 
 - Click "Continue with GitHub" in the hero or in the compact auth section below and complete the GitHub OAuth flow.
 - OAuth is a read-only access path for reading your starred public repositories.
@@ -138,7 +144,7 @@ The public landing page uses a conversion-first flow:
 - Token is held in memory; not persisted as raw token storage.
 - Browser-local data scope is derived from the authenticated GitHub account, so re-login with a refreshed OAuth token keeps the same local workspace.
 
-## 7.2 PAT fallback
+### 7.2 PAT fallback
 
 - Paste the token directly. Header-style prefixes such as `Bearer ` / `token `, surrounding quotes, and extra whitespace are normalized automatically before use.
 - Use a token with read access to `/user/starred` and the public repositories you want indexed.
@@ -173,13 +179,13 @@ Important:
 
 ## 9) LLM Modes
 
-## 9.1 Remote OpenAI-compatible
+### 9.1 Remote OpenAI-compatible
 
 - Requires API key.
 - Requires explicit remote consent toggle.
 - Top local snippets are sent when you generate an answer.
 
-## 9.2 Local providers (Ollama / LM Studio)
+### 9.2 Local providers (Ollama / LM Studio)
 
 - Requires explicit local consent toggle.
 - Endpoint must be reachable from browser.
@@ -204,7 +210,7 @@ Important:
   - Custom embedding models are supported but marked experimental with warning.
   - Namespaced Ollama models (for example `myorg/custom-embed:latest`) remain routed to Ollama, not browser embeddings.
 
-## 9.3 Browser WebLLM
+### 9.3 Browser WebLLM
 
 - Requires `VITE_WEBLLM_ENABLED=1`.
 - First run requires explicit model-download consent.
@@ -234,7 +240,7 @@ Recommended:
   - when lexical safety-net fusion triggers, fused relevance is used in MMR candidate scoring,
   - MMR rerank with per-repo cap.
 
-## 10.1 Retrieval Tuning (Sudo/Advanced)
+### 10.1 Retrieval Tuning (Sudo/Advanced)
 
 Developer advanced mode is available directly in UI as a checkbox (`Enable developer advanced mode (sudo)`).
 Settings are persisted per auth scope via `localStorage` using the authenticated account-scoped key (`gitstarrecall.sudo.<auth-scope>`).
@@ -270,6 +276,9 @@ Primary local storage:
   scoped localStorage key. There is no `sqlite-vec` or other native vector extension; embeddings are
   Float32 blobs in ordinary tables, ranked in-process with exact cosine similarity plus MMR.
 - The local database file/key is scoped per authenticated GitHub account identity, so different GitHub accounts do not share repo indexes or embedding stores, while the same account keeps the same local workspace across OAuth token refreshes or PAT re-entry.
+- Only one browser tab holds the write lease for a given identity at a time, acquired through the Web
+  Locks API. A second tab is refused write access rather than silently overwriting the first tab's
+  exported database. See section 12.10.
 
 Additional local persistence:
 
@@ -278,46 +287,74 @@ Additional local persistence:
   fails closed rather than reporting success if a known storage backend cannot be written.
 - Account-scoped settings for advanced retrieval mode, embedding preferences, and session continuity metadata.
 - Local runtime caches for model artifacts (WebLLM / embedding assets).
+- Local diagnostic logs under a per-identity `localStorage` key. Entries are redacted at capture: error
+  details are dropped entirely, and warning payloads are reduced to an allowlist of numeric and boolean
+  diagnostic fields. Logs are capped at 200 entries and expire after 7 days. They never contain GitHub
+  tokens, README content, or your query text.
 - If a legacy token-scoped settings record is malformed JSON during one-time migration, the app discards that unreadable historical record instead of repeatedly blocking login on the same parse failure.
 - If a legacy token-scoped DB snapshot is unreadable during one-time migration, the app discards that unreadable legacy copy and continues with a fresh account-scoped database instead of permanently blocking login.
 
 Reset actions in UI:
 
-- `Clear token`
-- `Delete local data`
-- `Clear token` signs out and clears the in-memory GitHub credential, but preserves the account-scoped local workspace and provider/settings state for that GitHub account.
-- `Delete local data` also clears browser cache entries used for WebLLM/model artifacts when the browser cache API is available.
+Both live in `Settings` under "Account and local data", and in the collapsible `Account` panel.
+
+- **Sign out** - labeled `Sign out of GitHub` for OAuth sessions, `Clear PAT session` for PAT sessions,
+  and `Clear token` in the compact account panel. This clears the in-memory GitHub credential only. The
+  account-scoped workspace, provider settings, and preferences for that GitHub account are preserved, so
+  signing back in returns you to the same index.
+- **Delete local data** - opens a confirmation dialog listing exactly what will be erased, then
+  permanently erases it. This cannot be undone.
+
+`Delete local data` attempts these five categories, in this order:
+
+1. Repository index, chunks, embeddings, and chats.
+2. Downloaded model caches (WebLLM and embedding artifacts, via the browser cache API where available).
+3. Provider settings, including endpoints and stored keys.
+4. Scoped preferences.
+5. Local logs - deliberately last, so the record of the deletion survives until every other category has
+   been attempted.
+
+Behavior worth knowing:
+
+- Every category is attempted even when an earlier one fails. The dialog then lists each failed category
+  with its reason instead of reporting success.
+- You are signed out only when every category succeeded. A partial failure leaves you signed in so you
+  can retry.
+- Deletion is blocked while a conflicting operation runs, and the dialog names it: an active GitHub sync,
+  embedding rebuild, search, chat-history restore, or WebLLM model download. It is also blocked when no
+  authenticated scope is present, because scoped deletion needs an identity.
+- Active LLM generation is cancelled and allowed to settle before deletion starts.
 
 ## 12) Troubleshooting
 
-## 12.1 PAT 401 / auth errors
+### 12.1 PAT 401 / auth errors
 
 - The app normalizes common pasted wrappers (`Bearer `, `token `, surrounding quotes, whitespace), but the underlying token still must be valid.
 - Most 401s come from invalid, expired, revoked, or incorrectly pasted tokens rather than missing extra scopes.
 - Verify the token can read `/user/starred` and any public repositories you expect to import.
 
-## 12.2 OAuth callback 404
+### 12.2 OAuth callback 404
 
 - Verify callback URL in GitHub OAuth app.
 - Verify `VITE_GITHUB_REDIRECT_URI` and `GITHUB_OAUTH_REDIRECT_URI` are exact.
 - Ensure production rewrite routes callback path to SPA entry.
 
-## 12.3 `/app` refresh 404 in production
+### 12.3 `/app` refresh 404 in production
 
 - Ensure the explicit rewrite for the affected known route is active.
 - Keep the allowlisted `vercel.json` rewrite entries configured.
 
-## 12.4 localStorage quota exceeded
+### 12.4 localStorage quota exceeded
 
 - App may enter memory-only fallback mode for that tab.
 - Use `Delete local data`, then re-index incrementally.
 
-## 12.5 WebLLM suggests low model on strong desktop
+### 12.5 WebLLM suggests low model on strong desktop
 
 - Check recommendation diagnostics in UI (`reason`, `webgpu`, `cores`, `mem`, `perf`).
 - Manual model selection is supported in chat settings.
 
-## 12.6 Semantic search relevance is weak
+### 12.6 Semantic search relevance is weak
 
 - Confirm indexed model and query model match.
 - If you switched model families, run full re-index.
@@ -328,13 +365,20 @@ Reset actions in UI:
 - If top results are from same repo, lower `maxChunksPerRepo` or increase `fetchK`.
 - Check diagnostics for lexical pool counters (`lexicalPoolRecentCount`, `lexicalPoolBroadCount`, `lexicalPoolOldestCount`) and trigger reason.
 
-## 12.7 Dimension mismatch error
+### 12.7 Dimension mismatch error
 
 - Error means query embedding dimension differs from indexed vectors.
 - Use same embedding model for indexing and searching.
 - Rebuild embeddings after model/profile changes.
 
-## 12.9 Score semantics (MMR vs dense)
+### 12.8 Browser embedding model keeps re-downloading
+
+- Verify browser cache is enabled (DevTools `Disable cache` should be off).
+- Avoid private/incognito mode if you want persistent model cache.
+- Confirm CSP allows required script/connect hosts (`https://cdn.jsdelivr.net`, `https://huggingface.co`, `https://*.huggingface.co`, `https://xethub.hf.co`).
+- Keep one stable recommended model path when possible; frequent model switching can trigger additional downloads.
+
+### 12.9 Score semantics (MMR vs dense)
 
 - Search result `score` reflects the rerank decision score (MMR objective).
 - `denseScore` reflects the relevance signal used by rerank:
@@ -343,28 +387,62 @@ Reset actions in UI:
 - UI display clamps negative rerank scores to `0.000` for readability.
 - UI keeps a compact band (`High/Medium/Low`) and a finite decimal score.
 
-## 12.8 Browser embedding model keeps re-downloading
+### 12.10 "Another tab is already writing local data"
 
-- Verify browser cache is enabled (DevTools `Disable cache` should be off).
-- Avoid private/incognito mode if you want persistent model cache.
-- Confirm CSP allows required script/connect hosts (`https://cdn.jsdelivr.net`, `https://huggingface.co`, `https://*.huggingface.co`, `https://xethub.hf.co`).
-- Keep one stable recommended model path when possible; frequent model switching can trigger additional downloads.
+The workspace allows one writing tab per GitHub identity. A second tab with the same account open is
+refused write access, so syncing, embedding, or deleting in that tab fails with:
+
+```text
+Another tab is already writing local data for scope <scope>. Close the other tab or finish its operation,
+then retry.
+```
+
+- Close or reload the other tab holding the workspace, then retry the action.
+- Reading and searching are unaffected; only writes are refused.
+- The lease is released when the owning tab is closed or reloaded, so no manual reset is needed.
+- Known limitation: the lease resolves as available when `navigator.locks` is unavailable, so a browser
+  without the Web Locks API does not fail closed for a second writer. Avoid running two tabs of the same
+  workspace on such a browser.
 
 ## 13) Developer Command Cheat Sheet
 
-- `pnpm dev` run local app
-- `pnpm test` run test suite
+- `pnpm dev` run local app (UI only; see section 3 for OAuth)
+- `pnpm lint` lint codebase at `--max-warnings=0`
+- `pnpm typecheck` TypeScript project build
+- `pnpm test` run unit test suite
+- `pnpm test:watch` unit tests in watch mode
+- `pnpm test:component` jsdom component interaction tests
+- `pnpm test:coverage` unit tests with coverage report
+- `pnpm test:e2e` Playwright browser smoke tests
+- `pnpm format` / `pnpm format:check` Prettier write / verify
+- `pnpm check:coverage` enforce coverage gates
+- `pnpm check:bundle` enforce bundle budgets
 - `pnpm build` typecheck + production build
-- `pnpm lint` lint codebase
+- `pnpm preview` serve the production build
+- `pnpm ci` full gate: `format:check`, `lint`, `typecheck`, `test:component`, `test:coverage`,
+  `check:coverage`, `build`, `check:bundle`, `test:e2e`
+
+`pnpm test:e2e` (and therefore `pnpm ci`) needs a browser binary once per checkout:
+
+```bash
+pnpm exec playwright install --with-deps chromium
+```
 
 ## 14) Related Docs
 
 - `README.md` (overview)
+- `docs/features.md` (full feature inventory)
+- `docs/adr/README.md` (the current multi-tab storage decision)
 - `docs/changelogs.md`
 - `docs/embedding-acceleration-plan.md`
-- `docs/tech-stack-architecture-security-prd.md`
+- `docs/dfd-diagrams.md`
 - `docs/threat-modeling-stride.md`
 - `docs/security-review-stride.md`
+- `docs/remediation/v0.14.0.md` (what shipped in the v0.14.0 hardening program, and what was deferred)
+
+`docs/tech-stack-architecture-security-prd.md` and `docs/codex-claude-build-guide.md` are historical
+pre-implementation documents, retained for provenance only. They describe an architecture that was never
+shipped; do not follow them for current behavior.
 
 ---
 
@@ -466,6 +544,8 @@ If connection fails from browser:
 - `VITE_EMBEDDING_WORKER_BATCH_SIZE` (1..32)
 - `VITE_EMBEDDING_DB_WRITE_BATCH_SIZE` (16..2048)
 - `VITE_EMBEDDING_UI_UPDATE_MS` (100..2000)
+- `VITE_DB_CHECKPOINT_EVERY_EMBEDDINGS` (positive integer, code default `256`)
+- `VITE_DB_CHECKPOINT_EVERY_MS` (positive integer, code default `3000`)
 - `VITE_EMBEDDING_LARGE_LIBRARY_MODE` (`1` or `0`)
 - `VITE_EMBEDDING_LARGE_LIBRARY_THRESHOLD` (default `500`)
 - `VITE_README_BATCH_PIPELINE_V2` (`1` enables staged README->chunk->embed pipeline)

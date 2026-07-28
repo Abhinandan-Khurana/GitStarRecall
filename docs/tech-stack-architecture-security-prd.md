@@ -3,10 +3,15 @@
 > **HISTORICAL — pre-implementation planning document. Retained for provenance; not accurate for the
 > shipped system.**
 >
-> This was written before implementation and describes choices that were never shipped — most
-> notably `sqlite-vec` / `sqlite-vec-wasm` for vector search. The shipped app uses sql.js with
-> Float32 vector blobs in ordinary SQLite tables, ranked in-process with exact cosine similarity plus
-> MMR, persisted to OPFS with a scoped localStorage snapshot fallback.
+> This was written before implementation and describes choices that were never shipped. At least three
+> are wrong for the current system, and no section of this document should be assumed accurate:
+>
+> - **`sqlite-vec` / `sqlite-vec-wasm`** for vector search (§1.2, §2.3.2, §2.3.4). The shipped app uses
+>   sql.js with Float32 vector blobs in ordinary SQLite tables, ranked in-process with exact cosine
+>   similarity plus MMR, persisted to OPFS with a scoped localStorage snapshot fallback.
+> - **TanStack Query** for data fetching and caching (§1.1). Not a dependency; never used.
+> - **An optional Next.js or Fastify backend** (§1.4). No such backend exists. The only server-side code
+>   is a single stateless serverless OAuth token-exchange function.
 >
 > For the current system, use these sources instead:
 >

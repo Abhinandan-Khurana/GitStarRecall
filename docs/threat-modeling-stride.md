@@ -291,3 +291,47 @@ Mitigations:
 - Keep raw GitHub tokens in memory only and derive scoped local keys from the authenticated GitHub account identity rather than persisting the raw value or tying persistence to rotating credentials.
 - Keep 401 remediation focused on token validity/formatting issues before scope expansion.
 - Clear browser runtime/model caches during local data reset.
+
+---
+
+## 9) v0.14.0 Public-Launch Threat Delta (2026-07-28)
+
+Covers the lean remediation program (PRs #46, #47, #54, #55, #56). Per-commit evidence and the list of
+deliberately deferred work: [`remediation/v0.14.0.md`](./remediation/v0.14.0.md).
+
+New/changed components:
+
+- Serverless OAuth exchange endpoint hardened at the request boundary (`api/github/oauth/exchange.js`).
+- Production security headers served from `vercel.json`, and explicit entry-route rewrites replacing the
+  catch-all SPA rewrite.
+- Single-writer storage: a Web Locks exclusive lease per scope (`acquireWriterLease`,
+  `LocalDatabaseWriterLeaseError`), plus a serialized workspace persistence queue.
+- Per-identity scoping extended to chat backups, local diagnostic logs, provider settings, and preferences.
+- Confirmed, category-enumerating local-data deletion with partial-failure reporting.
+- Embedding integrity enforcement: one current embedding per chunk with model/dimension/coverage validation.
+- Lazily loaded authenticated route chunks behind a Suspense boundary.
+
+Threat notes:
+
+| Category | Threat                                                                                                                          | Mitigation                                                                                                                                                                                                                             |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T        | Two tabs on one scope interleave whole-database exports, so the later writer silently discards the earlier one's committed rows | One writing tab per scope via a Web Locks exclusive lease; a second tab is refused writes instead of last-writer-wins. Writes are serialized through a single persistence queue so the newest acknowledged mutation is the durable one |
+| T        | Unbounded or non-JSON request bodies to the exchange endpoint, or a hung upstream call                                          | POST-only, JSON content-type check, 8 KiB body cap returning 413, exact field validation, and an `AbortController` upstream timeout                                                                                                    |
+| I        | A cross-identity read of local data on a shared browser profile                                                                 | Database file/key, chat backups, logs, provider settings, and preferences are all scoped per authenticated GitHub identity; a scoped clear fails closed rather than reporting success                                                  |
+| I        | Diagnostic logs retaining tokens, README text, or query strings                                                                 | Error details are dropped entirely at capture; warning payloads are reduced to an allowlisted set of numeric and boolean fields; entries are capped at 200 and expire after 7 days                                                     |
+| I        | An unknown public path returning a 200 HTML shell, exposing authenticated route structure to crawlers                           | Explicit entry-route rewrites; unknown paths return a real 404, and authenticated routes are absent from the sitemap                                                                                                                   |
+| R        | Deletion reporting success while data survives                                                                                  | Every category is attempted, failures are collected per category and surfaced, sign-out happens only on full success, and OPFS removal failures propagate rather than being swallowed                                                  |
+| E        | A stale or mixed-model vector store producing meaningless similarity scores                                                     | One current embedding per chunk enforced, with model, dimension, and coverage readiness validation, plus a hard query/index dimension guard                                                                                            |
+
+Residual risks accepted in this release:
+
+- The Web Locks lease resolves as available when `navigator.locks` is absent, so a browser without Web
+  Locks does not fail closed for a second writer.
+- `migrateLocalDatabaseScope` still treats OPFS cleanup as best effort, so a stale snapshot can survive
+  the scope-migration path even though `clearAllData` now propagates failures.
+- `clearAllData` swaps the in-memory database before removing persisted bytes, so a failed deletion
+  leaves an empty in-memory view over surviving persisted rows, reported as a partial deletion.
+- The production CSP retains `'unsafe-eval'`, which the in-browser model runtimes require. This is a
+  documented runtime-compatibility trade-off, not a separate ADR.
+- Whether a platform-side rate limit is enabled for `/api/github/oauth/exchange` is not verifiable from
+  this repository; no in-tree limiter was added.

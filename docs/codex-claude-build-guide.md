@@ -5,6 +5,10 @@
 > This describes how the project was first scaffolded from the planning documents and references
 > architecture that was never shipped. It is not a guide to working on the current codebase.
 >
+> Specifically: it cites `sqlite-vec` / `sqlite-vec-wasm` for vector search, TanStack Query for data
+> fetching, and an optional Next.js or Fastify backend — none of which exist. It also treats the
+> Next.js-versus-Vite choice as still open; the project uses Vite.
+>
 > For the current system, use these sources instead:
 >
 > - Architecture and setup: [`../README.md`](../README.md)
